@@ -1,8 +1,9 @@
+using server.Hubs;
+
 var builder = WebApplication.CreateBuilder(args);
 
-// Add services to the container.
-// Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
+builder.Services.AddSignalR();
 builder.Services.AddCors(options =>
     options.AddPolicy("dev",
         p => p.WithOrigins("http://localhost:5173")
@@ -13,7 +14,6 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
-// Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
@@ -22,5 +22,7 @@ if (app.Environment.IsDevelopment())
 app.UseHttpsRedirection();
 
 app.UseCors("dev");
+
+app.MapHub<CollabHub>("/collabhub");
 
 app.Run();

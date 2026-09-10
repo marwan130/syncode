@@ -1,6 +1,5 @@
 import Editor from '@monaco-editor/react';
 
-
 function EditorComponent() {
     return (
         <Editor
