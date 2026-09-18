@@ -12,11 +12,6 @@ interface UseSignalRConnectionProps {
   serverUrl?: string;
 }
 
-/**
- * return type defined as an interface to prevent accidently leaking internal variables
- * or changing the return types when modifying the hook's internals
- */
-
 interface UseSignalRConnectionReturn {
   isConnected: boolean;
   sendEdit: (fullText: string) => Promise<void>;
