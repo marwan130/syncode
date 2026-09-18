@@ -5,21 +5,21 @@ import type { CrdtId } from './CrdtId';
  * as its originId. RGA works by using a linked list of characters where each node stores the id of the previous node.
  */
 export interface CrdtChar {
-    id: CrdtId;
-    value: string;
-    originId: CrdtId | null; // id of the character this was inserted after, null if start of document
-    isDeleted: boolean;
+  id: CrdtId;
+  value: string;
+  originId: CrdtId | null; // id of the character this was inserted after, null if start of document
+  isDeleted: boolean;
 }
 
 export function createChar(
-    id: CrdtId,
-    value: string,
-    originId: CrdtId | null
+  id: CrdtId,
+  value: string,
+  originId: CrdtId | null
 ): CrdtChar {
-    return {
-        id,
-        value,
-        originId,
-        isDeleted: false,
-    };
+  return {
+    id,
+    value,
+    originId,
+    isDeleted: false,
+  };
 }

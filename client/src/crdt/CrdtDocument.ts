@@ -53,6 +53,14 @@ export class CrdtDocument {
   }
 
   /**
+   * needed for the pending buffer because in distributed real-time systems, packets can arrive out of order.
+   * insert operations must wait for their origin character to be visible in the document
+   */
+  public hasChar(id: CrdtId): boolean {
+    return this.findCharIndex(id) !== -1;
+  }
+
+  /**
    * rga integration rule: scans forward from the origin position,
    * skipping any sibling characters with a higher id, and inserts
    * the new character at the first position where it should come first.
@@ -121,7 +129,7 @@ export class CrdtDocument {
   public integrateRemoteInsert(op: InsertOp): void {
     this.clock = Math.max(this.clock, op.char.id.counter);
 
-    // prevents duplicate characters if the network delivers the same operation twice 
+    // prevents duplicate characters if the network delivers the same operation twice
     if (this.findCharIndex(op.char.id) !== -1) {
       return;
     }
