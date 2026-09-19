@@ -2,6 +2,8 @@ import type * as monaco from 'monaco-editor';
 import type { CrdtId } from '../crdt/CrdtId';
 import { crdtIdToString } from '../crdt/CrdtId';
 import type { SignalRCrdtProvider } from '../providers/SignalRCrdtProvider';
+import type { CursorAnchor } from '../crdt/CursorAnchor';
+import { createCursorAnchor, resolveCursorAnchor } from '../crdt/CursorAnchor';
 
 /**
  * bridges a monaco editor instance and a signalr crdt provider.
@@ -10,8 +12,8 @@ import type { SignalRCrdtProvider } from '../providers/SignalRCrdtProvider';
  * change range into individual crdt insert/delete operations.
  *
  * remote changes: when the provider fires onDocumentChange, the new visible
- * text is pushed back into monaco using executeEdits so the undo stack and
- * cursor position are preserved.
+ * text is pushed back into monaco using executeEdits. cursor position is
+ * restored using a crdt cursor anchor so it stays attached to the same text.
  *
  * isApplyingRemote prevents echo loops.
  */
@@ -20,6 +22,7 @@ export class MonacoCrdtBinding {
   private provider: SignalRCrdtProvider;
   private isApplyingRemote = false;
   private disposables: monaco.IDisposable[] = [];
+  private localCursorAnchor: CursorAnchor | null = null;
 
   constructor(
     editor: monaco.editor.IStandaloneCodeEditor,
@@ -30,6 +33,7 @@ export class MonacoCrdtBinding {
 
     this.registerLocalChangeHandler();
     this.registerRemoteChangeHandler();
+    this.registerCursorHandler();
   }
 
   /**
@@ -58,10 +62,35 @@ export class MonacoCrdtBinding {
             change.text
           );
         }
+
+        this.updateLocalCursorAnchor();
       }
     );
 
     this.disposables.push(disposable);
+  }
+
+  /**
+   * tracks cursor movements so we can anchor the cursor to a crdt character id
+   */
+  private registerCursorHandler(): void {
+    const disposable = this.editor.onDidChangeCursorPosition(() => {
+      this.updateLocalCursorAnchor();
+    });
+
+    this.disposables.push(disposable);
+    this.updateLocalCursorAnchor();
+  }
+
+  private updateLocalCursorAnchor(): void {
+    if (this.isApplyingRemote) return;
+
+    const model = this.editor.getModel();
+    const position = this.editor.getPosition();
+    if (!model || !position) return;
+
+    const offset = model.getOffsetAt(position);
+    this.localCursorAnchor = createCursorAnchor(this.provider.doc, offset);
   }
 
   private applyLocalChange(
@@ -109,9 +138,8 @@ export class MonacoCrdtBinding {
   }
 
   /**
-   * we snapshot the current selections before applying the change and restore
-   * them afterwards to avoid jumping the cursor on remote edits that don't
-   * overlap the local cursor position.
+   * applies remote document changes and restores the cursor position using
+   * the cursor anchor so it stays attached to the same character
    */
   private registerRemoteChangeHandler(): void {
     const unsubscribe = this.provider.onDocumentChange(() => {
@@ -126,7 +154,6 @@ export class MonacoCrdtBinding {
 
       this.isApplyingRemote = true;
       try {
-        const selections = this.editor.getSelections();
         const fullRange = model.getFullModelRange();
 
         this.editor.executeEdits('crdt-remote', [
@@ -137,8 +164,15 @@ export class MonacoCrdtBinding {
           },
         ]);
 
-        if (selections) {
-          this.editor.setSelections(selections);
+        if (this.localCursorAnchor) {
+          const resolved = resolveCursorAnchor(
+            this.provider.doc,
+            this.localCursorAnchor
+          );
+          this.editor.setPosition({
+            lineNumber: resolved.lineNumber,
+            column: resolved.column,
+          });
         }
       } finally {
         this.isApplyingRemote = false;
@@ -146,6 +180,10 @@ export class MonacoCrdtBinding {
     });
 
     this.disposables.push({ dispose: unsubscribe });
+  }
+
+  public getLocalCursorAnchor(): CursorAnchor | null {
+    return this.localCursorAnchor;
   }
 
   public dispose(): void {

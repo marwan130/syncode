@@ -29,6 +29,7 @@ function EditorComponent({ roomId = 'default-room' }: EditorProps) {
     const provider = providerRef.current;
     if (!editor || !provider) return;
 
+    editor.setValue(provider.doc.toVisibleString());
     bindingRef.current?.dispose();
     bindingRef.current = new MonacoCrdtBinding(editor, provider);
 
@@ -42,6 +43,7 @@ function EditorComponent({ roomId = 'default-room' }: EditorProps) {
     editorRef.current = editor;
     const provider = providerRef.current;
     if (provider) {
+      editor.setValue(provider.doc.toVisibleString());
       bindingRef.current?.dispose();
       bindingRef.current = new MonacoCrdtBinding(editor, provider);
     }
@@ -89,7 +91,7 @@ function EditorComponent({ roomId = 'default-room' }: EditorProps) {
       <Editor
         height="100vh"
         defaultLanguage="cpp"
-        defaultValue="#include <iostream>"
+        defaultValue=""
         theme="vs-dark"
         onMount={handleEditorMount}
         options={{
