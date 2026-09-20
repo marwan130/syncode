@@ -1,4 +1,4 @@
-﻿import {
+import {
   HubConnection,
   HubConnectionBuilder,
   HubConnectionState,
@@ -8,9 +8,16 @@ import { CrdtDocument } from '../crdt/CrdtDocument';
 import type { CrdtId } from '../crdt/CrdtId';
 import type { InsertOp, DeleteOp, CrdtOp } from '../crdt/CrdtDocument';
 import { PendingBuffer } from '../crdt/PendingBuffer';
+import type { CursorAnchor } from '../crdt/CursorAnchor';
 
 export type ConnectionStatus =
   'disconnected' | 'connecting' | 'connected' | 'reconnecting';
+
+export interface AwarenessState {
+  cursor: CursorAnchor | null;
+  name: string;
+  color: string;
+}
 
 export class SignalRCrdtProvider {
   public readonly doc: CrdtDocument;
@@ -19,6 +26,10 @@ export class SignalRCrdtProvider {
   private roomId: string;
   private statusListeners: Set<(s: ConnectionStatus) => void> = new Set();
   private changeListeners: Set<() => void> = new Set();
+  private awarenessListeners: Set<
+    (peerId: string, state: AwarenessState) => void
+  > = new Set();
+  private peerLeftListeners: Set<(peerId: string) => void> = new Set();
 
   constructor(siteId: string, roomId: string, serverUrl: string) {
     this.roomId = roomId;
@@ -32,6 +43,10 @@ export class SignalRCrdtProvider {
       .build();
 
     this.registerHubHandlers();
+  }
+
+  public get connectionId(): string | null {
+    return this.connection.connectionId;
   }
 
   public async connect(): Promise<void> {
@@ -70,6 +85,15 @@ export class SignalRCrdtProvider {
     return op;
   }
 
+  public async sendAwareness(state: AwarenessState): Promise<void> {
+    if (this.connection.state !== HubConnectionState.Connected) return;
+    try {
+      await this.connection.invoke('UpdateAwareness', this.roomId, state);
+    } catch (err) {
+      console.error('[SignalRCrdtProvider] Failed to send awareness:', err);
+    }
+  }
+
   public onStatusChange(listener: (s: ConnectionStatus) => void): () => void {
     this.statusListeners.add(listener);
     return () => this.statusListeners.delete(listener);
@@ -80,10 +104,33 @@ export class SignalRCrdtProvider {
     return () => this.changeListeners.delete(listener);
   }
 
+  public onAwarenessUpdate(
+    listener: (peerId: string, state: AwarenessState) => void
+  ): () => void {
+    this.awarenessListeners.add(listener);
+    return () => this.awarenessListeners.delete(listener);
+  }
+
+  public onPeerLeft(listener: (peerId: string) => void): () => void {
+    this.peerLeftListeners.add(listener);
+    return () => this.peerLeftListeners.delete(listener);
+  }
+
   private registerHubHandlers(): void {
     this.connection.on('ReceiveOp', (op: CrdtOp) => {
       this.buffer.process(op);
       this.emitChange();
+    });
+
+    this.connection.on(
+      'AwarenessUpdate',
+      (peerId: string, state: AwarenessState) => {
+        this.awarenessListeners.forEach((l) => l(peerId, state));
+      }
+    );
+
+    this.connection.on('PeerLeft', (peerId: string) => {
+      this.peerLeftListeners.forEach((l) => l(peerId));
     });
 
     this.connection.onreconnecting(() => {

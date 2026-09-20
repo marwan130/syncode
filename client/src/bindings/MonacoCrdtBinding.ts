@@ -23,6 +23,8 @@ export class MonacoCrdtBinding {
   private isApplyingRemote = false;
   private disposables: monaco.IDisposable[] = [];
   private localCursorAnchor: CursorAnchor | null = null;
+  private cursorListeners: Set<(anchor: CursorAnchor | null) => void> =
+    new Set();
 
   constructor(
     editor: monaco.editor.IStandaloneCodeEditor,
@@ -91,6 +93,7 @@ export class MonacoCrdtBinding {
 
     const offset = model.getOffsetAt(position);
     this.localCursorAnchor = createCursorAnchor(this.provider.doc, offset);
+    this.cursorListeners.forEach((l) => l(this.localCursorAnchor));
   }
 
   private applyLocalChange(
@@ -182,6 +185,13 @@ export class MonacoCrdtBinding {
     this.disposables.push({ dispose: unsubscribe });
   }
 
+  public onCursorChange(
+    listener: (anchor: CursorAnchor | null) => void
+  ): () => void {
+    this.cursorListeners.add(listener);
+    return () => this.cursorListeners.delete(listener);
+  }
+
   public getLocalCursorAnchor(): CursorAnchor | null {
     return this.localCursorAnchor;
   }
@@ -189,5 +199,6 @@ export class MonacoCrdtBinding {
   public dispose(): void {
     this.disposables.forEach((d) => d.dispose());
     this.disposables = [];
+    this.cursorListeners.clear();
   }
 }
