@@ -108,3 +108,17 @@ code {
   padding: 4px 8px;
   background: var(--code-bg);
 }
+
+@keyframes syncode-caret-blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
+.syncode-cursor-caret {
+  animation: syncode-caret-blink 1.2s step-start infinite;
+}
