@@ -1,4 +1,4 @@
-﻿import { crdtIdToString } from './CrdtId';
+import { crdtIdToString } from './CrdtId';
 import type { CrdtDocument, InsertOp, DeleteOp, CrdtOp } from './CrdtDocument';
 
 /**
