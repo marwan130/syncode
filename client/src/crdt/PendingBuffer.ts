@@ -78,6 +78,47 @@ export class PendingBuffer {
     this.doc.integrateRemoteDelete(op);
   }
 
+  public processPending(): void {
+    let progressed = true;
+    while (progressed) {
+      progressed = false;
+      for (const [key, ops] of Array.from(this.pendingInserts.entries())) {
+        const remaining: InsertOp[] = [];
+        for (const op of ops) {
+          if (this.isInsertReady(op)) {
+            this.doc.integrateRemoteInsert(op);
+            this.drain(op.char.id);
+            progressed = true;
+          } else {
+            remaining.push(op);
+          }
+        }
+        if (remaining.length === 0) {
+          this.pendingInserts.delete(key);
+        } else {
+          this.pendingInserts.set(key, remaining);
+        }
+      }
+
+      for (const [key, ops] of Array.from(this.pendingDeletes.entries())) {
+        const remaining: DeleteOp[] = [];
+        for (const op of ops) {
+          if (this.doc.hasChar(op.id)) {
+            this.doc.integrateRemoteDelete(op);
+            progressed = true;
+          } else {
+            remaining.push(op);
+          }
+        }
+        if (remaining.length === 0) {
+          this.pendingDeletes.delete(key);
+        } else {
+          this.pendingDeletes.set(key, remaining);
+        }
+      }
+    }
+  }
+
   /**
    * after a character with the given id is integrated, check whether any
    * buffered operations were waiting on it and integrate those too.

@@ -161,7 +161,18 @@ export class CrdtDocument {
 
   public fromSnapshot(snapshotJson: string): void {
     const snapshot: CrdtSnapshot = JSON.parse(snapshotJson);
-    this.clock = snapshot.clock;
-    this.chars = snapshot.chars;
+    this.clock = Math.max(this.clock, snapshot.clock);
+    if (this.chars.length === 0) {
+      this.chars = snapshot.chars;
+      return;
+    }
+    for (const char of snapshot.chars) {
+      const idx = this.findCharIndex(char.id);
+      if (idx === -1) {
+        this.integrateRemoteInsert({ type: 'insert', char });
+      } else if (char.isDeleted && !this.chars[idx].isDeleted) {
+        this.integrateRemoteDelete({ type: 'delete', id: char.id });
+      }
+    }
   }
 }

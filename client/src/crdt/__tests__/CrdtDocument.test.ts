@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { CrdtDocument } from '../CrdtDocument';
+import { PendingBuffer } from '../PendingBuffer';
 
 describe('CrdtDocument (RGA)', () => {
   it('handles basic sequential local insertions and deletions', () => {
@@ -129,5 +130,106 @@ describe('CrdtDocument (RGA)', () => {
 
     expect(docA.toVisibleString()).toBe('bac');
     expect(docB.toVisibleString()).toBe('bac');
+  });
+
+  it('allows a late-joining replica to restore from snapshot and integrate a straggling op referencing a tombstone', () => {
+    const docA = new CrdtDocument('site-A');
+    const docB = new CrdtDocument('site-B');
+
+    const opH = docA.localInsert(null, 'h');
+    const opE = docA.localInsert(opH.char.id, 'e');
+    const opL = docA.localInsert(opE.char.id, 'l');
+    docB.integrateRemoteInsert(opH);
+    docB.integrateRemoteInsert(opE);
+    docB.integrateRemoteInsert(opL);
+
+    const delL = docA.localDelete(opL.char.id);
+    docB.integrateRemoteDelete(delL);
+
+    const opP = docB.localInsert(opL.char.id, 'p');
+
+    const snapshotA = docA.toSnapshot();
+    const docC = new CrdtDocument('site-C');
+    docC.fromSnapshot(snapshotA);
+
+    expect(docC.toVisibleString()).toBe('he');
+
+    docC.integrateRemoteInsert(opP);
+    docA.integrateRemoteInsert(opP);
+
+    expect(docC.toVisibleString()).toBe('hep');
+    expect(docA.toVisibleString()).toBe('hep');
+    expect(docB.toVisibleString()).toBe('hep');
+  });
+
+  it('guarantees convergence across 3+ sites with randomized operation interleavings (fuzz test)', () => {
+    for (let seed = 1; seed <= 25; seed++) {
+      let pseudoRand = seed;
+      const nextRand = () => {
+        pseudoRand = (pseudoRand * 9301 + 49297) % 233280;
+        return pseudoRand / 233280;
+      };
+
+      const docA = new CrdtDocument('site-A');
+      const docB = new CrdtDocument('site-B');
+      const docC = new CrdtDocument('site-C');
+      const bufA = new PendingBuffer(docA);
+      const bufB = new PendingBuffer(docB);
+      const bufC = new PendingBuffer(docC);
+
+      const allOps: Array<
+        | { type: 'insert'; char: import('../CrdtChar').CrdtChar }
+        | { type: 'delete'; id: import('../CrdtId').CrdtId }
+      > = [];
+
+      const opA1 = docA.localInsert(null, 'A');
+      const opA2 = docA.localInsert(opA1.char.id, 'a');
+      allOps.push(opA1, opA2);
+
+      const opB1 = docB.localInsert(null, 'B');
+      const opB2 = docB.localInsert(opB1.char.id, 'b');
+      allOps.push(opB1, opB2);
+
+      const opC1 = docC.localInsert(null, 'C');
+      const opC2 = docC.localInsert(opC1.char.id, 'c');
+      allOps.push(opC1, opC2);
+
+      const shuffle = <T>(arr: T[]): T[] => {
+        const copy = [...arr];
+        for (let i = copy.length - 1; i > 0; i--) {
+          const j = Math.floor(nextRand() * (i + 1));
+          [copy[i], copy[j]] = [copy[j], copy[i]];
+        }
+        return copy;
+      };
+
+      const orderA = shuffle(allOps);
+      const orderB = shuffle(allOps);
+      const orderC = shuffle(allOps);
+
+      for (const op of orderA) {
+        if (op.type === 'insert' ? op.char.id.siteId !== 'site-A' : op.id.siteId !== 'site-A') {
+          bufA.process(op);
+        }
+      }
+
+      for (const op of orderB) {
+        if (op.type === 'insert' ? op.char.id.siteId !== 'site-B' : op.id.siteId !== 'site-B') {
+          bufB.process(op);
+        }
+      }
+
+      for (const op of orderC) {
+        if (op.type === 'insert' ? op.char.id.siteId !== 'site-C' : op.id.siteId !== 'site-C') {
+          bufC.process(op);
+        }
+      }
+
+      expect(bufA.size).toBe(0);
+      expect(bufB.size).toBe(0);
+      expect(bufC.size).toBe(0);
+      expect(docA.toVisibleString()).toBe(docB.toVisibleString());
+      expect(docB.toVisibleString()).toBe(docC.toVisibleString());
+    }
   });
 });
