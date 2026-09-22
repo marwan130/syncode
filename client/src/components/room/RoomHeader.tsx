@@ -1,8 +1,11 @@
+import { useState } from 'react';
 import type {
   ConnectionStatus,
   AwarenessState,
 } from '../../providers/SignalRCrdtProvider';
 import { ParticipantList } from './ParticipantList';
+import { ShareLinkButton } from './ShareLinkButton';
+import { JoinRoomModal } from './JoinRoomModal';
 
 interface RoomHeaderProps {
   roomId: string;
@@ -59,53 +62,111 @@ export function RoomHeader({
   localColor,
   peers,
 }: RoomHeaderProps) {
+  const [isJoinModalOpen, setJoinModalOpen] = useState(false);
+
   return (
-    <header
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: '0 16px',
-        height: 40,
-        background: '#1a1a1a',
-        borderBottom: '1px solid #2a2a2a',
-        flexShrink: 0,
-        userSelect: 'none',
-      }}
-    >
-      {/* left: app name + room id */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span
+    <>
+      <header
+        style={{
+          position: 'relative',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '0 16px',
+          height: 40,
+          background: '#1a1a1a',
+          borderBottom: '1px solid #2a2a2a',
+          flexShrink: 0,
+          userSelect: 'none',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span
+            style={{
+              fontSize: 14,
+              fontWeight: 700,
+              fontFamily: 'system-ui, sans-serif',
+              color: '#a5f3fc',
+              letterSpacing: '-0.3px',
+            }}
+          >
+            syncode
+          </span>
+        </div>
+
+        <div
           style={{
-            fontSize: 14,
-            fontWeight: 700,
-            fontFamily: 'system-ui, sans-serif',
-            color: '#c084fc',
-            letterSpacing: '-0.3px',
+            position: 'absolute',
+            left: '50%',
+            top: '50%',
+            transform: 'translate(-50%, -50%)',
+            pointerEvents: 'none',
           }}
         >
-          syncode
-        </span>
-        <span
-          style={{
-            fontSize: 12,
-            color: '#4b5563',
-            fontFamily: 'ui-monospace, Consolas, monospace',
-          }}
-        >
-          /{roomId}
-        </span>
-      </div>
+          <StatusDot status={status} />
+        </div>
 
-      {/* center: connection status */}
-      <StatusDot status={status} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <button
+            onClick={() => setJoinModalOpen(true)}
+            title="Join another room with a link"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 5,
+              padding: '4px 9px',
+              fontSize: 12,
+              fontWeight: 500,
+              fontFamily: 'system-ui, sans-serif',
+              color: '#9ca3af',
+              background: '#232326',
+              border: '1px solid #333338',
+              borderRadius: 6,
+              cursor: 'pointer',
+              outline: 'none',
+              transition: 'all 0.15s ease',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.color = '#e5e7eb';
+              e.currentTarget.style.background = '#2c2c32';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.color = '#9ca3af';
+              e.currentTarget.style.background = '#232326';
+            }}
+          >
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
+              <polyline points="10 17 15 12 10 7" />
+              <line x1="15" y1="12" x2="3" y2="12" />
+            </svg>
+            <span>Join</span>
+          </button>
 
-      {/* right: participant avatars */}
-      <ParticipantList
-        localName={localName}
-        localColor={localColor}
-        peers={peers}
+          <ShareLinkButton />
+
+          <ParticipantList
+            localName={localName}
+            localColor={localColor}
+            peers={peers}
+          />
+        </div>
+      </header>
+
+      <JoinRoomModal
+        isOpen={isJoinModalOpen}
+        currentRoomId={roomId}
+        onClose={() => setJoinModalOpen(false)}
       />
-    </header>
+    </>
   );
 }

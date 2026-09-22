@@ -17,8 +17,10 @@
     "@microsoft/signalr": "^10.0.11",
     "@monaco-editor/react": "^4.7.0",
     "@types/uuid": "^10.0.0",
+    "nanoid": "^6.0.1",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
+    "react-router-dom": "^7.18.4",
     "uuid": "^14.0.2"
   },
   "devDependencies": {
