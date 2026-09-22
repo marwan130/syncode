@@ -6,6 +6,11 @@ namespace server.Services;
 
 public class RedisRoomStore
 {
+    private static readonly JsonSerializerOptions _jsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true
+    };
+
     private readonly IDatabase _db;
     private readonly ILogger<RedisRoomStore> _logger;
 
@@ -39,7 +44,7 @@ public class RedisRoomStore
 
     public async Task DeleteRoomAsync(string roomId)
     {
-        await _db.KeyDeleteAsync([MetaKey(roomId), ParticipantsKey(roomId)]);
+        await _db.KeyDeleteAsync([MetaKey(roomId), ParticipantsKey(roomId), SnapshotKey(roomId)]);
         _logger.LogInformation("Deleted room {RoomId}", roomId);
     }
 
@@ -78,13 +83,61 @@ public class RedisRoomStore
 
         foreach (var entry in entries)
         {
-            var p = JsonSerializer.Deserialize<Participant>((string)entry.Value!);
+            var p = JsonSerializer.Deserialize<Participant>((string)entry.Value!, _jsonOptions);
             if (p is not null) participants.Add(p);
         }
 
         return participants;
     }
 
+    public async Task<string?> GetUserRoomAsync(string userId)
+    {
+        if (string.IsNullOrEmpty(userId)) return null;
+        var val = (string?)await _db.StringGetAsync(UserRoomKey(userId));
+        return val;
+    }
+
+    public async Task SetUserRoomAsync(string userId, string roomId)
+    {
+        if (string.IsNullOrEmpty(userId)) return;
+        await _db.StringSetAsync(UserRoomKey(userId), roomId, TimeSpan.FromHours(24));
+    }
+
+    public async Task ClearUserRoomAsync(string userId)
+    {
+        if (string.IsNullOrEmpty(userId)) return;
+        await _db.KeyDeleteAsync(UserRoomKey(userId));
+    }
+
+    public async Task RemoveUserFromRoomAsync(string roomId, string userId)
+    {
+        if (string.IsNullOrEmpty(roomId) || string.IsNullOrEmpty(userId)) return;
+        var entries = await _db.HashGetAllAsync(ParticipantsKey(roomId));
+        foreach (var entry in entries)
+        {
+            var p = JsonSerializer.Deserialize<Participant>((string)entry.Value!, _jsonOptions);
+            if (p is not null && p.UserId == userId)
+            {
+                await _db.HashDeleteAsync(ParticipantsKey(roomId), entry.Name);
+            }
+        }
+    }
+
+    public async Task SaveSnapshotAsync(string roomId, string snapshotJson)
+    {
+        if (string.IsNullOrEmpty(roomId) || string.IsNullOrEmpty(snapshotJson)) return;
+        await _db.StringSetAsync(SnapshotKey(roomId), snapshotJson, TimeSpan.FromHours(24));
+    }
+
+    public async Task<string?> GetSnapshotAsync(string roomId)
+    {
+        if (string.IsNullOrEmpty(roomId)) return null;
+        var val = (string?)await _db.StringGetAsync(SnapshotKey(roomId));
+        return val;
+    }
+
     private static string MetaKey(string roomId) => $"room:{roomId}:meta";
     private static string ParticipantsKey(string roomId) => $"room:{roomId}:participants";
+    private static string UserRoomKey(string userId) => $"user:{userId}:room";
+    private static string SnapshotKey(string roomId) => $"room:{roomId}:snapshot";
 }

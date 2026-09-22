@@ -1,3 +1,3 @@
 namespace server.Models;
 
-public record Participant(string ConnectionId, string DisplayName, string Color);
+public record Participant(string ConnectionId, string DisplayName, string Color, string UserId = "");
