@@ -1,24 +1,22 @@
-﻿import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import type { RefObject } from 'react';
 import { SignalRCrdtProvider } from '../providers/SignalRCrdtProvider';
 import type { ConnectionStatus } from '../providers/SignalRCrdtProvider';
-import type { CrdtId } from '../crdt/CrdtId';
-import type { InsertOp, DeleteOp } from '../crdt/CrdtDocument';
 
 interface UseCrdtSyncProps {
   siteId: string;
   roomId: string;
   serverUrl?: string;
+  displayName?: string;
+  color?: string;
+  enabled?: boolean;
 }
 
 interface UseCrdtSyncReturn {
   status: ConnectionStatus;
-  visibleText: string;
-  localInsert: (originId: CrdtId | null, value: string) => Promise<InsertOp>;
-  localDelete: (id: CrdtId) => Promise<DeleteOp>;
-  providerRef: React.RefObject<SignalRCrdtProvider | null>;
+  providerRef: RefObject<SignalRCrdtProvider | null>;
+  evictedNewRoomId: string | null;
 }
-
-import type React from 'react';
 
 const DEFAULT_SERVER_URL = import.meta.env.VITE_BACKEND_URL || '';
 
@@ -26,20 +24,35 @@ export function useCrdtSync({
   siteId,
   roomId,
   serverUrl = DEFAULT_SERVER_URL,
+  displayName,
+  color,
+  enabled = true,
 }: UseCrdtSyncProps): UseCrdtSyncReturn {
   const [status, setStatus] = useState<ConnectionStatus>('disconnected');
-  const [visibleText, setVisibleText] = useState('');
+  const [evictedNewRoomId, setEvictedNewRoomId] = useState<string | null>(null);
   const providerRef = useRef<SignalRCrdtProvider | null>(null);
 
   useEffect(() => {
-    if (!roomId || !siteId) return;
+    if (!roomId || !siteId || !displayName || !enabled) return;
 
-    const p = new SignalRCrdtProvider(siteId, roomId, serverUrl);
+    const p = new SignalRCrdtProvider(
+      siteId,
+      roomId,
+      serverUrl,
+      displayName,
+      color
+    );
     providerRef.current = p;
 
-    const unsubStatus = p.onStatusChange(setStatus);
-    const unsubChange = p.onDocumentChange(() => {
-      setVisibleText(p.doc.toVisibleString());
+    const unsubStatus = p.onStatusChange((s) => {
+      setStatus(s);
+      if (s === 'connecting' || s === 'connected') {
+        setEvictedNewRoomId(null);
+      }
+    });
+
+    const unsubEvicted = p.onEvicted((newRoomId) => {
+      setEvictedNewRoomId(newRoomId || '');
     });
 
     p.connect().catch((err) => {
@@ -48,30 +61,15 @@ export function useCrdtSync({
 
     return () => {
       unsubStatus();
-      unsubChange();
+      unsubEvicted();
       p.disconnect().catch(() => {});
       providerRef.current = null;
     };
-  }, [siteId, roomId, serverUrl]);
-
-  const localInsert = useCallback(
-    async (originId: CrdtId | null, value: string): Promise<InsertOp> => {
-      if (!providerRef.current) throw new Error('Provider not initialized');
-      return providerRef.current.localInsert(originId, value);
-    },
-    []
-  );
-
-  const localDelete = useCallback(async (id: CrdtId): Promise<DeleteOp> => {
-    if (!providerRef.current) throw new Error('Provider not initialized');
-    return providerRef.current.localDelete(id);
-  }, []);
+  }, [siteId, roomId, serverUrl, displayName, color, enabled]);
 
   return {
     status,
-    visibleText,
-    localInsert,
-    localDelete,
     providerRef,
+    evictedNewRoomId,
   };
 }

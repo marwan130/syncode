@@ -34,8 +34,49 @@ export function useAwareness({
     }
 
     const unsubAwareness = provider.onAwarenessUpdate((peerId, state) => {
-      setPeers((prev) => new Map(prev).set(peerId, state));
+      setPeers((prev) => {
+        const next = new Map(prev);
+        const existing = next.get(peerId);
+        next.set(peerId, {
+          ...state,
+          userId: existing?.userId ?? state.userId,
+        });
+        return next;
+      });
     });
+
+    const unsubParticipants = provider.onRoomParticipants((list) => {
+      setPeers(() => {
+        const next = new Map<string, AwarenessState>();
+        for (const p of list) {
+          if (p.connectionId && p.connectionId !== provider.connectionId) {
+            next.set(p.connectionId, {
+              cursor: null,
+              name: p.displayName,
+              color: p.color,
+              userId: p.userId,
+            });
+          }
+        }
+        return next;
+      });
+    });
+
+    const unsubPeerJoined = provider.onPeerJoined(
+      (peerId, name, color, userId) => {
+        setPeers((prev) => {
+          const next = new Map(prev);
+          const existing = next.get(peerId);
+          next.set(peerId, {
+            cursor: existing?.cursor ?? null,
+            name,
+            color,
+            userId,
+          });
+          return next;
+        });
+      }
+    );
 
     const unsubPeerLeft = provider.onPeerLeft((peerId) => {
       setPeers((prev) => {
@@ -45,9 +86,24 @@ export function useAwareness({
       });
     });
 
+    const unsubPeerLeftByUser = provider.onPeerLeftByUser((userId) => {
+      setPeers((prev) => {
+        const next = new Map(prev);
+        for (const [peerId, state] of next.entries()) {
+          if (state.userId === userId) {
+            next.delete(peerId);
+          }
+        }
+        return next;
+      });
+    });
+
     return () => {
       unsubAwareness();
+      unsubParticipants();
+      unsubPeerJoined();
       unsubPeerLeft();
+      unsubPeerLeftByUser();
       if (throttleRef.current) clearTimeout(throttleRef.current);
       setPeers(new Map());
     };
@@ -63,7 +119,7 @@ export function useAwareness({
       throttleRef.current = setTimeout(() => {
         provider
           .sendAwareness({ cursor: anchor, name: localName, color: localColor })
-          .catch(() => { });
+          .catch(() => {});
       }, 50);
     },
     [providerRef, status, localName, localColor]
