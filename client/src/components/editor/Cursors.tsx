@@ -1,13 +1,18 @@
 import { useEffect, useState } from 'react';
 import type * as monacoType from 'monaco-editor';
+import type { RefObject } from 'react';
 import { resolveCursorAnchor } from '../../crdt/CursorAnchor';
-import type { CrdtDocument } from '../../crdt/CrdtDocument';
-import type { AwarenessState } from '../../providers/SignalRCrdtProvider';
+import type {
+  AwarenessState,
+  ConnectionStatus,
+  SignalRCrdtProvider,
+} from '../../providers/SignalRCrdtProvider';
 
 interface CursorsProps {
   editor: monacoType.editor.IStandaloneCodeEditor;
   peers: Map<string, AwarenessState>;
-  doc: CrdtDocument;
+  providerRef: RefObject<SignalRCrdtProvider | null>;
+  status: ConnectionStatus;
 }
 
 interface RenderedCursor {
@@ -26,10 +31,14 @@ interface RenderedCursor {
  *
  * re-runs whenever the document changes, peers change, or the editor scrolls.
  */
-export function Cursors({ editor, peers, doc }: CursorsProps) {
+export function Cursors({ editor, peers, providerRef, status }: CursorsProps) {
   const [cursors, setCursors] = useState<RenderedCursor[]>([]);
 
   useEffect(() => {
+    const provider = providerRef.current;
+    if (!provider) return;
+    const doc = provider.doc;
+
     function recompute() {
       const next: RenderedCursor[] = [];
 
@@ -63,9 +72,13 @@ export function Cursors({ editor, peers, doc }: CursorsProps) {
       editor.onDidScrollChange(recompute),
       editor.onDidLayoutChange(recompute),
     ];
+    const unsubscribeDocument = provider.onDocumentChange(recompute);
 
-    return () => disposables.forEach((d) => d.dispose());
-  }, [editor, peers, doc]);
+    return () => {
+      disposables.forEach((d) => d.dispose());
+      unsubscribeDocument();
+    };
+  }, [editor, peers, providerRef, status]);
 
   if (cursors.length === 0) return null;
 
