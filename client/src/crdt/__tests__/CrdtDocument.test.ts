@@ -208,19 +208,31 @@ describe('CrdtDocument (RGA)', () => {
       const orderC = shuffle(allOps);
 
       for (const op of orderA) {
-        if (op.type === 'insert' ? op.char.id.siteId !== 'site-A' : op.id.siteId !== 'site-A') {
+        if (
+          op.type === 'insert'
+            ? op.char.id.siteId !== 'site-A'
+            : op.id.siteId !== 'site-A'
+        ) {
           bufA.process(op);
         }
       }
 
       for (const op of orderB) {
-        if (op.type === 'insert' ? op.char.id.siteId !== 'site-B' : op.id.siteId !== 'site-B') {
+        if (
+          op.type === 'insert'
+            ? op.char.id.siteId !== 'site-B'
+            : op.id.siteId !== 'site-B'
+        ) {
           bufB.process(op);
         }
       }
 
       for (const op of orderC) {
-        if (op.type === 'insert' ? op.char.id.siteId !== 'site-C' : op.id.siteId !== 'site-C') {
+        if (
+          op.type === 'insert'
+            ? op.char.id.siteId !== 'site-C'
+            : op.id.siteId !== 'site-C'
+        ) {
           bufC.process(op);
         }
       }

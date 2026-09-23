@@ -37,8 +37,12 @@ export function createCursorAnchor(
     return { afterId: null };
   }
 
-  const index = Math.min(offset - 1, visibleChars.length - 1);
-  return { afterId: visibleChars[index].id };
+  let textOffset = 0;
+  for (const char of visibleChars) {
+    textOffset += char.value.length;
+    if (textOffset >= offset) return { afterId: char.id };
+  }
+  return { afterId: visibleChars[visibleChars.length - 1].id };
 }
 
 export function createCursorAnchorFromPosition(
@@ -92,7 +96,7 @@ export function resolveCursorAnchor(
   let visibleOffset = 0;
   for (let i = 0; i <= targetIndex; i++) {
     if (!doc.chars[i].isDeleted) {
-      visibleOffset++;
+      visibleOffset += doc.chars[i].value.length;
     }
   }
 

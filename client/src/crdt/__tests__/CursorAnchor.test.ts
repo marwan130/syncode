@@ -9,6 +9,16 @@ import {
 } from '../CursorAnchor';
 
 describe('CursorAnchor', () => {
+  it('keeps Monaco UTF-16 offsets aligned around supplementary Unicode characters', () => {
+    const doc = new CrdtDocument('site-unicode');
+    const first = doc.localInsert(null, '😀');
+    doc.localInsert(first.char.id, 'x');
+
+    const anchor = createCursorAnchor(doc, 2);
+    expect(anchor.afterId).toEqual(first.char.id);
+    expect(resolveCursorAnchor(doc, anchor).offset).toBe(2);
+  });
+
   it('resolves null anchor to the start of the document', () => {
     const doc = new CrdtDocument('site-1');
     const anchor = createCursorAnchor(doc, 0);

@@ -108,15 +108,18 @@ export class MonacoCrdtBinding {
      */
     const visibleChars = doc.chars.filter((c) => !c.isDeleted);
 
-    for (let i = 0; i < deleteCount; i++) {
-      const char = visibleChars[offset + i];
-      if (char) {
+    let textOffset = 0;
+    let originId: CrdtId | null = null;
+    for (const char of visibleChars) {
+      const charEnd = textOffset + char.value.length;
+      if (charEnd <= offset) {
+        originId = char.id;
+      }
+      if (textOffset < offset + deleteCount && charEnd > offset) {
         this.provider.localDelete(char.id);
       }
+      textOffset = charEnd;
     }
-
-    let originId: CrdtId | null =
-      offset > 0 ? (visibleChars[offset - 1]?.id ?? null) : null;
 
     for (const ch of insertedText) {
       const op = this.provider.localInsert(originId, ch);
@@ -141,12 +144,37 @@ export class MonacoCrdtBinding {
 
       this.isApplyingRemote = true;
       try {
-        const fullRange = model.getFullModelRange();
+        let prefixLength = 0;
+        const sharedLength = Math.min(currentText.length, newText.length);
+        while (
+          prefixLength < sharedLength &&
+          currentText[prefixLength] === newText[prefixLength]
+        ) {
+          prefixLength++;
+        }
+
+        let suffixLength = 0;
+        while (
+          suffixLength < currentText.length - prefixLength &&
+          suffixLength < newText.length - prefixLength &&
+          currentText[currentText.length - suffixLength - 1] ===
+            newText[newText.length - suffixLength - 1]
+        ) {
+          suffixLength++;
+        }
+
+        const start = model.getPositionAt(prefixLength);
+        const end = model.getPositionAt(currentText.length - suffixLength);
 
         this.editor.executeEdits('crdt-remote', [
           {
-            range: fullRange,
-            text: newText,
+            range: {
+              startLineNumber: start.lineNumber,
+              startColumn: start.column,
+              endLineNumber: end.lineNumber,
+              endColumn: end.column,
+            },
+            text: newText.slice(prefixLength, newText.length - suffixLength),
             forceMoveMarkers: true,
           },
         ]);
