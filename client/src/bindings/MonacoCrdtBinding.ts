@@ -1,6 +1,5 @@
 import type * as monaco from 'monaco-editor';
 import type { CrdtId } from '../crdt/CrdtId';
-import { crdtIdToString } from '../crdt/CrdtId';
 import type { SignalRCrdtProvider } from '../providers/SignalRCrdtProvider';
 import type { CursorAnchor } from '../crdt/CursorAnchor';
 import { createCursorAnchor, resolveCursorAnchor } from '../crdt/CursorAnchor';
@@ -112,9 +111,7 @@ export class MonacoCrdtBinding {
     for (let i = 0; i < deleteCount; i++) {
       const char = visibleChars[offset + i];
       if (char) {
-        this.provider.localDelete(char.id).catch((err) => {
-          console.error('[MonacoCrdtBinding] localDelete failed:', err);
-        });
+        this.provider.localDelete(char.id);
       }
     }
 
@@ -122,21 +119,8 @@ export class MonacoCrdtBinding {
       offset > 0 ? (visibleChars[offset - 1]?.id ?? null) : null;
 
     for (const ch of insertedText) {
-      this.provider.localInsert(originId, ch).catch((err) => {
-        console.error('[MonacoCrdtBinding] localInsert failed:', err);
-      });
-
-      const freshVisible = this.provider.doc.chars.filter((c) => !c.isDeleted);
-      const inserted = freshVisible.find(
-        (c) =>
-          !visibleChars.some(
-            (v) => crdtIdToString(v.id) === crdtIdToString(c.id)
-          )
-      );
-      if (inserted) {
-        originId = inserted.id;
-        visibleChars.splice(offset, 0, inserted);
-      }
+      const op = this.provider.localInsert(originId, ch);
+      originId = op.char.id;
     }
   }
 
