@@ -1,5 +1,3 @@
 <Solution>
-  <Folder Name="/src/">
-    <Project Path="src/server/Syncode.Server.csproj" />
-  </Folder>
+  <Project Path="server/Syncode.Server.csproj" />
 </Solution>

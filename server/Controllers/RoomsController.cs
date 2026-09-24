@@ -20,18 +20,6 @@ public class RoomsController : ControllerBase
         return Ok(new { roomId });
     }
 
-    [HttpGet("{roomId}")]
-    public async Task<IActionResult> Get(string roomId)
-    {
-        var exists = await _store.RoomExistsAsync(roomId);
-        if (!exists)
-        {
-            return NotFound(new { message = "Room does not exist or has expired" });
-        }
-        var participants = await _store.GetParticipantsAsync(roomId);
-        return Ok(new { roomId, exists = true, participantCount = participants.Count });
-    }
-
     private static string GenerateRoomId()
     {
         const string chars = "abcdefghijklmnopqrstuvwxyz0123456789";

@@ -76,6 +76,9 @@ public class RedisRoomStore
     public async Task RemoveParticipantAsync(string roomId, string connectionId) =>
         await _db.HashDeleteAsync(ParticipantsKey(roomId), connectionId);
 
+    public async Task<bool> IsParticipantAsync(string roomId, string connectionId) =>
+        await _db.HashExistsAsync(ParticipantsKey(roomId), connectionId);
+
     public async Task<IReadOnlyList<Participant>> GetParticipantsAsync(string roomId)
     {
         var entries = await _db.HashGetAllAsync(ParticipantsKey(roomId));
@@ -90,11 +93,34 @@ public class RedisRoomStore
         return participants;
     }
 
+    public async Task<Participant?> GetParticipantAsync(string roomId, string connectionId)
+    {
+        var json = await _db.HashGetAsync(ParticipantsKey(roomId), connectionId);
+        return json.IsNullOrEmpty
+            ? null
+            : JsonSerializer.Deserialize<Participant>((string)json!, _jsonOptions);
+    }
+
     public async Task<string?> GetUserRoomAsync(string userId)
     {
         if (string.IsNullOrEmpty(userId)) return null;
         var val = (string?)await _db.StringGetAsync(UserRoomKey(userId));
         return val;
+    }
+
+    public async Task<string?> GetConnectionRoomAsync(string connectionId)
+    {
+        if (string.IsNullOrEmpty(connectionId)) return null;
+        return (string?)await _db.StringGetAsync(ConnectionRoomKey(connectionId));
+    }
+
+    public async Task SetConnectionRoomAsync(string connectionId, string roomId) =>
+        await _db.StringSetAsync(ConnectionRoomKey(connectionId), roomId, TimeSpan.FromHours(24));
+
+    public async Task ClearConnectionRoomAsync(string connectionId)
+    {
+        if (!string.IsNullOrEmpty(connectionId))
+            await _db.KeyDeleteAsync(ConnectionRoomKey(connectionId));
     }
 
     public async Task SetUserRoomAsync(string userId, string roomId)
@@ -139,5 +165,6 @@ public class RedisRoomStore
     private static string MetaKey(string roomId) => $"room:{roomId}:meta";
     private static string ParticipantsKey(string roomId) => $"room:{roomId}:participants";
     private static string UserRoomKey(string userId) => $"user:{userId}:room";
+    private static string ConnectionRoomKey(string connectionId) => $"connection:{connectionId}:room";
     private static string SnapshotKey(string roomId) => $"room:{roomId}:snapshot";
 }

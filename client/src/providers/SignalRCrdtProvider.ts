@@ -89,14 +89,8 @@ export class SignalRCrdtProvider {
     this.emitStatus('connecting');
     try {
       await this.connection.start();
+      await this.joinCurrentRoom();
       this.emitStatus('connected');
-      await this.connection.invoke(
-        'JoinRoom',
-        this.roomId,
-        this.siteId,
-        this.displayName,
-        this.color
-      );
     } catch (err) {
       this.emitStatus('disconnected');
       throw err;
@@ -220,6 +214,20 @@ export class SignalRCrdtProvider {
       this.scheduleSnapshotSave();
     });
 
+    this.connection.on('RequestSnapshot', (targetConnectionId: string) => {
+      if (this.connection.state !== HubConnectionState.Connected) return;
+      this.connection
+        .invoke(
+          'SendSnapshotToPeer',
+          this.roomId,
+          targetConnectionId,
+          this.doc.toSnapshot()
+        )
+        .catch((err) => {
+          console.error('[SignalRCrdtProvider] Failed to send snapshot:', err);
+        });
+    });
+
     this.connection.on(
       'AwarenessUpdate',
       (peerId: string, state: AwarenessState) => {
@@ -276,16 +284,11 @@ export class SignalRCrdtProvider {
     });
 
     this.connection.onreconnected(async () => {
-      this.emitStatus('connected');
       try {
-        await this.connection.invoke(
-          'JoinRoom',
-          this.roomId,
-          this.siteId,
-          this.displayName,
-          this.color
-        );
+        await this.joinCurrentRoom();
+        this.emitStatus('connected');
       } catch (err) {
+        this.emitStatus('disconnected');
         console.error(
           '[SignalRCrdtProvider] Failed to rejoin room after reconnect:',
           err
@@ -296,6 +299,16 @@ export class SignalRCrdtProvider {
     this.connection.onclose(() => {
       this.emitStatus('disconnected');
     });
+  }
+
+  private async joinCurrentRoom(): Promise<void> {
+    await this.connection.invoke(
+      'JoinRoom',
+      this.roomId,
+      this.siteId,
+      this.displayName,
+      this.color
+    );
   }
 
   private async sendOp(op: CrdtOp): Promise<void> {
