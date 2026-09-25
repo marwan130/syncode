@@ -34,7 +34,7 @@ export function ShareLinkButton() {
         fontWeight: 500,
         fontFamily: 'system-ui, sans-serif',
         color: copied ? '#4ade80' : '#e5e7eb',
-        background: copied ? 'rgba(74, 222, 128, 0.12)' : '#262626',
+        background: copied ? 'rgba(74, 222, 128, 0.12)' : 'var(--control-bg)',
         border: `1px solid ${copied ? '#4ade8055' : '#3a3a3a'}`,
         borderRadius: 6,
         cursor: 'pointer',
@@ -49,7 +49,7 @@ export function ShareLinkButton() {
       }}
       onMouseLeave={(e) => {
         if (!copied) {
-          e.currentTarget.style.background = '#262626';
+          e.currentTarget.style.background = 'var(--control-bg)';
           e.currentTarget.style.borderColor = '#3a3a3a';
         }
       }}

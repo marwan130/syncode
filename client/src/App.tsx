@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useState } from 'react';
 import {
   Routes,
   Route,
@@ -7,95 +7,50 @@ import {
   useParams,
 } from 'react-router-dom';
 import EditorComponent from './components/editor/Editor';
+import { JoinRoomModal } from './components/room/JoinRoomModal';
 
-function AutoCreateRoom() {
+function Home() {
   const navigate = useNavigate();
+  const [error, setError] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [joinRoomOpen, setJoinRoomOpen] = useState(false);
 
-  useEffect(() => {
-    let active = true;
-
-    async function createAndRedirect() {
-      try {
-        const res = await fetch('/api/rooms', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-        });
-        if (res.ok) {
-          const data = await res.json();
-          if (active && data?.roomId) {
-            navigate(`/room/${data.roomId}`, { replace: true });
-            return;
-          }
-        }
-      } catch (err) {
-        console.warn(
-          '[AutoCreateRoom] Server room creation failed, falling back to local id:',
-          err
-        );
-      }
-
-      if (active) {
-        const fallbackId = Math.random().toString(36).substring(2, 10);
-        navigate(`/room/${fallbackId}`, { replace: true });
-      }
+  async function createRoom() {
+    setCreating(true);
+    setError('');
+    try {
+      const response = await fetch('/api/rooms', { method: 'POST' });
+      if (!response.ok)
+        throw new Error(`Room creation failed (${response.status})`);
+      const { roomId } = await response.json();
+      if (!roomId) throw new Error('The server did not return a room ID.');
+      navigate(`/room/${roomId}`, { replace: true });
+    } catch {
+      setError('Could not create a room. Please try again.');
+      setCreating(false);
     }
-
-    createAndRedirect();
-
-    return () => {
-      active = false;
-    };
-  }, [navigate]);
+  }
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        width: '100vw',
-        height: '100vh',
-        background: '#121214',
-        color: '#9ca3af',
-        fontFamily: 'system-ui, sans-serif',
-        gap: 16,
-      }}
-    >
-      <div
-        style={{
-          fontSize: 26,
-          fontWeight: 700,
-          background: 'linear-gradient(135deg, #a5f3fc 0%, #38bdf8 100%)',
-          WebkitBackgroundClip: 'text',
-          WebkitTextFillColor: 'transparent',
-          letterSpacing: '-0.5px',
-        }}
-      >
-        syncode
+    <main className="home-page">
+      <h1>Syncode</h1>
+      <div className="home-actions">
+        <button onClick={createRoom} disabled={creating}>
+          Create a room
+        </button>
+        <button
+          className="home-secondary"
+          onClick={() => setJoinRoomOpen(true)}
+        >
+          Join a room
+        </button>
       </div>
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 10,
-          fontSize: 13,
-          color: '#6b7280',
-        }}
-      >
-        <div
-          style={{
-            width: 14,
-            height: 14,
-            border: '2px solid #38bdf8',
-            borderTopColor: 'transparent',
-            borderRadius: '50%',
-            animation: 'spin 0.8s linear infinite',
-          }}
-        />
-        <span>Creating your room...</span>
-      </div>
-    </div>
+      {error && <p role="alert">{error}</p>}
+      <JoinRoomModal
+        isOpen={joinRoomOpen}
+        onClose={() => setJoinRoomOpen(false)}
+      />
+    </main>
   );
 }
 
@@ -106,7 +61,7 @@ function RoomRoute() {
 
 function App() {
   return (
-    <main
+    <div
       style={{
         width: '100vw',
         height: '100vh',
@@ -116,11 +71,11 @@ function App() {
       }}
     >
       <Routes>
-        <Route path="/" element={<AutoCreateRoom />} />
+        <Route path="/" element={<Home />} />
         <Route path="/room/:roomId" element={<RoomRoute />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
-    </main>
+    </div>
   );
 }
 
