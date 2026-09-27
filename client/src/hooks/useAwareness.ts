@@ -28,7 +28,7 @@ export function useAwareness({
 
   useEffect(() => {
     const provider = providerRef.current;
-    if (!provider || status !== 'connected') {
+    if (!provider || status === 'disconnected') {
       setPeers(new Map());
       return;
     }
@@ -105,7 +105,6 @@ export function useAwareness({
       unsubPeerLeft();
       unsubPeerLeftByUser();
       if (throttleRef.current) clearTimeout(throttleRef.current);
-      setPeers(new Map());
     };
   }, [status, providerRef]);
 

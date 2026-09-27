@@ -7,12 +7,16 @@ import {
 } from '../../utils/userStorage';
 
 interface RoomJoinProps {
-  roomId: string;
   onJoin: (info: { displayName: string; color: string }) => void;
   defaultName?: string;
+  onCancel?: () => void;
 }
 
-export function RoomJoin({ roomId, onJoin, defaultName = '' }: RoomJoinProps) {
+export function RoomJoin({
+  onJoin,
+  defaultName = '',
+  onCancel,
+}: RoomJoinProps) {
   const [name, setName] = useState(defaultName);
   const [selectedColor, setSelectedColor] = useState<string>(() =>
     getStoredColor()
@@ -41,8 +45,7 @@ export function RoomJoin({ roomId, onJoin, defaultName = '' }: RoomJoinProps) {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        background: 'rgba(10, 10, 10, 0.85)',
-        backdropFilter: 'blur(8px)',
+        background: 'var(--app-bg)',
         padding: 16,
       }}
     >
@@ -50,7 +53,7 @@ export function RoomJoin({ roomId, onJoin, defaultName = '' }: RoomJoinProps) {
         style={{
           width: '100%',
           maxWidth: 420,
-          background: '#161618',
+          background: 'var(--surface-bg)',
           border: '1px solid #2e2e34',
           borderRadius: 12,
           padding: 28,
@@ -84,19 +87,7 @@ export function RoomJoin({ roomId, onJoin, defaultName = '' }: RoomJoinProps) {
               fontFamily: 'system-ui, sans-serif',
             }}
           >
-            Enter your name to join room{' '}
-            <code
-              style={{
-                fontFamily: 'ui-monospace, Consolas, monospace',
-                color: '#e5e7eb',
-                background: '#26262a',
-                padding: '2px 6px',
-                borderRadius: 4,
-                fontSize: 12,
-              }}
-            >
-              {roomId}
-            </code>
+            Choose your display name and avatar color
           </p>
         </div>
 
@@ -135,7 +126,7 @@ export function RoomJoin({ roomId, onJoin, defaultName = '' }: RoomJoinProps) {
                 padding: '10px 12px',
                 fontSize: 14,
                 fontFamily: 'system-ui, sans-serif',
-                background: '#202024',
+                background: 'var(--control-bg)',
                 color: '#f3f4f6',
                 border: error ? '1px solid #ef4444' : '1px solid #383842',
                 borderRadius: 6,
@@ -182,7 +173,7 @@ export function RoomJoin({ roomId, onJoin, defaultName = '' }: RoomJoinProps) {
                 marginBottom: 8,
               }}
             >
-              Choose cursor color
+              Choose avatar and cursor color
             </label>
             <div
               style={{
@@ -218,31 +209,52 @@ export function RoomJoin({ roomId, onJoin, defaultName = '' }: RoomJoinProps) {
             </div>
           </div>
 
-          <button
-            type="submit"
-            style={{
-              marginTop: 6,
-              padding: '10px 16px',
-              fontSize: 14,
-              fontWeight: 600,
-              fontFamily: 'system-ui, sans-serif',
-              color: '#ffffff',
-              background: 'linear-gradient(135deg, #0284c7 0%, #0ea5e9 100%)',
-              border: 'none',
-              borderRadius: 6,
-              cursor: 'pointer',
-              boxShadow: '0 2px 10px rgba(14, 165, 233, 0.4)',
-              transition: 'opacity 0.15s ease, transform 0.1s ease',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.opacity = '0.92';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.opacity = '1';
-            }}
-          >
-            Join Room
-          </button>
+          <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+            {onCancel && (
+              <button
+                type="button"
+                onClick={onCancel}
+                style={{
+                  flex: 1,
+                  padding: '10px 16px',
+                  fontSize: 14,
+                  fontFamily: 'system-ui, sans-serif',
+                  color: '#9ca3af',
+                  background: 'transparent',
+                  border: '1px solid #383842',
+                  borderRadius: 6,
+                  cursor: 'pointer',
+                }}
+              >
+                Cancel
+              </button>
+            )}
+            <button
+              type="submit"
+              style={{
+                flex: 1,
+                padding: '10px 16px',
+                fontSize: 14,
+                fontWeight: 600,
+                fontFamily: 'system-ui, sans-serif',
+                color: '#ffffff',
+                background: 'linear-gradient(135deg, #0284c7 0%, #0ea5e9 100%)',
+                border: 'none',
+                borderRadius: 6,
+                cursor: 'pointer',
+                boxShadow: '0 2px 10px rgba(14, 165, 233, 0.4)',
+                transition: 'opacity 0.15s ease, transform 0.1s ease',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.opacity = '0.92';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.opacity = '1';
+              }}
+            >
+              {onCancel ? 'Save Profile' : 'Join Room'}
+            </button>
+          </div>
         </form>
       </div>
     </div>

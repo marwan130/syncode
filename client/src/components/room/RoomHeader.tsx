@@ -13,6 +13,7 @@ interface RoomHeaderProps {
   localName: string;
   localColor: string;
   peers: Map<string, AwarenessState>;
+  onEditProfile: () => void;
 }
 
 const STATUS_COLORS: Record<ConnectionStatus, string> = {
@@ -61,6 +62,7 @@ export function RoomHeader({
   localName,
   localColor,
   peers,
+  onEditProfile,
 }: RoomHeaderProps) {
   const [isJoinModalOpen, setJoinModalOpen] = useState(false);
 
@@ -74,8 +76,8 @@ export function RoomHeader({
           justifyContent: 'space-between',
           padding: '0 16px',
           height: 40,
-          background: '#1a1a1a',
-          borderBottom: '1px solid #2a2a2a',
+          background: 'var(--app-bg)',
+          borderBottom: '1px solid var(--border)',
           flexShrink: 0,
           userSelect: 'none',
         }}
@@ -119,8 +121,8 @@ export function RoomHeader({
               fontWeight: 500,
               fontFamily: 'system-ui, sans-serif',
               color: '#9ca3af',
-              background: '#232326',
-              border: '1px solid #333338',
+              background: 'var(--control-bg)',
+              border: '1px solid var(--border)',
               borderRadius: 6,
               cursor: 'pointer',
               outline: 'none',
@@ -128,11 +130,11 @@ export function RoomHeader({
             }}
             onMouseEnter={(e) => {
               e.currentTarget.style.color = '#e5e7eb';
-              e.currentTarget.style.background = '#2c2c32';
+              e.currentTarget.style.background = 'var(--surface-bg)';
             }}
             onMouseLeave={(e) => {
               e.currentTarget.style.color = '#9ca3af';
-              e.currentTarget.style.background = '#232326';
+              e.currentTarget.style.background = 'var(--control-bg)';
             }}
           >
             <svg
@@ -158,6 +160,7 @@ export function RoomHeader({
             localName={localName}
             localColor={localColor}
             peers={peers}
+            onEditProfile={onEditProfile}
           />
         </div>
       </header>

@@ -68,8 +68,7 @@ export function JoinRoomModal({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        background: 'rgba(10, 10, 10, 0.75)',
-        backdropFilter: 'blur(6px)',
+        background: 'var(--app-bg)',
         padding: 16,
       }}
       onClick={onClose}
@@ -78,7 +77,7 @@ export function JoinRoomModal({
         style={{
           width: '100%',
           maxWidth: 380,
-          background: '#18181b',
+          background: 'var(--surface-bg)',
           border: '1px solid #2e2e34',
           borderRadius: 10,
           padding: 22,
@@ -133,7 +132,7 @@ export function JoinRoomModal({
                 padding: '9px 12px',
                 fontSize: 13,
                 fontFamily: 'ui-monospace, Consolas, monospace',
-                background: '#232328',
+                background: 'var(--control-bg)',
                 color: '#f3f4f6',
                 border: error ? '1px solid #ef4444' : '1px solid #383842',
                 borderRadius: 6,
