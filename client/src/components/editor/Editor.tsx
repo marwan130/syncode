@@ -87,6 +87,7 @@ function EditorComponent({ roomId: propRoomId }: EditorProps) {
         localColor={localColor}
         peers={peers}
         onEditProfile={() => setProfileOpen(true)}
+        editor={monacoEditor}
       />
 
       <div className="room-editor">

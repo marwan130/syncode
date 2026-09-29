@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import type * as monaco from 'monaco-editor';
 import type {
   ConnectionStatus,
   AwarenessState,
@@ -6,6 +7,7 @@ import type {
 import { ParticipantList } from './ParticipantList';
 import { ShareLinkButton } from './ShareLinkButton';
 import { JoinRoomModal } from './JoinRoomModal';
+import { SearchReplace } from '../editor/SearchReplace';
 
 interface RoomHeaderProps {
   roomId: string;
@@ -14,6 +16,7 @@ interface RoomHeaderProps {
   localColor: string;
   peers: Map<string, AwarenessState>;
   onEditProfile: () => void;
+  editor: monaco.editor.IStandaloneCodeEditor | null;
 }
 
 const STATUS_COLORS: Record<ConnectionStatus, string> = {
@@ -63,6 +66,7 @@ export function RoomHeader({
   localColor,
   peers,
   onEditProfile,
+  editor,
 }: RoomHeaderProps) {
   const [isJoinModalOpen, setJoinModalOpen] = useState(false);
 
@@ -109,6 +113,8 @@ export function RoomHeader({
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <SearchReplace editor={editor} />
+
           <button
             onClick={() => setJoinModalOpen(true)}
             title="Join another room with a link"
