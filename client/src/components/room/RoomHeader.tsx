@@ -8,6 +8,7 @@ import { ParticipantList } from './ParticipantList';
 import { ShareLinkButton } from './ShareLinkButton';
 import { JoinRoomModal } from './JoinRoomModal';
 import { SearchReplace } from '../editor/SearchReplace';
+import { LANGUAGE_MODES, type LanguageMode } from '../editor/languageModes';
 
 interface RoomHeaderProps {
   roomId: string;
@@ -17,6 +18,8 @@ interface RoomHeaderProps {
   peers: Map<string, AwarenessState>;
   onEditProfile: () => void;
   editor: monaco.editor.IStandaloneCodeEditor | null;
+  language: LanguageMode;
+  onLanguageChange: (language: LanguageMode) => void;
 }
 
 const STATUS_COLORS: Record<ConnectionStatus, string> = {
@@ -67,6 +70,8 @@ export function RoomHeader({
   peers,
   onEditProfile,
   editor,
+  language,
+  onLanguageChange,
 }: RoomHeaderProps) {
   const [isJoinModalOpen, setJoinModalOpen] = useState(false);
 
@@ -113,6 +118,31 @@ export function RoomHeader({
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <select
+            aria-label="Editor language"
+            value={language}
+            disabled={!editor}
+            onChange={(event) =>
+              onLanguageChange(event.target.value as LanguageMode)
+            }
+            style={{
+              height: 28,
+              padding: '0 6px',
+              color: '#d4d4d4',
+              background: 'var(--control-bg)',
+              border: '1px solid var(--border)',
+              borderRadius: 6,
+              fontSize: 12,
+              cursor: editor ? 'pointer' : 'default',
+            }}
+          >
+            {LANGUAGE_MODES.map((mode) => (
+              <option key={mode.id} value={mode.id}>
+                {mode.label}
+              </option>
+            ))}
+          </select>
+
           <SearchReplace editor={editor} />
 
           <button

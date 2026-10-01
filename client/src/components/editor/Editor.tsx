@@ -1,4 +1,4 @@
-import Editor, { type OnMount } from '@monaco-editor/react';
+import Editor, { type Monaco, type OnMount } from '@monaco-editor/react';
 import { useEffect, useState } from 'react';
 import type * as monaco from 'monaco-editor';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -11,6 +11,9 @@ import {
   getStoredDisplayName,
 } from '../../utils/userStorage';
 import { Cursors } from './Cursors';
+import { LivePreview } from './LivePreview';
+import { useDebouncedPreview } from '../../hooks/useDebouncedPreview';
+import { isPreviewLanguage, type LanguageMode } from './languageModes';
 import { RoomHeader } from '../room/RoomHeader';
 import { RoomJoin } from '../room/RoomJoin';
 
@@ -26,7 +29,9 @@ function EditorComponent({ roomId: propRoomId }: EditorProps) {
   const [displayName, setDisplayName] = useState(getStoredDisplayName);
   const [localColor, setLocalColor] = useState(getStoredColor);
   const [isProfileOpen, setProfileOpen] = useState(false);
+  const [language, setLanguage] = useState<LanguageMode>('cpp');
   const [siteId] = useState(getOrCreateSiteId);
+  const [monacoApi, setMonacoApi] = useState<Monaco | null>(null);
   const [monacoEditor, setMonacoEditor] =
     useState<monaco.editor.IStandaloneCodeEditor | null>(null);
 
@@ -49,6 +54,11 @@ function EditorComponent({ roomId: propRoomId }: EditorProps) {
     localName: displayName || 'Anonymous',
     localColor,
   });
+  const previewSource = useDebouncedPreview({
+    providerRef,
+    status,
+    enabled: isPreviewLanguage(language),
+  });
 
   useEffect(() => {
     const provider = providerRef.current;
@@ -64,7 +74,16 @@ function EditorComponent({ roomId: propRoomId }: EditorProps) {
     };
   }, [monacoEditor, providerRef, status, broadcastCursor]);
 
-  const handleEditorMount: OnMount = (editor) => setMonacoEditor(editor);
+  const handleEditorMount: OnMount = (editor, monacoInstance) => {
+    setMonacoEditor(editor);
+    setMonacoApi(monacoInstance);
+  };
+
+  const handleLanguageChange = (nextLanguage: LanguageMode) => {
+    setLanguage(nextLanguage);
+    const model = monacoEditor?.getModel();
+    if (model) monacoApi?.editor.setModelLanguage(model, nextLanguage);
+  };
 
   return (
     <div className="room-workspace">
@@ -88,28 +107,42 @@ function EditorComponent({ roomId: propRoomId }: EditorProps) {
         peers={peers}
         onEditProfile={() => setProfileOpen(true)}
         editor={monacoEditor}
+        language={language}
+        onLanguageChange={handleLanguageChange}
       />
 
-      <div className="room-editor">
-        <Editor
-          height="100%"
-          defaultLanguage="cpp"
-          defaultValue=""
-          theme="vs-dark"
-          onMount={handleEditorMount}
-          options={{
-            automaticLayout: true,
-            fontSize: 14,
-            minimap: { enabled: true },
-            readOnly: status !== 'connected',
-          }}
-        />
-        {monacoEditor && (
-          <Cursors
+      <div
+        className={`room-editor${isPreviewLanguage(language) ? ' has-live-preview' : ''}`}
+      >
+        <div className="room-code-editor">
+          <Editor
+            height="100%"
+            defaultLanguage="cpp"
+            defaultValue=""
+            theme="vs-dark"
+            onMount={handleEditorMount}
+            options={{
+              automaticLayout: true,
+              fontSize: 14,
+              minimap: { enabled: true },
+              readOnly: status !== 'connected',
+            }}
+          />
+          {monacoEditor && (
+            <Cursors
+              editor={monacoEditor}
+              peers={peers}
+              providerRef={providerRef}
+              status={status}
+            />
+          )}
+        </div>
+        {isPreviewLanguage(language) && (
+          <LivePreview
+            source={previewSource}
+            language={language}
+            monaco={monacoApi}
             editor={monacoEditor}
-            peers={peers}
-            providerRef={providerRef}
-            status={status}
           />
         )}
       </div>
