@@ -20,6 +20,8 @@ interface RoomHeaderProps {
   editor: monaco.editor.IStandaloneCodeEditor | null;
   language: LanguageMode;
   onLanguageChange: (language: LanguageMode) => void;
+  isChatOpen: boolean;
+  onToggleChat: () => void;
 }
 
 const STATUS_COLORS: Record<ConnectionStatus, string> = {
@@ -72,6 +74,8 @@ export function RoomHeader({
   editor,
   language,
   onLanguageChange,
+  isChatOpen,
+  onToggleChat,
 }: RoomHeaderProps) {
   const [isJoinModalOpen, setJoinModalOpen] = useState(false);
 
@@ -144,6 +148,15 @@ export function RoomHeader({
           </select>
 
           <SearchReplace editor={editor} />
+
+          <button
+            className={`chat-toggle${isChatOpen ? ' is-active' : ''}`}
+            type="button"
+            aria-pressed={isChatOpen}
+            onClick={onToggleChat}
+          >
+            Chat
+          </button>
 
           <button
             onClick={() => setJoinModalOpen(true)}

@@ -6,6 +6,31 @@ namespace server.Services;
 
 public class RedisRoomStore
 {
+    private const int ChatHistoryLimit = 100;
+    private const string ConsumeChatRateLimitScript = """
+        local now = tonumber(ARGV[1])
+        local member = ARGV[2]
+        local limits = {5, 10000, 30, 60000, 100, 10000, 500, 60000}
+        for i, key in ipairs(KEYS) do
+            local limit = limits[(i - 1) * 2 + 1]
+            local window = limits[(i - 1) * 2 + 2]
+            redis.call('ZREMRANGEBYSCORE', key, '-inf', now - window)
+            if redis.call('ZCARD', key) >= limit then
+                return 0
+            end
+        end
+        for i, key in ipairs(KEYS) do
+            redis.call('ZADD', key, now, member)
+            redis.call('PEXPIRE', key, limits[(i - 1) * 2 + 2] + 1000)
+        end
+        return 1
+        """;
+    private const string AppendChatMessageScript = """
+        redis.call('RPUSH', KEYS[1], ARGV[1])
+        redis.call('LTRIM', KEYS[1], -100, -1)
+        return 1
+        """;
+
     private static readonly JsonSerializerOptions _jsonOptions = new()
     {
         PropertyNameCaseInsensitive = true
@@ -44,8 +69,48 @@ public class RedisRoomStore
 
     public async Task DeleteRoomAsync(string roomId)
     {
-        await _db.KeyDeleteAsync([MetaKey(roomId), ParticipantsKey(roomId), SnapshotKey(roomId)]);
+        await _db.KeyDeleteAsync([
+            MetaKey(roomId),
+            ParticipantsKey(roomId),
+            SnapshotKey(roomId),
+            ChatKey(roomId),
+        ]);
         _logger.LogInformation("Deleted room {RoomId}", roomId);
+    }
+
+    public async Task AppendChatMessageAsync(string roomId, ChatMessage message)
+    {
+        await _db.ScriptEvaluateAsync(
+            AppendChatMessageScript,
+            [ChatKey(roomId)],
+            [JsonSerializer.Serialize(message)]);
+    }
+
+    public async Task<bool> TryConsumeChatRateLimitAsync(
+        string roomId,
+        string connectionId,
+        string messageId)
+    {
+        var result = await _db.ScriptEvaluateAsync(
+            ConsumeChatRateLimitScript,
+            [
+                ChatConnectionRateKey(roomId, connectionId, "10s"),
+                ChatConnectionRateKey(roomId, connectionId, "1m"),
+                ChatRoomRateKey(roomId, "10s"),
+                ChatRoomRateKey(roomId, "1m"),
+            ],
+            [DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), messageId]);
+        return (int)result == 1;
+    }
+
+    public async Task<IReadOnlyList<ChatMessage>> GetChatMessagesAsync(string roomId)
+    {
+        var entries = await _db.ListRangeAsync(ChatKey(roomId), -ChatHistoryLimit, -1);
+        return entries
+            .Select(entry => JsonSerializer.Deserialize<ChatMessage>((string)entry!, _jsonOptions))
+            .Where(message => message is not null)
+            .Select(message => message!)
+            .ToArray();
     }
 
     public async Task<IEnumerable<string>> GetStaleRoomsAsync(TimeSpan threshold)
@@ -167,4 +232,12 @@ public class RedisRoomStore
     private static string UserRoomKey(string userId) => $"user:{userId}:room";
     private static string ConnectionRoomKey(string connectionId) => $"connection:{connectionId}:room";
     private static string SnapshotKey(string roomId) => $"room:{roomId}:snapshot";
+    private static string ChatKey(string roomId) => $"room:{roomId}:chat";
+    private static string ChatConnectionRateKey(
+        string roomId,
+        string connectionId,
+        string window) =>
+        $"room:{{{roomId}}}:chat:rate:connection:{connectionId}:{window}";
+    private static string ChatRoomRateKey(string roomId, string window) =>
+        $"room:{{{roomId}}}:chat:rate:{window}";
 }

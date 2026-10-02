@@ -60,6 +60,7 @@ public class CollabHub : Hub
         await _store.AddParticipantAsync(roomId, new Participant(Context.ConnectionId, displayName, color, userId));
         await _store.SetConnectionRoomAsync(Context.ConnectionId, roomId);
         await Clients.Caller.SendAsync("RoomParticipants", existingParticipants);
+        await Clients.Caller.SendAsync("ChatHistory", await _store.GetChatMessagesAsync(roomId));
 
         var peer = existingParticipants.FirstOrDefault(p => p.ConnectionId != Context.ConnectionId);
         if (peer != null)
@@ -101,6 +102,39 @@ public class CollabHub : Hub
         await EnsureParticipantAsync(roomId);
         await Clients.OthersInGroup(roomId)
             .SendAsync("AwarenessUpdate", Context.ConnectionId, awarenessState);
+    }
+
+    public async Task SendChatMessage(string roomId, string content)
+    {
+        await EnsureParticipantAsync(roomId);
+        var normalizedContent = content?.Trim();
+        if (string.IsNullOrWhiteSpace(normalizedContent)) return;
+        if (normalizedContent.Length > 2000)
+        {
+            throw new HubException("Chat messages must be 2000 characters or fewer.");
+        }
+
+        var messageId = Guid.NewGuid().ToString("N");
+        if (!await _store.TryConsumeChatRateLimitAsync(
+                roomId,
+                Context.ConnectionId,
+                messageId))
+        {
+            throw new HubException("Chat rate limit reached. Please wait before sending more messages.");
+        }
+
+        var participant = await _store.GetParticipantAsync(roomId, Context.ConnectionId);
+        if (participant is null) throw new HubException("Join this room before sending updates.");
+
+        var message = new ChatMessage(
+            messageId,
+            participant.DisplayName,
+            participant.Color,
+            normalizedContent,
+            DateTimeOffset.UtcNow);
+        await _store.AppendChatMessageAsync(roomId, message);
+        await _store.TouchRoomAsync(roomId);
+        await Clients.Group(roomId).SendAsync("ChatMessage", message);
     }
 
     private async Task EnsureParticipantAsync(string roomId)

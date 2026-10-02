@@ -16,6 +16,8 @@ import { useDebouncedPreview } from '../../hooks/useDebouncedPreview';
 import { isPreviewLanguage, type LanguageMode } from './languageModes';
 import { RoomHeader } from '../room/RoomHeader';
 import { RoomJoin } from '../room/RoomJoin';
+import { useChat } from '../../hooks/useChat';
+import { ChatPanel } from '../chat/ChatPanel';
 
 interface EditorProps {
   roomId?: string;
@@ -42,6 +44,8 @@ function EditorComponent({ roomId: propRoomId }: EditorProps) {
     color: localColor,
     enabled: Boolean(roomId && displayName),
   });
+  const [isChatOpen, setChatOpen] = useState(false);
+  const { messages, sendMessage } = useChat({ providerRef, status });
 
   useEffect(() => {
     if (evictedNewRoomId)
@@ -109,40 +113,51 @@ function EditorComponent({ roomId: propRoomId }: EditorProps) {
         editor={monacoEditor}
         language={language}
         onLanguageChange={handleLanguageChange}
+        isChatOpen={isChatOpen}
+        onToggleChat={() => setChatOpen((open) => !open)}
       />
 
-      <div
-        className={`room-editor${isPreviewLanguage(language) ? ' has-live-preview' : ''}`}
-      >
-        <div className="room-code-editor">
-          <Editor
-            height="100%"
-            defaultLanguage="cpp"
-            defaultValue=""
-            theme="vs-dark"
-            onMount={handleEditorMount}
-            options={{
-              automaticLayout: true,
-              fontSize: 14,
-              minimap: { enabled: true },
-              readOnly: status !== 'connected',
-            }}
-          />
-          {monacoEditor && (
-            <Cursors
+      <div className="room-main">
+        <div
+          className={`room-editor${isPreviewLanguage(language) ? ' has-live-preview' : ''}`}
+        >
+          <div className="room-code-editor">
+            <Editor
+              height="100%"
+              defaultLanguage="cpp"
+              defaultValue=""
+              theme="vs-dark"
+              onMount={handleEditorMount}
+              options={{
+                automaticLayout: true,
+                fontSize: 14,
+                minimap: { enabled: true },
+                readOnly: status !== 'connected',
+              }}
+            />
+            {monacoEditor && (
+              <Cursors
+                editor={monacoEditor}
+                peers={peers}
+                providerRef={providerRef}
+                status={status}
+              />
+            )}
+          </div>
+          {isPreviewLanguage(language) && (
+            <LivePreview
+              source={previewSource}
+              language={language}
+              monaco={monacoApi}
               editor={monacoEditor}
-              peers={peers}
-              providerRef={providerRef}
-              status={status}
             />
           )}
         </div>
-        {isPreviewLanguage(language) && (
-          <LivePreview
-            source={previewSource}
-            language={language}
-            monaco={monacoApi}
-            editor={monacoEditor}
+        {isChatOpen && (
+          <ChatPanel
+            messages={messages}
+            onSendMessage={sendMessage}
+            disabled={status !== 'connected'}
           />
         )}
       </div>

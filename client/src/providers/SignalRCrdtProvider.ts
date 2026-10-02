@@ -27,6 +27,14 @@ export interface ParticipantInfo {
   userId?: string;
 }
 
+export interface ChatMessage {
+  id: string;
+  author: string;
+  color: string;
+  content: string;
+  sentAt: string;
+}
+
 export class SignalRCrdtProvider {
   public readonly doc: CrdtDocument;
   public readonly siteId: string;
@@ -57,6 +65,8 @@ export class SignalRCrdtProvider {
   private roomParticipantsListeners: Set<
     (participants: ParticipantInfo[]) => void
   > = new Set();
+  private chatMessageListeners = new Set<(message: ChatMessage) => void>();
+  private chatHistoryListeners = new Set<(messages: ChatMessage[]) => void>();
 
   constructor(
     siteId: string,
@@ -144,6 +154,23 @@ export class SignalRCrdtProvider {
     }
   }
 
+  public async sendChatMessage(content: string): Promise<void> {
+    if (this.connection.state !== HubConnectionState.Connected) return;
+    await this.connection.invoke('SendChatMessage', this.roomId, content);
+  }
+
+  public onChatMessage(listener: (message: ChatMessage) => void): () => void {
+    this.chatMessageListeners.add(listener);
+    return () => this.chatMessageListeners.delete(listener);
+  }
+
+  public onChatHistory(
+    listener: (messages: ChatMessage[]) => void
+  ): () => void {
+    this.chatHistoryListeners.add(listener);
+    return () => this.chatHistoryListeners.delete(listener);
+  }
+
   public onStatusChange(listener: (s: ConnectionStatus) => void): () => void {
     this.statusListeners.add(listener);
     return () => this.statusListeners.delete(listener);
@@ -198,6 +225,22 @@ export class SignalRCrdtProvider {
   }
 
   private registerHubHandlers(): void {
+    this.connection.on('ChatMessage', (raw: Record<string, unknown>) => {
+      this.chatMessageListeners.forEach((listener) =>
+        listener(this.normalizeChatMessage(raw))
+      );
+    });
+
+    this.connection.on(
+      'ChatHistory',
+      (rawMessages: Array<Record<string, unknown>>) => {
+        const messages = (rawMessages || []).map((message) =>
+          this.normalizeChatMessage(message)
+        );
+        this.chatHistoryListeners.forEach((listener) => listener(messages));
+      }
+    );
+
     this.connection.on('LoadSnapshot', (snapshotJson: string) => {
       try {
         this.doc.fromSnapshot(snapshotJson);
@@ -299,6 +342,16 @@ export class SignalRCrdtProvider {
     this.connection.onclose(() => {
       this.emitStatus('disconnected');
     });
+  }
+
+  private normalizeChatMessage(raw: Record<string, unknown>): ChatMessage {
+    return {
+      id: String(raw.id ?? raw.Id ?? ''),
+      author: String(raw.author ?? raw.Author ?? 'Anonymous'),
+      color: String(raw.color ?? raw.Color ?? '#38bdf8'),
+      content: String(raw.content ?? raw.Content ?? ''),
+      sentAt: String(raw.sentAt ?? raw.SentAt ?? new Date().toISOString()),
+    };
   }
 
   private async joinCurrentRoom(): Promise<void> {
