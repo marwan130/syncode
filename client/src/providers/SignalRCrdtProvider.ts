@@ -41,6 +41,7 @@ export class SignalRCrdtProvider {
   private buffer: PendingBuffer;
   private connection: HubConnection;
   private roomId: string;
+  private accessKey: string;
   private displayName: string;
   private color: string;
   private statusListeners: Set<(s: ConnectionStatus) => void> = new Set();
@@ -71,12 +72,14 @@ export class SignalRCrdtProvider {
   constructor(
     siteId: string,
     roomId: string,
+    accessKey: string,
     serverUrl: string,
     displayName: string = `User ${siteId.slice(0, 6)}`,
     color: string = '#38bdf8'
   ) {
     this.siteId = siteId;
     this.roomId = roomId;
+    this.accessKey = accessKey;
     this.displayName = displayName;
     this.color = color;
     this.doc = new CrdtDocument(siteId);
@@ -358,6 +361,7 @@ export class SignalRCrdtProvider {
     await this.connection.invoke(
       'JoinRoom',
       this.roomId,
+      this.accessKey,
       this.siteId,
       this.displayName,
       this.color

@@ -5,6 +5,7 @@ import {
   useNavigate,
   Navigate,
   useParams,
+  useLocation,
 } from 'react-router-dom';
 import EditorComponent from './components/editor/Editor';
 import { JoinRoomModal } from './components/room/JoinRoomModal';
@@ -22,9 +23,10 @@ function Home() {
       const response = await fetch('/api/rooms', { method: 'POST' });
       if (!response.ok)
         throw new Error(`Room creation failed (${response.status})`);
-      const { roomId } = await response.json();
-      if (!roomId) throw new Error('The server did not return a room ID.');
-      navigate(`/room/${roomId}`, { replace: true });
+      const { roomId, accessKey } = await response.json();
+      if (!roomId || !accessKey)
+        throw new Error('The server did not return a complete room invite.');
+      navigate(`/room/${roomId}#key=${accessKey}`, { replace: true });
     } catch {
       setError('Could not create a room. Please try again.');
       setCreating(false);
@@ -56,7 +58,29 @@ function Home() {
 
 function RoomRoute() {
   const { roomId } = useParams<{ roomId: string }>();
-  return <EditorComponent key={roomId} roomId={roomId} />;
+  const location = useLocation();
+  const navigate = useNavigate();
+  const accessKey =
+    new URLSearchParams(location.hash.slice(1)).get('key') ?? '';
+
+  if (!/^[0-9a-f]{64}$/i.test(accessKey)) {
+    return (
+      <main className="home-page">
+        <p>
+          This room link is missing its access key. Ask for a fresh invite link.
+        </p>
+        <button onClick={() => navigate('/')}>Back to home</button>
+      </main>
+    );
+  }
+
+  return (
+    <EditorComponent
+      key={`${roomId}:${accessKey}`}
+      roomId={roomId}
+      accessKey={accessKey}
+    />
+  );
 }
 
 function App() {

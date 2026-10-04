@@ -6,6 +6,7 @@ import type { ConnectionStatus } from '../providers/SignalRCrdtProvider';
 interface UseCrdtSyncProps {
   siteId: string;
   roomId: string;
+  accessKey: string;
   serverUrl?: string;
   displayName?: string;
   color?: string;
@@ -23,6 +24,7 @@ const DEFAULT_SERVER_URL = import.meta.env.VITE_BACKEND_URL || '';
 export function useCrdtSync({
   siteId,
   roomId,
+  accessKey,
   serverUrl = DEFAULT_SERVER_URL,
   displayName,
   color,
@@ -38,6 +40,7 @@ export function useCrdtSync({
     const p = new SignalRCrdtProvider(
       siteId,
       roomId,
+      accessKey,
       serverUrl,
       displayName,
       color
@@ -65,7 +68,7 @@ export function useCrdtSync({
       p.disconnect().catch(() => {});
       providerRef.current = null;
     };
-  }, [siteId, roomId, serverUrl, displayName, color, enabled]);
+  }, [siteId, roomId, accessKey, serverUrl, displayName, color, enabled]);
 
   return {
     status,

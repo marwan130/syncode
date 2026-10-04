@@ -9,12 +9,33 @@ public class CollabHub : Hub
     private readonly RedisRoomStore _store;
     public CollabHub(RedisRoomStore store) => _store = store;
 
-    public async Task JoinRoom(string roomId, string userId, string displayName, string color)
+    public async Task JoinRoom(
+        string roomId,
+        string accessKey,
+        string userId,
+        string displayName,
+        string color)
     {
-        if (string.IsNullOrWhiteSpace(roomId) || !await _store.RoomExistsAsync(roomId))
+        if (!await _store.ValidateRoomAccessAsync(roomId, accessKey))
         {
-            throw new HubException("Room does not exist or has expired.");
+            throw new HubException("Invalid or expired room invitation.");
         }
+
+        if (string.IsNullOrWhiteSpace(userId) || userId.Length > 128)
+        {
+            throw new HubException("Invalid participant identity.");
+        }
+        displayName = string.IsNullOrWhiteSpace(displayName)
+            ? "Anonymous"
+            : displayName.Trim();
+        if (displayName.Length > 32)
+        {
+            throw new HubException("Display names must be 32 characters or fewer.");
+        }
+        var participantColor = color is { Length: 7 } &&
+            System.Text.RegularExpressions.Regex.IsMatch(color, "^#[0-9a-fA-F]{6}$")
+                ? color
+                : "#38bdf8";
 
         if (!string.IsNullOrEmpty(userId))
         {
@@ -57,7 +78,9 @@ public class CollabHub : Hub
         }
 
         var existingParticipants = await _store.GetParticipantsAsync(roomId);
-        await _store.AddParticipantAsync(roomId, new Participant(Context.ConnectionId, displayName, color, userId));
+        await _store.AddParticipantAsync(
+            roomId,
+            new Participant(Context.ConnectionId, displayName, participantColor, userId));
         await _store.SetConnectionRoomAsync(Context.ConnectionId, roomId);
         await Clients.Caller.SendAsync("RoomParticipants", existingParticipants);
         await Clients.Caller.SendAsync("ChatHistory", await _store.GetChatMessagesAsync(roomId));
@@ -68,7 +91,8 @@ public class CollabHub : Hub
             await Clients.Client(peer.ConnectionId).SendAsync("RequestSnapshot", Context.ConnectionId);
         }
 
-        await Clients.OthersInGroup(roomId).SendAsync("PeerJoined", Context.ConnectionId, displayName, color, userId);
+        await Clients.OthersInGroup(roomId)
+            .SendAsync("PeerJoined", Context.ConnectionId, displayName, participantColor, userId);
     }
 
     public async Task SaveSnapshot(string roomId, string snapshotJson)

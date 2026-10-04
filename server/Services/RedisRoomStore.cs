@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Security.Cryptography;
 using server.Models;
 using StackExchange.Redis;
 
@@ -45,7 +46,7 @@ public class RedisRoomStore
         _logger = logger;
     }
 
-    public async Task CreateRoomAsync(string roomId)
+    public async Task CreateRoomAsync(string roomId, string accessKeyHash)
     {
         var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
         var metaKey = MetaKey(roomId);
@@ -53,13 +54,32 @@ public class RedisRoomStore
         await _db.HashSetAsync(metaKey, [
             new HashEntry("createdAt", now),
             new HashEntry("lastActivity", now),
+            new HashEntry("accessKeyHash", accessKeyHash),
         ]);
 
         _logger.LogInformation("Created room {RoomId}", roomId);
     }
 
-    public async Task<bool> RoomExistsAsync(string roomId) =>
-        await _db.KeyExistsAsync(MetaKey(roomId));
+    public async Task<bool> ValidateRoomAccessAsync(string roomId, string accessKey)
+    {
+        if (string.IsNullOrEmpty(roomId) ||
+            roomId.Length != 8 ||
+            !roomId.All(character =>
+                character is >= 'a' and <= 'z' or >= '0' and <= '9') ||
+            string.IsNullOrEmpty(accessKey) ||
+            accessKey.Length != 64 ||
+            !accessKey.All(Uri.IsHexDigit))
+        {
+            return false;
+        }
+
+        var storedHash = (string?)await _db.HashGetAsync(MetaKey(roomId), "accessKeyHash");
+        if (storedHash is null) return false;
+
+        var suppliedHash = SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(accessKey));
+        var expectedHash = Convert.FromHexString(storedHash);
+        return CryptographicOperations.FixedTimeEquals(suppliedHash, expectedHash);
+    }
 
     public async Task TouchRoomAsync(string roomId)
     {

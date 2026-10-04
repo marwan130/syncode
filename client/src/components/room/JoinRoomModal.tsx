@@ -26,27 +26,26 @@ export function JoinRoomModal({
       return;
     }
 
-    let extractedId = trimmed;
+    let inviteUrl: URL;
     try {
-      if (trimmed.includes('/room/')) {
-        const parts = trimmed.split('/room/');
-        extractedId = parts[1].split('?')[0].split('#')[0];
-      } else if (
-        trimmed.startsWith('http://') ||
-        trimmed.startsWith('https://')
-      ) {
-        const url = new URL(trimmed);
-        const pathSegments = url.pathname.split('/').filter(Boolean);
-        extractedId = pathSegments[pathSegments.length - 1];
-      }
-    } catch (err) {
-      void err;
+      inviteUrl = new URL(
+        trimmed.startsWith('/') || trimmed.startsWith('http')
+          ? trimmed
+          : `/room/${trimmed}`,
+        window.location.origin
+      );
+    } catch {
+      setError('Invalid room link');
+      return;
     }
 
-    extractedId = extractedId.replace(/[^a-zA-Z0-9_-]/g, '');
+    const pathMatch = inviteUrl.pathname.match(/\/room\/([a-zA-Z0-9_-]+)\/?$/);
+    const extractedId = pathMatch?.[1] ?? '';
+    const accessKey =
+      new URLSearchParams(inviteUrl.hash.slice(1)).get('key') ?? '';
 
-    if (!extractedId) {
-      setError('Invalid room link');
+    if (!extractedId || !/^[0-9a-f]{64}$/i.test(accessKey)) {
+      setError('Use a complete room invite link with its access key');
       return;
     }
 
@@ -56,7 +55,7 @@ export function JoinRoomModal({
     }
 
     onClose();
-    navigate(`/room/${extractedId}`);
+    navigate(`/room/${extractedId}#key=${accessKey}`);
   };
 
   return (
@@ -108,7 +107,7 @@ export function JoinRoomModal({
               fontFamily: 'system-ui, sans-serif',
             }}
           >
-            Paste an invite link to join.
+            Paste the complete invite link to join.
           </p>
         </div>
 
@@ -120,7 +119,7 @@ export function JoinRoomModal({
             <input
               type="text"
               autoFocus
-              placeholder="e.g. https://.../room/xyz123"
+              placeholder="Paste a complete room invite link"
               value={inputVal}
               onChange={(e) => {
                 setInputVal(e.target.value);

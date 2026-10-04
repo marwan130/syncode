@@ -21,9 +21,10 @@ import { ChatPanel } from '../chat/ChatPanel';
 
 interface EditorProps {
   roomId?: string;
+  accessKey: string;
 }
 
-function EditorComponent({ roomId: propRoomId }: EditorProps) {
+function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
   const params = useParams<{ roomId: string }>();
   const navigate = useNavigate();
   const roomId = propRoomId ?? params.roomId ?? '';
@@ -40,9 +41,10 @@ function EditorComponent({ roomId: propRoomId }: EditorProps) {
   const { status, providerRef, evictedNewRoomId } = useCrdtSync({
     siteId,
     roomId,
+    accessKey,
     displayName: displayName || undefined,
     color: localColor,
-    enabled: Boolean(roomId && displayName),
+    enabled: Boolean(roomId && accessKey && displayName),
   });
   const [isChatOpen, setChatOpen] = useState(false);
   const { messages, sendMessage } = useChat({ providerRef, status });
