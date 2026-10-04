@@ -35,10 +35,32 @@ export interface ChatMessage {
   sentAt: string;
 }
 
+export interface RoomEntry {
+  id: string;
+  name: string;
+  parentId: string | null;
+  isFolder: boolean;
+}
+
 export class SignalRCrdtProvider {
-  public readonly doc: CrdtDocument;
+  private documents = new Map<string, CrdtDocument>();
+  private buffers = new Map<string, PendingBuffer>();
+  private activeFile = 'main.cpp';
+  private files: RoomEntry[] = [
+    { id: 'main.cpp', name: 'main.cpp', parentId: null, isFolder: false },
+  ];
+  private fileListeners = new Set<(files: RoomEntry[]) => void>();
+  private activeFileListeners = new Set<(file: RoomEntry) => void>();
+  public get doc(): CrdtDocument {
+    return this.documentFor(this.activeFile);
+  }
+  public get fileList(): RoomEntry[] {
+    return this.files;
+  }
+  public get activeFileId(): string {
+    return this.activeFile;
+  }
   public readonly siteId: string;
-  private buffer: PendingBuffer;
   private connection: HubConnection;
   private roomId: string;
   private accessKey: string;
@@ -54,7 +76,7 @@ export class SignalRCrdtProvider {
     (userId: string, newRoomId?: string) => void
   > = new Set();
   private evictedListeners: Set<(newRoomId?: string) => void> = new Set();
-  private snapshotSaveTimer: ReturnType<typeof setTimeout> | null = null;
+  private snapshotSaveTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private peerJoinedListeners: Set<
     (
       peerId: string,
@@ -82,8 +104,7 @@ export class SignalRCrdtProvider {
     this.accessKey = accessKey;
     this.displayName = displayName;
     this.color = color;
-    this.doc = new CrdtDocument(siteId);
-    this.buffer = new PendingBuffer(this.doc);
+    this.documentFor(this.activeFile);
 
     this.connection = new HubConnectionBuilder()
       .withUrl(`${serverUrl}/collabhub`)
@@ -111,9 +132,22 @@ export class SignalRCrdtProvider {
   }
 
   public async disconnect(): Promise<void> {
-    if (this.snapshotSaveTimer) {
-      clearTimeout(this.snapshotSaveTimer);
-      this.snapshotSaveTimer = null;
+    const pendingFiles = [...this.snapshotSaveTimers.keys()];
+    this.snapshotSaveTimers.forEach((timer) => clearTimeout(timer));
+    this.snapshotSaveTimers.clear();
+    if (this.connection.state === HubConnectionState.Connected) {
+      await Promise.all(
+        pendingFiles.map((fileId) =>
+          this.connection
+            .invoke(
+              'SaveFileSnapshot',
+              this.roomId,
+              fileId,
+              this.documentFor(fileId).toSnapshot()
+            )
+            .catch(() => {})
+        )
+      );
     }
     if (this.connection.state !== HubConnectionState.Disconnected) {
       await this.connection.stop();
@@ -122,30 +156,117 @@ export class SignalRCrdtProvider {
   }
 
   public localInsert(originId: CrdtId | null, value: string): InsertOp {
-    const op = this.doc.localInsert(originId, value);
+    const fileId = this.activeFile;
+    const op = this.documentFor(fileId).localInsert(originId, value);
     this.emitChange();
-    this.sendOp(op).catch(() => {});
-    this.scheduleSnapshotSave();
+    this.sendOp(fileId, op).catch(() => {});
+    this.scheduleSnapshotSave(fileId);
     return op;
+  }
+
+  private documentFor(fileId: string): CrdtDocument {
+    let doc = this.documents.get(fileId);
+    if (!doc) {
+      doc = new CrdtDocument(this.siteId);
+      this.documents.set(fileId, doc);
+      this.buffers.set(fileId, new PendingBuffer(doc));
+    }
+    return doc;
+  }
+
+  public setActiveFile(fileId: string): void {
+    const file = this.files.find(
+      (item) => item.id === fileId && !item.isFolder
+    );
+    if (!file || fileId === this.activeFile) return;
+    this.activeFile = fileId;
+    this.documentFor(fileId);
+    this.activeFileListeners.forEach((listener) => listener(file));
+    this.emitChange();
+  }
+
+  public onFilesChange(listener: (files: RoomEntry[]) => void): () => void {
+    this.fileListeners.add(listener);
+    listener(this.files);
+    return () => this.fileListeners.delete(listener);
+  }
+
+  public onActiveFileChange(listener: (file: RoomEntry) => void): () => void {
+    this.activeFileListeners.add(listener);
+    return () => this.activeFileListeners.delete(listener);
+  }
+
+  public async createEntry(
+    name: string,
+    parentId: string | null,
+    isFolder: boolean
+  ): Promise<string> {
+    const id = await this.connection.invoke<string>(
+      'CreateEntry',
+      this.roomId,
+      name,
+      parentId,
+      isFolder
+    );
+    if (!isFolder) this.setActiveFile(id);
+    return id;
+  }
+  public async renameEntry(entryId: string, name: string): Promise<void> {
+    await this.connection.invoke('RenameEntry', this.roomId, entryId, name);
+  }
+  public async deleteEntry(entryId: string): Promise<void> {
+    await this.connection.invoke('DeleteEntry', this.roomId, entryId);
+  }
+
+  private updateFiles(files: RoomEntry[]): void {
+    const nextIds = new Set(files.map((entry) => entry.id));
+    for (const oldEntry of this.files) {
+      if (nextIds.has(oldEntry.id)) continue;
+      this.documents.delete(oldEntry.id);
+      this.buffers.delete(oldEntry.id);
+      const timer = this.snapshotSaveTimers.get(oldEntry.id);
+      if (timer) clearTimeout(timer);
+      this.snapshotSaveTimers.delete(oldEntry.id);
+    }
+    this.files = files;
+    for (const file of files) {
+      if (!file.isFolder) this.documentFor(file.id);
+    }
+    if (!files.some((file) => file.id === this.activeFile && !file.isFolder))
+      this.activeFile = files.find((file) => !file.isFolder)?.id ?? 'main.cpp';
+    this.fileListeners.forEach((listener) => listener([...files]));
+    const active = files.find((file) => file.id === this.activeFile);
+    if (active)
+      this.activeFileListeners.forEach((listener) => listener(active));
+    this.emitChange();
   }
 
   public localDelete(id: CrdtId): DeleteOp {
-    const op = this.doc.localDelete(id);
+    const fileId = this.activeFile;
+    const op = this.documentFor(fileId).localDelete(id);
     this.emitChange();
-    this.sendOp(op).catch(() => {});
-    this.scheduleSnapshotSave();
+    this.sendOp(fileId, op).catch(() => {});
+    this.scheduleSnapshotSave(fileId);
     return op;
   }
 
-  private scheduleSnapshotSave(): void {
-    if (this.snapshotSaveTimer) clearTimeout(this.snapshotSaveTimer);
-    this.snapshotSaveTimer = setTimeout(() => {
+  private scheduleSnapshotSave(fileId: string): void {
+    const existingTimer = this.snapshotSaveTimers.get(fileId);
+    if (existingTimer) clearTimeout(existingTimer);
+    const timer = setTimeout(() => {
+      this.snapshotSaveTimers.delete(fileId);
       if (this.connection.state === HubConnectionState.Connected) {
         this.connection
-          .invoke('SaveSnapshot', this.roomId, this.doc.toSnapshot())
+          .invoke(
+            'SaveFileSnapshot',
+            this.roomId,
+            fileId,
+            this.documentFor(fileId).toSnapshot()
+          )
           .catch(() => {});
       }
     }, 1000);
+    this.snapshotSaveTimers.set(fileId, timer);
   }
 
   public async sendAwareness(state: AwarenessState): Promise<void> {
@@ -244,35 +365,63 @@ export class SignalRCrdtProvider {
       }
     );
 
-    this.connection.on('LoadSnapshot', (snapshotJson: string) => {
-      try {
-        this.doc.fromSnapshot(snapshotJson);
-        this.buffer.processPending();
-        this.emitChange();
-      } catch (err) {
-        console.error('[SignalRCrdtProvider] Failed to load snapshot:', err);
+    this.connection.on('RoomFiles', (files: RoomEntry[]) =>
+      this.updateFiles(files)
+    );
+    this.connection.on('FileAdded', (file: RoomEntry) =>
+      this.updateFiles([...this.files, file])
+    );
+    this.connection.on('FileRenamed', (id: string, name: string) =>
+      this.updateFiles(
+        this.files.map((file) => (file.id === id ? { ...file, name } : file))
+      )
+    );
+    this.connection.on('FileDeleted', (deletedIds: string[]) => {
+      const ids = new Set(
+        Array.isArray(deletedIds) ? deletedIds : [deletedIds]
+      );
+      this.updateFiles(this.files.filter((entry) => !ids.has(entry.id)));
+    });
+
+    this.connection.on(
+      'LoadFileSnapshot',
+      (fileId: string, snapshotJson: string) => {
+        try {
+          this.documentFor(fileId).fromSnapshot(snapshotJson);
+          this.buffers.get(fileId)?.processPending();
+          this.emitChange();
+        } catch (err) {
+          console.error('[SignalRCrdtProvider] Failed to load snapshot:', err);
+        }
       }
-    });
+    );
 
-    this.connection.on('ReceiveOp', (op: CrdtOp) => {
-      this.buffer.process(op);
+    this.connection.on('ReceiveFileOp', (fileId: string, op: CrdtOp) => {
+      this.buffers.get(fileId)?.process(op);
       this.emitChange();
-      this.scheduleSnapshotSave();
+      this.scheduleSnapshotSave(fileId);
     });
 
-    this.connection.on('RequestSnapshot', (targetConnectionId: string) => {
-      if (this.connection.state !== HubConnectionState.Connected) return;
-      this.connection
-        .invoke(
-          'SendSnapshotToPeer',
-          this.roomId,
-          targetConnectionId,
-          this.doc.toSnapshot()
-        )
-        .catch((err) => {
-          console.error('[SignalRCrdtProvider] Failed to send snapshot:', err);
-        });
-    });
+    this.connection.on(
+      'RequestFileSnapshot',
+      (fileId: string, targetConnectionId: string) => {
+        if (this.connection.state !== HubConnectionState.Connected) return;
+        this.connection
+          .invoke(
+            'SendFileSnapshotToPeer',
+            this.roomId,
+            fileId,
+            targetConnectionId,
+            this.documentFor(fileId).toSnapshot()
+          )
+          .catch((err) => {
+            console.error(
+              '[SignalRCrdtProvider] Failed to send snapshot:',
+              err
+            );
+          });
+      }
+    );
 
     this.connection.on(
       'AwarenessUpdate',
@@ -368,13 +517,13 @@ export class SignalRCrdtProvider {
     );
   }
 
-  private async sendOp(op: CrdtOp): Promise<void> {
+  private async sendOp(fileId: string, op: CrdtOp): Promise<void> {
     if (this.connection.state !== HubConnectionState.Connected) {
       console.warn('[SignalRCrdtProvider] Failed to send op: Not connected');
       return;
     }
     try {
-      await this.connection.invoke('SendOp', this.roomId, op);
+      await this.connection.invoke('SendFileOp', this.roomId, fileId, op);
     } catch (err) {
       console.error('[SignalRCrdtProvider] Failed to send op:', err);
     }

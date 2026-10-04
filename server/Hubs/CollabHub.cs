@@ -71,10 +71,19 @@ public class CollabHub : Hub
         await Groups.AddToGroupAsync(Context.ConnectionId, roomId);
         await _store.TouchRoomAsync(roomId);
 
-        var snapshot = await _store.GetSnapshotAsync(roomId);
-        if (!string.IsNullOrEmpty(snapshot))
+        var files = await _store.GetEntriesAsync(roomId);
+        await Clients.Caller.SendAsync("RoomFiles", files);
+        foreach (var file in files.Where(entry => !entry.IsFolder))
         {
-            await Clients.Caller.SendAsync("LoadSnapshot", snapshot);
+            var fileSnapshot = await _store.GetFileSnapshotAsync(roomId, file.Id);
+            if (string.IsNullOrEmpty(fileSnapshot) && file.Id == "main.cpp")
+            {
+                fileSnapshot = await _store.GetSnapshotAsync(roomId);
+                if (!string.IsNullOrEmpty(fileSnapshot))
+                    await _store.SaveFileSnapshotAsync(roomId, file.Id, fileSnapshot);
+            }
+            if (!string.IsNullOrEmpty(fileSnapshot))
+                await Clients.Caller.SendAsync("LoadFileSnapshot", file.Id, fileSnapshot);
         }
 
         var existingParticipants = await _store.GetParticipantsAsync(roomId);
@@ -87,38 +96,107 @@ public class CollabHub : Hub
 
         var peer = existingParticipants.FirstOrDefault(p => p.ConnectionId != Context.ConnectionId);
         if (peer != null)
-        {
-            await Clients.Client(peer.ConnectionId).SendAsync("RequestSnapshot", Context.ConnectionId);
-        }
+            foreach (var file in files)
+                await Clients.Client(peer.ConnectionId).SendAsync("RequestFileSnapshot", file.Id, Context.ConnectionId);
 
         await Clients.OthersInGroup(roomId)
             .SendAsync("PeerJoined", Context.ConnectionId, displayName, participantColor, userId);
     }
 
-    public async Task SaveSnapshot(string roomId, string snapshotJson)
+    public async Task SaveFileSnapshot(string roomId, string fileId, string snapshotJson)
     {
-        await EnsureParticipantAsync(roomId);
+        await EnsureFileParticipantAsync(roomId, fileId);
+        if (string.IsNullOrEmpty(snapshotJson) || snapshotJson.Length > 5_000_000)
+            throw new HubException("Invalid file snapshot.");
         await _store.TouchRoomAsync(roomId);
-        await _store.SaveSnapshotAsync(roomId, snapshotJson);
+        await _store.SaveFileSnapshotAsync(roomId, fileId, snapshotJson);
     }
 
-    public async Task SendSnapshotToPeer(string roomId, string targetConnectionId, string snapshotJson)
+    public async Task SendFileSnapshotToPeer(string roomId, string fileId, string targetConnectionId, string snapshotJson)
     {
-        await EnsureParticipantAsync(roomId);
+        await EnsureFileParticipantAsync(roomId, fileId);
         if (await _store.GetConnectionRoomAsync(targetConnectionId) != roomId ||
             !await _store.IsParticipantAsync(roomId, targetConnectionId))
-        {
             throw new HubException("Snapshot target is not a participant in this room.");
-        }
-        await _store.SaveSnapshotAsync(roomId, snapshotJson);
-        await Clients.Client(targetConnectionId).SendAsync("LoadSnapshot", snapshotJson);
+        await _store.SaveFileSnapshotAsync(roomId, fileId, snapshotJson);
+        await Clients.Client(targetConnectionId).SendAsync("LoadFileSnapshot", fileId, snapshotJson);
     }
 
-    public async Task SendOp(string roomId, CrdtOpDto op)
+    public async Task SendFileOp(string roomId, string fileId, CrdtOpDto op)
+    {
+        await EnsureFileParticipantAsync(roomId, fileId);
+        await _store.TouchRoomAsync(roomId);
+        await Clients.OthersInGroup(roomId).SendAsync("ReceiveFileOp", fileId, op);
+    }
+
+    public async Task<string> CreateEntry(string roomId, string name, string? parentId, bool isFolder)
     {
         await EnsureParticipantAsync(roomId);
-        await _store.TouchRoomAsync(roomId);
-        await Clients.OthersInGroup(roomId).SendAsync("ReceiveOp", op);
+        name = ValidateFileName(name);
+        var entries = await _store.GetEntriesAsync(roomId);
+        if (entries.Count >= 500) throw new HubException("A room can contain up to 500 files and folders.");
+        ValidateParent(entries, parentId);
+        var entry = new RedisRoomStore.RoomEntry(Guid.NewGuid().ToString("N"), name, parentId, isFolder);
+        if (!await _store.CreateEntryAsync(roomId, entry))
+            throw new HubException("An item with that name already exists in this folder.");
+        await Clients.Group(roomId).SendAsync("FileAdded", entry);
+        return entry.Id;
+    }
+
+    public async Task RenameEntry(string roomId, string entryId, string name)
+    {
+        await EnsureEntryParticipantAsync(roomId, entryId);
+        name = ValidateFileName(name);
+        if (!await _store.RenameEntryAsync(roomId, entryId, name))
+            throw new HubException("An item with that name already exists in this folder.");
+        await Clients.Group(roomId).SendAsync("FileRenamed", entryId, name);
+    }
+
+    public async Task DeleteEntry(string roomId, string entryId)
+    {
+        await EnsureEntryParticipantAsync(roomId, entryId);
+        var result = await _store.DeleteEntryAsync(roomId, entryId);
+        if (result.Status == -1) throw new HubException("A room must keep at least one file.");
+        if (result.Status == 0) throw new HubException("File or folder no longer exists.");
+        await Clients.Group(roomId).SendAsync("FileDeleted", result.DeletedIds);
+    }
+
+    private async Task EnsureFileParticipantAsync(string roomId, string fileId)
+    {
+        await EnsureParticipantAsync(roomId);
+        if (!(await _store.GetEntriesAsync(roomId)).Any(entry => entry.Id == fileId && !entry.IsFolder))
+            throw new HubException("File no longer exists.");
+    }
+
+    private async Task EnsureEntryParticipantAsync(string roomId, string entryId)
+    {
+        await EnsureParticipantAsync(roomId);
+        if (!(await _store.GetEntriesAsync(roomId)).Any(entry => entry.Id == entryId))
+            throw new HubException("File or folder no longer exists.");
+    }
+
+    private static void ValidateParent(IReadOnlyList<RedisRoomStore.RoomEntry> entries, string? parentId)
+    {
+        if (parentId is null) return;
+        var parent = entries.FirstOrDefault(entry => entry.Id == parentId && entry.IsFolder)
+            ?? throw new HubException("Parent folder no longer exists.");
+        var depth = 1;
+        while (parent.ParentId is not null)
+        {
+            parent = entries.FirstOrDefault(entry => entry.Id == parent.ParentId && entry.IsFolder)
+                ?? throw new HubException("Invalid folder hierarchy.");
+            if (++depth >= 16) throw new HubException("Folders can be nested up to 16 levels.");
+        }
+    }
+
+    private static string ValidateFileName(string name)
+    {
+        name = name?.Trim() ?? string.Empty;
+        if (name.Length is < 1 or > 128 || name is "." or ".." ||
+            name.IndexOfAny([ '/', '\\', ':', '*', '?', '"', '<', '>', '|' ]) >= 0 ||
+            name.Any(char.IsControl))
+            throw new HubException("Enter a valid file name (up to 128 characters).");
+        return name;
     }
 
     public async Task UpdateAwareness(string roomId, object awarenessState)
