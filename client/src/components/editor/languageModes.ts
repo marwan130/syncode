@@ -24,3 +24,31 @@ export function isPreviewLanguage(
     language === 'typescript'
   );
 }
+
+const EXTENSION_LANGUAGES: Record<string, LanguageMode> = {
+  html: 'html',
+  htm: 'html',
+  css: 'css',
+  js: 'javascript',
+  mjs: 'javascript',
+  cjs: 'javascript',
+  ts: 'typescript',
+  mts: 'typescript',
+  cts: 'typescript',
+  tsx: 'typescript',
+  jsx: 'javascript',
+  cs: 'csharp',
+  c: 'c',
+  h: 'c',
+  cc: 'cpp',
+  cpp: 'cpp',
+  cxx: 'cpp',
+  hpp: 'cpp',
+  rs: 'rust',
+  java: 'java',
+};
+
+export function languageForFileName(name: string): LanguageMode {
+  const extension = name.split('.').pop()?.toLowerCase() ?? '';
+  return EXTENSION_LANGUAGES[extension] ?? 'cpp';
+}

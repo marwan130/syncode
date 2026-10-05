@@ -13,15 +13,35 @@ import {
 import { Cursors } from './Cursors';
 import { LivePreview } from './LivePreview';
 import { useDebouncedPreview } from '../../hooks/useDebouncedPreview';
-import { isPreviewLanguage, type LanguageMode } from './languageModes';
+import {
+  isPreviewLanguage,
+  languageForFileName,
+  type LanguageMode,
+} from './languageModes';
 import { RoomHeader } from '../room/RoomHeader';
 import { RoomJoin } from '../room/RoomJoin';
 import { useChat } from '../../hooks/useChat';
 import { ChatPanel } from '../chat/ChatPanel';
+import { FileExplorer } from './FileExplorer';
+import type { RoomEntry } from '../../providers/SignalRCrdtProvider';
 
 interface EditorProps {
   roomId?: string;
   accessKey: string;
+}
+
+function getEntryPath(entry: RoomEntry, entries: RoomEntry[]): string {
+  const path = [entry.name];
+  let parentId = entry.parentId;
+  while (parentId) {
+    const parent = entries.find(
+      (item) => item.id === parentId && item.isFolder
+    );
+    if (!parent) break;
+    path.unshift(parent.name);
+    parentId = parent.parentId;
+  }
+  return path.join('/');
 }
 
 function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
@@ -32,11 +52,20 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
   const [displayName, setDisplayName] = useState(getStoredDisplayName);
   const [localColor, setLocalColor] = useState(getStoredColor);
   const [isProfileOpen, setProfileOpen] = useState(false);
-  const [language, setLanguage] = useState<LanguageMode>('cpp');
+  const [entries, setEntries] = useState<RoomEntry[]>([]);
+  const [activeFileId, setActiveFileId] = useState('main.cpp');
+  const [isExplorerOpen, setExplorerOpen] = useState(true);
   const [siteId] = useState(getOrCreateSiteId);
   const [monacoApi, setMonacoApi] = useState<Monaco | null>(null);
   const [monacoEditor, setMonacoEditor] =
     useState<monaco.editor.IStandaloneCodeEditor | null>(null);
+  const activeFile =
+    entries.find((entry) => entry.id === activeFileId && !entry.isFolder) ??
+    entries.find((entry) => !entry.isFolder);
+  const activeFilePath = activeFile
+    ? getEntryPath(activeFile, entries)
+    : 'main.cpp';
+  const language: LanguageMode = languageForFileName(activeFilePath);
 
   const { status, providerRef, evictedNewRoomId } = useCrdtSync({
     siteId,
@@ -46,6 +75,28 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
     color: localColor,
     enabled: Boolean(roomId && accessKey && displayName),
   });
+
+  useEffect(() => {
+    const provider = providerRef.current;
+    if (!provider) return;
+    const offFiles = provider.onFilesChange((next) => {
+      setEntries(next);
+      if (
+        next.length &&
+        !next.some((entry) => entry.id === activeFileId && !entry.isFolder)
+      )
+        setActiveFileId(
+          next.find((entry) => !entry.isFolder)?.id ?? 'main.cpp'
+        );
+    });
+    const offActive = provider.onActiveFileChange((file) =>
+      setActiveFileId(file.id)
+    );
+    return () => {
+      offFiles();
+      offActive();
+    };
+  }, [providerRef, status, activeFileId]);
   const [isChatOpen, setChatOpen] = useState(false);
   const { messages, sendMessage } = useChat({ providerRef, status });
 
@@ -78,17 +129,29 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
       unsubscribeCursor();
       binding.dispose();
     };
-  }, [monacoEditor, providerRef, status, broadcastCursor]);
+  }, [monacoEditor, providerRef, status, broadcastCursor, activeFileId]);
 
   const handleEditorMount: OnMount = (editor, monacoInstance) => {
     setMonacoEditor(editor);
     setMonacoApi(monacoInstance);
   };
 
-  const handleLanguageChange = (nextLanguage: LanguageMode) => {
-    setLanguage(nextLanguage);
-    const model = monacoEditor?.getModel();
-    if (model) monacoApi?.editor.setModelLanguage(model, nextLanguage);
+  const runFileAction = <T,>(action: () => Promise<T>): Promise<T | void> =>
+    action().catch((error: unknown) => {
+      window.alert(
+        error instanceof Error ? error.message : 'File operation failed.'
+      );
+    });
+
+  const createEntry = (isFolder: boolean, parentId: string | null) => {
+    const name = window.prompt(
+      isFolder ? 'New folder name' : 'New file name',
+      isFolder ? 'New Folder' : 'untitled.ts'
+    );
+    if (!name?.trim() || !providerRef.current) return Promise.resolve();
+    return runFileAction(() =>
+      providerRef.current!.createEntry(name, parentId, isFolder)
+    );
   };
 
   return (
@@ -113,20 +176,48 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
         peers={peers}
         onEditProfile={() => setProfileOpen(true)}
         editor={monacoEditor}
-        language={language}
-        onLanguageChange={handleLanguageChange}
+        monaco={monacoApi}
+        explorerOpen={isExplorerOpen}
+        onToggleExplorer={() => setExplorerOpen((open) => !open)}
         isChatOpen={isChatOpen}
         onToggleChat={() => setChatOpen((open) => !open)}
       />
 
       <div className="room-main">
+        {isExplorerOpen && (
+          <FileExplorer
+            entries={entries}
+            activeFileId={activeFileId}
+            onSelect={(id) => providerRef.current?.setActiveFile(id)}
+            onCreateFile={(parentId) => createEntry(false, parentId)}
+            onCreateFolder={(parentId) => createEntry(true, parentId)}
+            onRename={(entry) => {
+              const name = window.prompt(
+                `Rename ${entry.isFolder ? 'folder' : 'file'}`,
+                entry.name
+              );
+              if (name?.trim())
+                runFileAction(() =>
+                  providerRef.current!.renameEntry(entry.id, name)
+                );
+            }}
+            onDelete={(entry) => {
+              const prompt = entry.isFolder
+                ? `Delete folder "${entry.name}" and everything inside it?`
+                : `Delete ${entry.name}?`;
+              if (window.confirm(prompt))
+                runFileAction(() => providerRef.current!.deleteEntry(entry.id));
+            }}
+          />
+        )}
         <div
           className={`room-editor${isPreviewLanguage(language) ? ' has-live-preview' : ''}`}
         >
           <div className="room-code-editor">
             <Editor
               height="100%"
-              defaultLanguage="cpp"
+              language={language}
+              path={activeFilePath}
               defaultValue=""
               theme="vs-dark"
               onMount={handleEditorMount}

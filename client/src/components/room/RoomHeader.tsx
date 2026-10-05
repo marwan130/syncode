@@ -8,7 +8,8 @@ import { ParticipantList } from './ParticipantList';
 import { ShareLinkButton } from './ShareLinkButton';
 import { JoinRoomModal } from './JoinRoomModal';
 import { SearchReplace } from '../editor/SearchReplace';
-import { LANGUAGE_MODES, type LanguageMode } from '../editor/languageModes';
+import { ThemePicker } from '../editor/ThemePicker';
+import type { Monaco } from '@monaco-editor/react';
 
 interface RoomHeaderProps {
   roomId: string;
@@ -18,8 +19,9 @@ interface RoomHeaderProps {
   peers: Map<string, AwarenessState>;
   onEditProfile: () => void;
   editor: monaco.editor.IStandaloneCodeEditor | null;
-  language: LanguageMode;
-  onLanguageChange: (language: LanguageMode) => void;
+  monaco: Monaco | null;
+  explorerOpen: boolean;
+  onToggleExplorer: () => void;
   isChatOpen: boolean;
   onToggleChat: () => void;
 }
@@ -54,7 +56,7 @@ function StatusDot({ status }: { status: ConnectionStatus }) {
       <span
         style={{
           fontSize: 12,
-          color: '#6b7280',
+          color: 'var(--text-muted)',
           fontFamily: 'system-ui, sans-serif',
         }}
       >
@@ -72,8 +74,9 @@ export function RoomHeader({
   peers,
   onEditProfile,
   editor,
-  language,
-  onLanguageChange,
+  monaco,
+  explorerOpen,
+  onToggleExplorer,
   isChatOpen,
   onToggleChat,
 }: RoomHeaderProps) {
@@ -96,17 +99,18 @@ export function RoomHeader({
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span
-            style={{
-              fontSize: 14,
-              fontWeight: 700,
-              fontFamily: 'system-ui, sans-serif',
-              color: '#a5f3fc',
-              letterSpacing: '-0.3px',
-            }}
+          <button
+            className="syncode-brand-toggle"
+            type="button"
+            title={explorerOpen ? 'Hide file explorer' : 'Show file explorer'}
+            aria-label={
+              explorerOpen ? 'Hide file explorer' : 'Show file explorer'
+            }
+            aria-expanded={explorerOpen}
+            onClick={onToggleExplorer}
           >
             syncode
-          </span>
+          </button>
         </div>
 
         <div
@@ -122,30 +126,7 @@ export function RoomHeader({
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <select
-            aria-label="Editor language"
-            value={language}
-            disabled={!editor}
-            onChange={(event) =>
-              onLanguageChange(event.target.value as LanguageMode)
-            }
-            style={{
-              height: 28,
-              padding: '0 6px',
-              color: '#d4d4d4',
-              background: 'var(--control-bg)',
-              border: '1px solid var(--border)',
-              borderRadius: 6,
-              fontSize: 12,
-              cursor: editor ? 'pointer' : 'default',
-            }}
-          >
-            {LANGUAGE_MODES.map((mode) => (
-              <option key={mode.id} value={mode.id}>
-                {mode.label}
-              </option>
-            ))}
-          </select>
+          <ThemePicker monaco={monaco} />
 
           <SearchReplace editor={editor} />
 
@@ -169,7 +150,7 @@ export function RoomHeader({
               fontSize: 12,
               fontWeight: 500,
               fontFamily: 'system-ui, sans-serif',
-              color: '#9ca3af',
+              color: 'var(--text-muted)',
               background: 'var(--control-bg)',
               border: '1px solid var(--border)',
               borderRadius: 6,
@@ -178,11 +159,11 @@ export function RoomHeader({
               transition: 'all 0.15s ease',
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.color = '#e5e7eb';
+              e.currentTarget.style.color = 'var(--text-h)';
               e.currentTarget.style.background = 'var(--surface-bg)';
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.color = '#9ca3af';
+              e.currentTarget.style.color = 'var(--text-muted)';
               e.currentTarget.style.background = 'var(--control-bg)';
             }}
           >

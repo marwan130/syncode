@@ -9,6 +9,7 @@ import {
 } from 'react-router-dom';
 import EditorComponent from './components/editor/Editor';
 import { JoinRoomModal } from './components/room/JoinRoomModal';
+import { ThemeInitializer } from './components/editor/ThemePicker';
 
 function Home() {
   const navigate = useNavigate();
@@ -66,10 +67,10 @@ function RoomRoute() {
   if (!/^[0-9a-f]{64}$/i.test(accessKey)) {
     return (
       <main className="home-page">
-        <p>
+        <p style={{ color: 'var(--text-muted)', fontSize: 14, textAlign: 'center', maxWidth: 340 }}>
           This room link is missing its access key. Ask for a fresh invite link.
         </p>
-        <button onClick={() => navigate('/')}>Back to home</button>
+        <button className="home-secondary" onClick={() => navigate('/')}>Back to home</button>
       </main>
     );
   }
@@ -85,21 +86,14 @@ function RoomRoute() {
 
 function App() {
   return (
-    <div
-      style={{
-        width: '100vw',
-        height: '100vh',
-        margin: 0,
-        padding: 0,
-        overflow: 'hidden',
-      }}
-    >
+    <>
+      <ThemeInitializer />
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/room/:roomId" element={<RoomRoute />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
-    </div>
+    </>
   );
 }
 
