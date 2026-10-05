@@ -75,51 +75,41 @@ export function JoinRoomModal({
       <div
         style={{
           width: '100%',
-          maxWidth: 380,
+          maxWidth: 420,
           background: 'var(--surface-bg)',
-          border: '1px solid #2e2e34',
-          borderRadius: 10,
-          padding: 22,
-          boxShadow: '0 20px 30px rgba(0, 0, 0, 0.5)',
+          border: '1px solid var(--border)',
+          borderRadius: 12,
+          padding: 28,
+          boxShadow:
+            '0 20px 40px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05)',
           display: 'flex',
           flexDirection: 'column',
           gap: 16,
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div>
-          <h3
-            style={{
-              margin: '0 0 6px',
-              fontSize: 16,
-              fontWeight: 600,
-              color: '#f3f4f6',
-              fontFamily: 'system-ui, sans-serif',
-            }}
-          >
-            Join Room with Link
-          </h3>
-          <p
-            style={{
-              margin: 0,
-              fontSize: 13,
-              color: '#9ca3af',
-              fontFamily: 'system-ui, sans-serif',
-            }}
-          >
-            Paste the complete invite link to join.
-          </p>
-        </div>
+        <h3
+          style={{
+            margin: 0,
+            fontSize: 16,
+            fontWeight: 600,
+            lineHeight: 1,
+            color: 'var(--text-h)',
+            fontFamily: 'system-ui, sans-serif',
+          }}
+        >
+          Join Room with Link
+        </h3>
 
         <form
           onSubmit={handleJoin}
-          style={{ display: 'flex', flexDirection: 'column', gap: 14 }}
+          style={{ display: 'flex', flexDirection: 'column', gap: 16 }}
         >
           <div>
             <input
               type="text"
               autoFocus
-              placeholder="Paste a complete room invite link"
+              placeholder="Paste a room invite link"
               value={inputVal}
               onChange={(e) => {
                 setInputVal(e.target.value);
@@ -128,14 +118,30 @@ export function JoinRoomModal({
               style={{
                 width: '100%',
                 boxSizing: 'border-box',
-                padding: '9px 12px',
-                fontSize: 13,
+                padding: '10px 12px',
+                fontSize: 14,
                 fontFamily: 'ui-monospace, Consolas, monospace',
                 background: 'var(--control-bg)',
-                color: '#f3f4f6',
-                border: error ? '1px solid #ef4444' : '1px solid #383842',
+                color: 'var(--text-h)',
+                border: error
+                  ? '1px solid var(--danger)'
+                  : '1px solid var(--border)',
                 borderRadius: 6,
                 outline: 'none',
+                transition: 'border-color 0.15s ease, box-shadow 0.15s ease',
+              }}
+              onFocus={(e) => {
+                if (!error) {
+                  e.currentTarget.style.borderColor = 'var(--accent)';
+                  e.currentTarget.style.boxShadow =
+                    '0 0 0 3px rgba(56, 189, 248, 0.25)';
+                }
+              }}
+              onBlur={(e) => {
+                if (!error) {
+                  e.currentTarget.style.borderColor = '#383842';
+                  e.currentTarget.style.boxShadow = 'none';
+                }
               }}
             />
             {error && (
@@ -143,7 +149,7 @@ export function JoinRoomModal({
                 style={{
                   display: 'block',
                   fontSize: 12,
-                  color: '#ef4444',
+                  color: 'var(--danger)',
                   marginTop: 4,
                   fontFamily: 'system-ui, sans-serif',
                 }}
@@ -153,26 +159,22 @@ export function JoinRoomModal({
             )}
           </div>
 
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'flex-end',
-              gap: 8,
-              marginTop: 4,
-            }}
-          >
+          <div style={{ display: 'flex', gap: 8 }}>
             <button
               type="button"
               onClick={onClose}
               style={{
-                padding: '6px 12px',
-                fontSize: 13,
+                flex: 1,
+                padding: '10px 16px',
+                fontSize: 14,
                 fontFamily: 'system-ui, sans-serif',
+                color: 'var(--text-muted)',
                 background: 'transparent',
-                color: '#9ca3af',
-                border: '1px solid #383842',
+                border: '1px solid var(--border)',
                 borderRadius: 6,
                 cursor: 'pointer',
+                boxShadow: 'none',
+                outline: 'none',
               }}
             >
               Cancel
@@ -180,16 +182,24 @@ export function JoinRoomModal({
             <button
               type="submit"
               style={{
-                padding: '6px 14px',
-                fontSize: 13,
+                flex: 1,
+                padding: '10px 16px',
+                fontSize: 14,
                 fontWeight: 600,
                 fontFamily: 'system-ui, sans-serif',
-                background: 'linear-gradient(135deg, #0284c7 0%, #0ea5e9 100%)',
-                color: '#ffffff',
+                background: 'var(--button-bg)',
+                color: 'var(--button-fg)',
                 border: 'none',
                 borderRadius: 6,
                 cursor: 'pointer',
-                boxShadow: '0 2px 8px rgba(14, 165, 233, 0.35)',
+                boxShadow: '0 2px 10px rgba(14, 165, 233, 0.4)',
+                transition: 'opacity 0.15s ease',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.opacity = '0.92';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.opacity = '1';
               }}
             >
               Join Room

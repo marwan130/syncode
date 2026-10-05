@@ -54,7 +54,7 @@ export function RoomJoin({
           width: '100%',
           maxWidth: 420,
           background: 'var(--surface-bg)',
-          border: '1px solid #2e2e34',
+          border: '1px solid var(--border)',
           borderRadius: 12,
           padding: 28,
           boxShadow:
@@ -83,7 +83,7 @@ export function RoomJoin({
             style={{
               margin: 0,
               fontSize: 13,
-              color: '#9ca3af',
+              color: 'var(--text-muted)',
               fontFamily: 'system-ui, sans-serif',
             }}
           >
@@ -102,7 +102,7 @@ export function RoomJoin({
                 display: 'block',
                 fontSize: 12,
                 fontWeight: 600,
-                color: '#d1d5db',
+                color: 'var(--text)',
                 fontFamily: 'system-ui, sans-serif',
                 marginBottom: 6,
               }}
@@ -127,15 +127,17 @@ export function RoomJoin({
                 fontSize: 14,
                 fontFamily: 'system-ui, sans-serif',
                 background: 'var(--control-bg)',
-                color: '#f3f4f6',
-                border: error ? '1px solid #ef4444' : '1px solid #383842',
+                color: 'var(--text-h)',
+                border: error
+                  ? '1px solid var(--danger)'
+                  : '1px solid var(--border)',
                 borderRadius: 6,
                 outline: 'none',
                 transition: 'border-color 0.15s ease, box-shadow 0.15s ease',
               }}
               onFocus={(e) => {
                 if (!error) {
-                  e.currentTarget.style.borderColor = '#38bdf8';
+                  e.currentTarget.style.borderColor = 'var(--accent)';
                   e.currentTarget.style.boxShadow =
                     '0 0 0 3px rgba(56, 189, 248, 0.25)';
                 }
@@ -152,7 +154,7 @@ export function RoomJoin({
                 style={{
                   display: 'block',
                   fontSize: 12,
-                  color: '#ef4444',
+                  color: 'var(--danger)',
                   marginTop: 4,
                   fontFamily: 'system-ui, sans-serif',
                 }}
@@ -168,7 +170,7 @@ export function RoomJoin({
                 display: 'block',
                 fontSize: 12,
                 fontWeight: 500,
-                color: '#9ca3af',
+                color: 'var(--text-muted)',
                 fontFamily: 'system-ui, sans-serif',
                 marginBottom: 8,
               }}
@@ -219,9 +221,9 @@ export function RoomJoin({
                   padding: '10px 16px',
                   fontSize: 14,
                   fontFamily: 'system-ui, sans-serif',
-                  color: '#9ca3af',
+                  color: 'var(--text-muted)',
                   background: 'transparent',
-                  border: '1px solid #383842',
+                  border: '1px solid var(--border)',
                   borderRadius: 6,
                   cursor: 'pointer',
                 }}
@@ -237,8 +239,8 @@ export function RoomJoin({
                 fontSize: 14,
                 fontWeight: 600,
                 fontFamily: 'system-ui, sans-serif',
-                color: '#ffffff',
-                background: 'linear-gradient(135deg, #0284c7 0%, #0ea5e9 100%)',
+                color: 'var(--button-fg)',
+                background: 'var(--button-bg)',
                 border: 'none',
                 borderRadius: 6,
                 cursor: 'pointer',
