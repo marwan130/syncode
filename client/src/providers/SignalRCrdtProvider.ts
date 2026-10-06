@@ -10,6 +10,12 @@ import type { InsertOp, DeleteOp, CrdtOp } from '../crdt/CrdtDocument';
 import { PendingBuffer } from '../crdt/PendingBuffer';
 import type { CursorAnchor } from '../crdt/CursorAnchor';
 
+function errorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === 'string') return err;
+  return 'Unknown error';
+}
+
 export type ConnectionStatus =
   'disconnected' | 'connecting' | 'connected' | 'reconnecting';
 
@@ -59,6 +65,18 @@ export class SignalRCrdtProvider {
   }
   public get activeFileId(): string {
     return this.activeFile;
+  }
+  public setLocalColor(color: string): void {
+    if (this.color === color) return;
+    this.color = color;
+    this.sendAwareness({
+      cursor: null,
+      name: this.displayName,
+      color,
+    }).catch(() => { });
+  }
+  public getFileContent(fileId: string): string {
+    return this.documentFor(fileId).toVisibleString();
   }
   public readonly siteId: string;
   private connection: HubConnection;
@@ -126,6 +144,9 @@ export class SignalRCrdtProvider {
       await this.joinCurrentRoom();
       this.emitStatus('connected');
     } catch (err) {
+      if (this.connection.state !== HubConnectionState.Disconnected) {
+        await this.connection.stop().catch(() => { });
+      }
       this.emitStatus('disconnected');
       throw err;
     }
@@ -145,7 +166,7 @@ export class SignalRCrdtProvider {
               fileId,
               this.documentFor(fileId).toSnapshot()
             )
-            .catch(() => {})
+            .catch(() => { })
         )
       );
     }
@@ -159,7 +180,7 @@ export class SignalRCrdtProvider {
     const fileId = this.activeFile;
     const op = this.documentFor(fileId).localInsert(originId, value);
     this.emitChange();
-    this.sendOp(fileId, op).catch(() => {});
+    this.sendOp(fileId, op).catch(() => { });
     this.scheduleSnapshotSave(fileId);
     return op;
   }
@@ -245,7 +266,7 @@ export class SignalRCrdtProvider {
     const fileId = this.activeFile;
     const op = this.documentFor(fileId).localDelete(id);
     this.emitChange();
-    this.sendOp(fileId, op).catch(() => {});
+    this.sendOp(fileId, op).catch(() => { });
     this.scheduleSnapshotSave(fileId);
     return op;
   }
@@ -263,7 +284,7 @@ export class SignalRCrdtProvider {
             fileId,
             this.documentFor(fileId).toSnapshot()
           )
-          .catch(() => {});
+          .catch(() => { });
       }
     }, 1000);
     this.snapshotSaveTimers.set(fileId, timer);
@@ -274,7 +295,7 @@ export class SignalRCrdtProvider {
     try {
       await this.connection.invoke('UpdateAwareness', this.roomId, state);
     } catch (err) {
-      console.error('[SignalRCrdtProvider] Failed to send awareness:', err);
+      console.error('[SignalRCrdtProvider] Failed to send awareness:', errorMessage(err));
     }
   }
 
@@ -390,8 +411,9 @@ export class SignalRCrdtProvider {
           this.documentFor(fileId).fromSnapshot(snapshotJson);
           this.buffers.get(fileId)?.processPending();
           this.emitChange();
+          this.scheduleSnapshotSave(fileId);
         } catch (err) {
-          console.error('[SignalRCrdtProvider] Failed to load snapshot:', err);
+          console.error('[SignalRCrdtProvider] Failed to load snapshot:', errorMessage(err));
         }
       }
     );
@@ -417,7 +439,7 @@ export class SignalRCrdtProvider {
           .catch((err) => {
             console.error(
               '[SignalRCrdtProvider] Failed to send snapshot:',
-              err
+              errorMessage(err)
             );
           });
       }
@@ -467,7 +489,7 @@ export class SignalRCrdtProvider {
       (userId: string, newRoomId?: string) => {
         if (userId === this.siteId) {
           this.evictedListeners.forEach((l) => l(newRoomId));
-          this.disconnect().catch(() => {});
+          this.disconnect().catch(() => { });
         } else {
           this.peerLeftByUserListeners.forEach((l) => l(userId, newRoomId));
         }
@@ -486,8 +508,9 @@ export class SignalRCrdtProvider {
         this.emitStatus('disconnected');
         console.error(
           '[SignalRCrdtProvider] Failed to rejoin room after reconnect:',
-          err
+          errorMessage(err)
         );
+        await this.connection.stop().catch(() => { });
       }
     });
 
@@ -519,13 +542,13 @@ export class SignalRCrdtProvider {
 
   private async sendOp(fileId: string, op: CrdtOp): Promise<void> {
     if (this.connection.state !== HubConnectionState.Connected) {
-      console.warn('[SignalRCrdtProvider] Failed to send op: Not connected');
+      console.warn('[SignalRCrdtProvider] sendOp skipped: not connected');
       return;
     }
     try {
       await this.connection.invoke('SendFileOp', this.roomId, fileId, op);
     } catch (err) {
-      console.error('[SignalRCrdtProvider] Failed to send op:', err);
+      console.error('[SignalRCrdtProvider] Failed to send op:', errorMessage(err));
     }
   }
 

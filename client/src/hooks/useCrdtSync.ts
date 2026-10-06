@@ -3,6 +3,12 @@ import type { RefObject } from 'react';
 import { SignalRCrdtProvider } from '../providers/SignalRCrdtProvider';
 import type { ConnectionStatus } from '../providers/SignalRCrdtProvider';
 
+function errorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === 'string') return err;
+  return 'Unknown error';
+}
+
 interface UseCrdtSyncProps {
   siteId: string;
   roomId: string;
@@ -33,6 +39,8 @@ export function useCrdtSync({
   const [status, setStatus] = useState<ConnectionStatus>('disconnected');
   const [evictedNewRoomId, setEvictedNewRoomId] = useState<string | null>(null);
   const providerRef = useRef<SignalRCrdtProvider | null>(null);
+  const profileRef = useRef({ displayName, color });
+  profileRef.current = { displayName, color };
 
   useEffect(() => {
     if (!roomId || !siteId || !displayName || !enabled) return;
@@ -42,8 +50,8 @@ export function useCrdtSync({
       roomId,
       accessKey,
       serverUrl,
-      displayName,
-      color
+      profileRef.current.displayName,
+      profileRef.current.color
     );
     providerRef.current = p;
 
@@ -58,17 +66,30 @@ export function useCrdtSync({
       setEvictedNewRoomId(newRoomId || '');
     });
 
-    p.connect().catch((err) => {
-      console.error('[useCrdtSync] Failed to connect:', err);
+    // React Strict Mode replays effects in development. Defer startup by one
+    // microtask so the setup it immediately cleans up never opens a transport.
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      p.connect().catch((err) => {
+        if (!cancelled) {
+          console.error('[useCrdtSync] Failed to connect:', errorMessage(err));
+        }
+      });
     });
 
     return () => {
+      cancelled = true;
       unsubStatus();
       unsubEvicted();
       p.disconnect().catch(() => {});
       providerRef.current = null;
     };
-  }, [siteId, roomId, accessKey, serverUrl, displayName, color, enabled]);
+  }, [siteId, roomId, accessKey, serverUrl, Boolean(displayName), enabled]);
+
+  useEffect(() => {
+    providerRef.current?.setLocalColor(color ?? '#38bdf8');
+  }, [color]);
 
   return {
     status,
