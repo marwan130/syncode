@@ -1,3 +1,5 @@
 <Solution>
   <Project Path="server/Syncode.Server.csproj" />
+  <Project Path="execution-service/Syncode.ExecutionService.csproj" />
+  <Project Path="execution-service.tests/Syncode.ExecutionService.Tests.csproj" />
 </Solution>
