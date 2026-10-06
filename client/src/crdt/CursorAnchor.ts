@@ -3,14 +3,15 @@ import { crdtIdsEqual } from './CrdtId';
 import type { CrdtDocument } from './CrdtDocument';
 
 /**
- * represents a cursor anchored to a crdt character id instead of a numeric line/col
+ * represents a cursor anchored between CRDT characters instead of at a numeric line/column
  *
  * plain line and column numbers shift whenever remote users type or delete text earlier
- * in the document. anchoring the cursor immediately after a specific crdt character id
- * keeps the cursor attached to that character regardless of remote edits.
+ * in the document. Anchoring both sides preserves the same text position through remote edits.
  */
 export interface CursorAnchor {
   afterId: CrdtId | null;
+  /** First character after the cursor, used to preserve right-side affinity. */
+  beforeId?: CrdtId | null;
 }
 
 export interface CursorPosition {
@@ -28,21 +29,18 @@ export function createCursorAnchor(
   doc: CrdtDocument,
   offset: number
 ): CursorAnchor {
-  if (offset <= 0) {
-    return { afterId: null };
-  }
-
   const visibleChars = doc.chars.filter((c) => !c.isDeleted);
-  if (visibleChars.length === 0) {
-    return { afterId: null };
-  }
-
+  let afterId: CrdtId | null = null;
   let textOffset = 0;
   for (const char of visibleChars) {
-    textOffset += char.value.length;
-    if (textOffset >= offset) return { afterId: char.id };
+    const nextOffset = textOffset + char.value.length;
+    if (offset < nextOffset) {
+      return { afterId, beforeId: char.id };
+    }
+    afterId = char.id;
+    textOffset = nextOffset;
   }
-  return { afterId: visibleChars[visibleChars.length - 1].id };
+  return { afterId, beforeId: null };
 }
 
 export function createCursorAnchorFromPosition(
@@ -77,7 +75,31 @@ export function resolveCursorAnchor(
   doc: CrdtDocument,
   anchor: CursorAnchor | null
 ): CursorPosition {
-  if (!anchor || anchor.afterId === null) {
+  if (!anchor) {
+    return { offset: 0, lineNumber: 1, column: 1 };
+  }
+
+  if (anchor.beforeId) {
+    const beforeIndex = doc.chars.findIndex((char) =>
+      crdtIdsEqual(char.id, anchor.beforeId!)
+    );
+    if (beforeIndex !== -1) {
+      let visibleOffset = 0;
+      for (let i = 0; i < doc.chars.length; i++) {
+        const char = doc.chars[i];
+        if (i >= beforeIndex && !char.isDeleted) {
+          return resolveVisibleOffset(doc, visibleOffset);
+        }
+        if (!char.isDeleted) {
+          visibleOffset += doc.chars[i].value.length;
+        }
+      }
+      // If the target and everything after it were deleted, clamp to EOF.
+      return resolveVisibleOffset(doc, visibleOffset);
+    }
+  }
+
+  if (anchor.afterId === null) {
     return { offset: 0, lineNumber: 1, column: 1 };
   }
 
@@ -100,6 +122,13 @@ export function resolveCursorAnchor(
     }
   }
 
+  return resolveVisibleOffset(doc, visibleOffset);
+}
+
+function resolveVisibleOffset(
+  doc: CrdtDocument,
+  visibleOffset: number
+): CursorPosition {
   const text = doc.toVisibleString();
   const clampedOffset = Math.min(visibleOffset, text.length);
 
