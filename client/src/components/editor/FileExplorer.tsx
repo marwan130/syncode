@@ -1,6 +1,31 @@
 import { useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
+import { Icon, addCollection } from '@iconify/react';
 import type { RoomEntry } from '../../providers/SignalRCrdtProvider';
+import vscodeFileIcons from './vscodeFileIcons.json';
+
+addCollection(vscodeFileIcons);
+
+const EXTENSION_ICONS: Record<string, string> = {
+  c: 'c', h: 'c', cc: 'cpp', cpp: 'cpp', cxx: 'cpp', hpp: 'cpp',
+  cs: 'csharp', css: 'css', env: 'dotenv', htm: 'html', html: 'html',
+  java: 'java', js: 'js', cjs: 'js', mjs: 'js', json: 'json', md: 'markdown',
+  py: 'python', pyw: 'python', rs: 'rust', sh: 'shell', bash: 'shell',
+  svg: 'svg', ts: 'typescript', mts: 'typescript', cts: 'typescript',
+  tsx: 'reactjs', jsx: 'reactjs', xml: 'xml', yaml: 'yaml', yml: 'yaml',
+  toml: 'toml', txt: 'text',
+};
+
+function getFileIcon(entry: RoomEntry, expanded: boolean): string {
+  if (entry.isFolder)
+    return `vscode-icons:default-folder${expanded ? '-opened' : ''}`;
+
+  const name = entry.name.toLowerCase();
+  if (name === 'dockerfile') return 'vscode-icons:file-type-docker';
+  if (name === 'package.json') return 'vscode-icons:file-type-npm';
+  const extension = name.split('.').pop() ?? '';
+  return `vscode-icons:file-type-${EXTENSION_ICONS[extension] ?? 'text'}`;
+}
 
 interface FileExplorerProps {
   entries: RoomEntry[];
@@ -68,22 +93,20 @@ export function FileExplorer({
               aria-expanded={entry.isFolder ? isExpanded : undefined}
               title={entry.name}
             >
-              <span className="file-explorer-icon" aria-hidden="true">
-                {entry.isFolder
-                  ? isExpanded
-                    ? '▾'
-                    : '▸'
-                  : entry.name.split('.').pop()?.toUpperCase() || 'FILE'}
-              </span>
-              {entry.name}
+              <Icon
+                className="file-explorer-icon"
+                icon={getFileIcon(entry, isExpanded)}
+                aria-hidden="true"
+              />
+              <span className="file-explorer-name">{entry.name}</span>
             </button>
             <div className="file-explorer-actions">
               {entry.isFolder && (
                 <>
                   <button
                     type="button"
-                    title={`New file in ${entry.name}`}
-                    aria-label={`New file in ${entry.name}`}
+                    title="New file"
+                    aria-label="New file"
                     onClick={() => {
                       setExpandedFolders((current) =>
                         new Set(current).add(entry.id)
@@ -95,8 +118,8 @@ export function FileExplorer({
                   </button>
                   <button
                     type="button"
-                    title={`New folder in ${entry.name}`}
-                    aria-label={`New folder in ${entry.name}`}
+                    title="New folder"
+                    aria-label="New folder"
                     onClick={() => {
                       setExpandedFolders((current) =>
                         new Set(current).add(entry.id)
@@ -166,7 +189,6 @@ export function FileExplorer({
           </button>
         </div>
       </div>
-      <div className="file-explorer-room">ROOM FILES</div>
       <ul>{renderChildren(null)}</ul>
     </aside>
   );
