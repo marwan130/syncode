@@ -3,18 +3,17 @@ import { v4 as uuidv4 } from 'uuid';
 const STORAGE_KEYS = {
   DISPLAY_NAME: 'syncode_display_name',
   USER_COLOR: 'syncode_user_color',
-  SITE_ID: 'syncode_site_id',
 } as const;
 
 export const CURSOR_COLORS = [
-  '#f97316', // orange
-  '#22d3ee', // cyan
-  '#a78bfa', // violet
-  '#4ade80', // green
-  '#f472b6', // pink
-  '#facc15', // yellow
-  '#60a5fa', // blue
-  '#fb7185', // rose
+  '#f97316',
+  '#22d3ee',
+  '#a78bfa',
+  '#4ade80',
+  '#f472b6',
+  '#facc15',
+  '#60a5fa',
+  '#fb7185',
 ];
 
 export function getRandomColor(): string {
@@ -22,19 +21,23 @@ export function getRandomColor(): string {
   return CURSOR_COLORS[index];
 }
 
-export function getStoredDisplayName(): string | null {
+export function getStoredDisplayName(roomId: string): string | null {
   try {
-    return localStorage.getItem(STORAGE_KEYS.DISPLAY_NAME);
+    return sessionStorage.getItem(`${STORAGE_KEYS.DISPLAY_NAME}:${roomId}`);
   } catch {
     return null;
   }
 }
 
-export function setStoredDisplayName(name: string): void {
+export function setStoredDisplayName(roomId: string, name: string): boolean {
   try {
-    localStorage.setItem(STORAGE_KEYS.DISPLAY_NAME, name.trim());
+    const key = `${STORAGE_KEYS.DISPLAY_NAME}:${roomId}`;
+    if (sessionStorage.getItem(key)) return false;
+    sessionStorage.setItem(key, name.trim());
+    return true;
   } catch (err) {
     void err;
+    return false;
   }
 }
 
@@ -60,17 +63,8 @@ export function setStoredColor(color: string): void {
   }
 }
 
-export function getOrCreateSiteId(): string {
-  try {
-    localStorage.removeItem(STORAGE_KEYS.SITE_ID);
-
-    const existing = sessionStorage.getItem(STORAGE_KEYS.SITE_ID);
-    if (existing) return existing;
-
-    const newId = uuidv4();
-    sessionStorage.setItem(STORAGE_KEYS.SITE_ID, newId);
-    return newId;
-  } catch {
-    return uuidv4();
-  }
+export function createSiteId(): string {
+  // A CRDT site ID must be unique per editor tab. sessionStorage can be copied
+  // when a tab is duplicated, causing two editors to generate colliding IDs.
+  return uuidv4();
 }
