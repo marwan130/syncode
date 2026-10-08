@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import type * as monaco from 'monaco-editor';
 import type {
   ConnectionStatus,
@@ -16,14 +16,17 @@ interface RoomHeaderProps {
   status: ConnectionStatus;
   localName: string;
   localColor: string;
+  onJoinProfile: (info: { displayName: string; color: string }) => void;
+  onColorChange: (color: string) => void;
   peers: Map<string, AwarenessState>;
-  onEditProfile: () => void;
   editor: monaco.editor.IStandaloneCodeEditor | null;
   monaco: Monaco | null;
   explorerOpen: boolean;
   onToggleExplorer: () => void;
   isChatOpen: boolean;
   onToggleChat: () => void;
+  showPreviewButton: boolean;
+  onShowPreview: () => void;
 }
 
 const STATUS_COLORS: Record<ConnectionStatus, string> = {
@@ -50,7 +53,6 @@ function StatusDot({ status }: { status: ConnectionStatus }) {
           height: 7,
           borderRadius: '50%',
           background: color,
-          boxShadow: `0 0 0 2px ${color}33`,
         }}
       />
       <span
@@ -71,20 +73,25 @@ export function RoomHeader({
   status,
   localName,
   localColor,
+  onJoinProfile,
+  onColorChange,
   peers,
-  onEditProfile,
   editor,
   monaco,
   explorerOpen,
   onToggleExplorer,
   isChatOpen,
   onToggleChat,
+  showPreviewButton,
+  onShowPreview,
 }: RoomHeaderProps) {
   const [isJoinModalOpen, setJoinModalOpen] = useState(false);
+  const joinAnchorRef = useRef<HTMLDivElement>(null);
 
   return (
     <>
       <header
+        className="room-header"
         style={{
           position: 'relative',
           display: 'flex',
@@ -98,7 +105,7 @@ export function RoomHeader({
           userSelect: 'none',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div className="room-header-left">
           <button
             className="syncode-brand-toggle"
             type="button"
@@ -110,6 +117,14 @@ export function RoomHeader({
             onClick={onToggleExplorer}
           >
             syncode
+          </button>
+          <button
+            className={`chat-toggle${isChatOpen ? ' is-active' : ''}`}
+            type="button"
+            aria-pressed={isChatOpen}
+            onClick={onToggleChat}
+          >
+            Chat
           </button>
         </div>
 
@@ -125,81 +140,68 @@ export function RoomHeader({
           <StatusDot status={status} />
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div className="room-header-right">
           <ThemePicker monaco={monaco} />
 
           <SearchReplace editor={editor} />
 
-          <button
-            className={`chat-toggle${isChatOpen ? ' is-active' : ''}`}
-            type="button"
-            aria-pressed={isChatOpen}
-            onClick={onToggleChat}
-          >
-            Chat
-          </button>
-
-          <button
-            onClick={() => setJoinModalOpen(true)}
-            title="Join another room with a link"
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 5,
-              padding: '4px 9px',
-              fontSize: 12,
-              fontWeight: 500,
-              fontFamily: 'system-ui, sans-serif',
-              color: 'var(--text-muted)',
-              background: 'var(--control-bg)',
-              border: '1px solid var(--border)',
-              borderRadius: 6,
-              cursor: 'pointer',
-              outline: 'none',
-              transition: 'all 0.15s ease',
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.color = 'var(--text-h)';
-              e.currentTarget.style.background = 'var(--surface-bg)';
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.color = 'var(--text-muted)';
-              e.currentTarget.style.background = 'var(--control-bg)';
-            }}
-          >
-            <svg
-              width="12"
-              height="12"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
+          {showPreviewButton && (
+            <button
+              className="preview-view-button"
+              type="button"
+              onClick={onShowPreview}
             >
-              <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
-              <polyline points="10 17 15 12 10 7" />
-              <line x1="15" y1="12" x2="3" y2="12" />
-            </svg>
-            <span>Join</span>
-          </button>
+              View
+            </button>
+          )}
+
+          <div className="room-join-anchor" ref={joinAnchorRef}>
+            <button
+              className="room-join-toggle"
+              type="button"
+              onClick={() => setJoinModalOpen((open) => !open)}
+              title="Join another room with a link"
+              aria-expanded={isJoinModalOpen}
+            >
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
+                <polyline points="10 17 15 12 10 7" />
+                <line x1="15" y1="12" x2="3" y2="12" />
+              </svg>
+              <span>Join</span>
+            </button>
+            <JoinRoomModal
+              isOpen={isJoinModalOpen}
+              currentRoomId={roomId}
+              currentName={localName}
+              currentColor={localColor}
+              containerRef={joinAnchorRef}
+              onClose={() => setJoinModalOpen(false)}
+            />
+          </div>
 
           <ShareLinkButton />
 
           <ParticipantList
+            roomId={roomId}
             localName={localName}
             localColor={localColor}
             peers={peers}
-            onEditProfile={onEditProfile}
+            onJoinProfile={onJoinProfile}
+            onColorChange={onColorChange}
           />
         </div>
       </header>
 
-      <JoinRoomModal
-        isOpen={isJoinModalOpen}
-        currentRoomId={roomId}
-        onClose={() => setJoinModalOpen(false)}
-      />
     </>
   );
 }

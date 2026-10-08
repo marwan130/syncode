@@ -1,100 +1,75 @@
+import { useEffect, useRef, useState } from 'react';
 import type { AwarenessState } from '../../providers/SignalRCrdtProvider';
+import { RoomJoin } from './RoomJoin';
+import { Avatar } from './Avatar';
 
 interface ParticipantListProps {
+  roomId: string;
   localName: string;
   localColor: string;
   peers: Map<string, AwarenessState>;
-  onEditProfile: () => void;
+  onJoinProfile: (info: { displayName: string; color: string }) => void;
+  onColorChange: (color: string) => void;
 }
 
-function getInitials(name: string): string {
-  const parts = name.trim().split(/\s+/);
-  if (parts.length >= 2) {
-    return (parts[0][0] + parts[1][0]).toUpperCase();
-  }
-  return name.slice(0, 2).toUpperCase();
-}
-
-function Avatar({
-  name,
-  color,
-  title,
-  cursor = 'default',
-}: {
-  name: string;
-  color: string;
-  title?: string;
-  cursor?: 'default' | 'pointer';
-}) {
-  return (
-    <div
-      title={title ?? name}
-      style={{
-        width: 26,
-        height: 26,
-        borderRadius: '50%',
-        background: color,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        color: '#fff',
-        fontSize: 10,
-        fontWeight: 700,
-        fontFamily: 'system-ui, sans-serif',
-        flexShrink: 0,
-        border: '2px solid rgba(255,255,255,0.12)',
-        cursor,
-        userSelect: 'none',
-        letterSpacing: '0.5px',
-      }}
-    >
-      {getInitials(name)}
-    </div>
-  );
-}
-
-// renders a horizontal row of colored avatar circles, one per connected peer
 export function ParticipantList({
+  roomId,
   localName,
   localColor,
   peers,
-  onEditProfile,
+  onJoinProfile,
+  onColorChange,
 }: ParticipantListProps) {
+  const [isProfileOpen, setProfileOpen] = useState(!localName);
+  const profileAnchorRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!localName) setProfileOpen(true);
+  }, [localName, roomId]);
+
+  useEffect(() => {
+    if (!isProfileOpen) return;
+    const dismissOnOutsidePress = (event: PointerEvent) => {
+      if (!profileAnchorRef.current?.contains(event.target as Node))
+        setProfileOpen(false);
+    };
+    document.addEventListener('pointerdown', dismissOnOutsidePress);
+    return () =>
+      document.removeEventListener('pointerdown', dismissOnOutsidePress);
+  }, [isProfileOpen]);
+
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-      {/* local user always first */}
-      <button
-        type="button"
-        onClick={onEditProfile}
-        title="Edit your display name and avatar color"
-        aria-label="Edit your display name and avatar color"
-        onMouseEnter={(e) => {
-          e.currentTarget.style.transform = 'scale(1.12)';
-          e.currentTarget.style.boxShadow = '0 0 0 2px rgba(255,255,255,0.55)';
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.transform = 'scale(1)';
-          e.currentTarget.style.boxShadow = 'none';
-        }}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          padding: 0,
-          border: 0,
-          borderRadius: '50%',
-          background: 'transparent',
-          cursor: 'pointer',
-          transition: 'transform 0.12s ease, box-shadow 0.12s ease',
-        }}
-      >
-        <Avatar
-          name={localName}
-          color={localColor}
-          title={`${localName} (you)`}
-          cursor="pointer"
-        />
-      </button>
+      <div className="profile-anchor" ref={profileAnchorRef}>
+        <button
+          type="button"
+          onClick={() => setProfileOpen((open) => !open)}
+          title="Edit your avatar color"
+          aria-label="Edit your name and avatar color"
+          aria-expanded={isProfileOpen}
+          aria-haspopup="dialog"
+          className="profile-avatar-button"
+        >
+          <Avatar
+            name={localName || '?'}
+            color={localColor}
+            title={localName ? `${localName} (you)` : 'Choose your name'}
+            cursor="pointer"
+          />
+        </button>
+        {isProfileOpen && (
+          <RoomJoin
+            roomId={roomId}
+            defaultName={localName}
+            onJoin={(info) => {
+              onJoinProfile(info);
+              setProfileOpen(false);
+            }}
+            onColorChange={onColorChange}
+            onClose={() => setProfileOpen(false)}
+          />
+        )}
+      </div>
       {Array.from(peers.entries()).map(([peerId, peer]) => (
         <Avatar key={peerId} name={peer.name} color={peer.color} />
       ))}

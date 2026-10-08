@@ -25,36 +25,7 @@ export function ShareLinkButton() {
     <button
       onClick={handleCopy}
       title="Copy room invite link"
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 6,
-        padding: '4px 10px',
-        fontSize: 12,
-        fontWeight: 500,
-        fontFamily: 'system-ui, sans-serif',
-        color: copied ? '#4ade80' : 'var(--text-muted)',
-        background: copied ? 'rgba(74, 222, 128, 0.12)' : 'var(--control-bg)',
-        border: `1px solid ${copied ? '#4ade8055' : 'var(--border)'}`,
-        borderRadius: 6,
-        cursor: 'pointer',
-        transition: 'all 0.15s ease',
-        outline: 'none',
-      }}
-      onMouseEnter={(e) => {
-        if (!copied) {
-          e.currentTarget.style.background = 'var(--surface-bg)';
-          e.currentTarget.style.borderColor = 'var(--border)';
-          e.currentTarget.style.color = 'var(--text-h)';
-        }
-      }}
-      onMouseLeave={(e) => {
-        if (!copied) {
-          e.currentTarget.style.background = 'var(--control-bg)';
-          e.currentTarget.style.borderColor = 'var(--border)';
-          e.currentTarget.style.color = 'var(--text-muted)';
-        }
-      }}
+      className={`room-join-toggle share-link-button${copied ? ' is-copied' : ''}`}
     >
       {copied ? (
         <>

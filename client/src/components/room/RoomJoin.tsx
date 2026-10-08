@@ -1,264 +1,194 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   CURSOR_COLORS,
-  setStoredDisplayName,
-  setStoredColor,
   getStoredColor,
+  getStoredDisplayName,
+  setStoredColor,
+  setStoredDisplayName,
 } from '../../utils/userStorage';
 
+export interface RoomProfileForm {
+  displayName: string;
+  color: string;
+  inviteLink: string;
+}
+
 interface RoomJoinProps {
-  onJoin: (info: { displayName: string; color: string }) => void;
+  roomId?: string;
   defaultName?: string;
-  onCancel?: () => void;
+  mode?: 'profile' | 'create' | 'join';
+  presentation?: 'popover' | 'dialog';
+  currentRoomId?: string;
+  onJoin?: (info: { displayName: string; color: string }) => void;
+  onColorChange?: (color: string) => void;
+  onStart?: (info: RoomProfileForm) => void;
+  onClose: () => void;
 }
 
 export function RoomJoin({
-  onJoin,
+  roomId,
   defaultName = '',
-  onCancel,
+  mode = 'profile',
+  presentation = 'popover',
+  currentRoomId,
+  onJoin,
+  onColorChange,
+  onStart,
+  onClose,
 }: RoomJoinProps) {
   const [name, setName] = useState(defaultName);
-  const [selectedColor, setSelectedColor] = useState<string>(() =>
-    getStoredColor()
-  );
+  const [selectedColor, setSelectedColor] = useState(getStoredColor);
+  const [inviteLink, setInviteLink] = useState('');
   const [error, setError] = useState('');
+  let linkedRoomId = '';
+  if (mode === 'join' && inviteLink) {
+    try {
+      linkedRoomId = new URL(
+        inviteLink.startsWith('/') || inviteLink.startsWith('http')
+          ? inviteLink
+          : `/room/${inviteLink}`,
+        window.location.origin
+      ).pathname.match(/\/room\/([a-zA-Z0-9_-]+)\/?$/)?.[1] ?? '';
+    } catch {
+      linkedRoomId = '';
+    }
+  }
+  const lockedName =
+    mode === 'profile'
+      ? defaultName
+      : linkedRoomId
+        ? (getStoredDisplayName(linkedRoomId) ?? '')
+        : '';
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const trimmed = name.trim();
-    if (!trimmed) {
-      setError('Please enter a display name to continue');
+  useEffect(() => {
+    setName(defaultName);
+    setError('');
+  }, [defaultName, roomId]);
+
+  const chooseColor = (color: string) => {
+    setSelectedColor(color);
+    setStoredColor(color);
+    onColorChange?.(color);
+  };
+
+  const handleSubmit = (event: React.FormEvent) => {
+    event.preventDefault();
+    const trimmedName = (lockedName || name).trim();
+    if (!trimmedName) {
+      setError('Enter a name to continue.');
       return;
     }
 
-    setStoredDisplayName(trimmed);
-    setStoredColor(selectedColor);
-    onJoin({ displayName: trimmed, color: selectedColor });
+    const info = { displayName: trimmedName, color: selectedColor };
+    if (mode === 'profile' && roomId) {
+      const fixedName = getStoredDisplayName(roomId) ?? trimmedName;
+      setStoredDisplayName(roomId, fixedName);
+      onJoin?.({ ...info, displayName: fixedName });
+      onClose();
+      return;
+    }
+
+    if (mode === 'join' && !inviteLink.trim()) {
+      setError('Paste a room invite link.');
+      return;
+    }
+    if (mode === 'join') {
+      try {
+        const invite = new URL(
+          inviteLink.startsWith('/') || inviteLink.startsWith('http')
+            ? inviteLink
+            : `/room/${inviteLink}`,
+          window.location.origin
+        );
+        const linkedRoom = invite.pathname.match(
+          /\/room\/([a-zA-Z0-9_-]+)\/?$/
+        )?.[1];
+        const accessKey =
+          new URLSearchParams(invite.hash.slice(1)).get('key') ?? '';
+        if (!linkedRoom || !/^[0-9a-f]{64}$/i.test(accessKey)) {
+          setError('Use a complete room invite link.');
+          return;
+        }
+        if (linkedRoom === currentRoomId) {
+          setError('You are already in this room.');
+          return;
+        }
+      } catch {
+        setError('Enter a valid room invite link.');
+        return;
+      }
+    }
+    onStart?.({ ...info, inviteLink: inviteLink.trim() });
   };
 
-  return (
-    <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 9999,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        background: 'var(--app-bg)',
-        padding: 16,
-      }}
+  const content = (
+    <section
+      className={`profile-popover${presentation === 'dialog' ? ' profile-dialog' : ''}`}
+      role="dialog"
+      aria-label={mode === 'join' ? 'Join a room' : 'Set your room profile'}
     >
-      <div
-        style={{
-          width: '100%',
-          maxWidth: 420,
-          background: 'var(--surface-bg)',
-          border: '1px solid var(--border)',
-          borderRadius: 12,
-          padding: 28,
-          boxShadow:
-            '0 20px 40px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05)',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 20,
-        }}
-      >
-        <div style={{ textAlign: 'center' }}>
-          <div
-            style={{
-              fontSize: 22,
-              fontWeight: 700,
-              fontFamily: 'system-ui, sans-serif',
-              background: 'linear-gradient(135deg, #a5f3fc 0%, #38bdf8 100%)',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
-              letterSpacing: '-0.5px',
-              marginBottom: 6,
+      <form onSubmit={handleSubmit}>
+        <input
+          id="room-display-name"
+          className="profile-name-input"
+          type="text"
+          maxLength={24}
+          autoFocus={!defaultName}
+          readOnly={Boolean(lockedName)}
+          value={lockedName || name}
+          onChange={(event) => {
+            setName(event.target.value);
+            setError('');
+          }}
+          placeholder="Enter a name"
+          aria-label="Display name"
+        />
+        {mode === 'join' && (
+          <input
+            className="profile-name-input profile-link-input"
+            type="text"
+            autoFocus
+            placeholder="Paste a room invite link"
+            value={inviteLink}
+            onChange={(event) => {
+              setInviteLink(event.target.value);
+              setError('');
             }}
-          >
-            syncode
-          </div>
-          <p
-            style={{
-              margin: 0,
-              fontSize: 13,
-              color: 'var(--text-muted)',
-              fontFamily: 'system-ui, sans-serif',
-            }}
-          >
-            Choose your display name and avatar color
-          </p>
+            aria-label="Room invite link"
+          />
+        )}
+        {error && <span className="profile-error">{error}</span>}
+
+        <div className="profile-color-options" aria-label="Avatar color">
+          {CURSOR_COLORS.map((color) => (
+            <button
+              key={color}
+              type="button"
+              className={`profile-color-option${selectedColor === color ? ' is-selected' : ''}`}
+              style={{ backgroundColor: color }}
+              aria-label={`Choose ${color} avatar color`}
+              aria-pressed={selectedColor === color}
+              onClick={() => chooseColor(color)}
+            />
+          ))}
         </div>
 
-        <form
-          onSubmit={handleSubmit}
-          style={{ display: 'flex', flexDirection: 'column', gap: 18 }}
-        >
-          <div>
-            <label
-              htmlFor="display-name-input"
-              style={{
-                display: 'block',
-                fontSize: 12,
-                fontWeight: 600,
-                color: 'var(--text)',
-                fontFamily: 'system-ui, sans-serif',
-                marginBottom: 6,
-              }}
-            >
-              Display Name
-            </label>
-            <input
-              id="display-name-input"
-              type="text"
-              autoFocus
-              maxLength={24}
-              value={name}
-              onChange={(e) => {
-                setName(e.target.value);
-                if (error) setError('');
-              }}
-              placeholder="e.g. John"
-              style={{
-                width: '100%',
-                boxSizing: 'border-box',
-                padding: '10px 12px',
-                fontSize: 14,
-                fontFamily: 'system-ui, sans-serif',
-                background: 'var(--control-bg)',
-                color: 'var(--text-h)',
-                border: error
-                  ? '1px solid var(--danger)'
-                  : '1px solid var(--border)',
-                borderRadius: 6,
-                outline: 'none',
-                transition: 'border-color 0.15s ease, box-shadow 0.15s ease',
-              }}
-              onFocus={(e) => {
-                if (!error) {
-                  e.currentTarget.style.borderColor = 'var(--accent)';
-                  e.currentTarget.style.boxShadow =
-                    '0 0 0 3px rgba(56, 189, 248, 0.25)';
-                }
-              }}
-              onBlur={(e) => {
-                if (!error) {
-                  e.currentTarget.style.borderColor = '#383842';
-                  e.currentTarget.style.boxShadow = 'none';
-                }
-              }}
-            />
-            {error && (
-              <span
-                style={{
-                  display: 'block',
-                  fontSize: 12,
-                  color: 'var(--danger)',
-                  marginTop: 4,
-                  fontFamily: 'system-ui, sans-serif',
-                }}
-              >
-                {error}
-              </span>
-            )}
-          </div>
+        <button className="profile-join-button" type="submit">
+          {mode === 'profile'
+            ? 'Save changes'
+            : mode === 'create'
+              ? 'Create room'
+              : 'Join room'}
+        </button>
+      </form>
+    </section>
+  );
 
-          <div>
-            <label
-              style={{
-                display: 'block',
-                fontSize: 12,
-                fontWeight: 500,
-                color: 'var(--text-muted)',
-                fontFamily: 'system-ui, sans-serif',
-                marginBottom: 8,
-              }}
-            >
-              Choose avatar and cursor color
-            </label>
-            <div
-              style={{
-                display: 'flex',
-                gap: 8,
-                flexWrap: 'wrap',
-              }}
-            >
-              {CURSOR_COLORS.map((color) => {
-                const isSelected = selectedColor === color;
-                return (
-                  <button
-                    key={color}
-                    type="button"
-                    onClick={() => setSelectedColor(color)}
-                    style={{
-                      width: 26,
-                      height: 26,
-                      borderRadius: '50%',
-                      background: color,
-                      border: isSelected
-                        ? '2px solid #ffffff'
-                        : '2px solid transparent',
-                      outline: isSelected ? `2px solid ${color}` : 'none',
-                      cursor: 'pointer',
-                      padding: 0,
-                      transition: 'transform 0.1s ease',
-                      transform: isSelected ? 'scale(1.15)' : 'scale(1)',
-                    }}
-                  />
-                );
-              })}
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
-            {onCancel && (
-              <button
-                type="button"
-                onClick={onCancel}
-                style={{
-                  flex: 1,
-                  padding: '10px 16px',
-                  fontSize: 14,
-                  fontFamily: 'system-ui, sans-serif',
-                  color: 'var(--text-muted)',
-                  background: 'transparent',
-                  border: '1px solid var(--border)',
-                  borderRadius: 6,
-                  cursor: 'pointer',
-                }}
-              >
-                Cancel
-              </button>
-            )}
-            <button
-              type="submit"
-              style={{
-                flex: 1,
-                padding: '10px 16px',
-                fontSize: 14,
-                fontWeight: 600,
-                fontFamily: 'system-ui, sans-serif',
-                color: 'var(--button-fg)',
-                background: 'var(--button-bg)',
-                border: 'none',
-                borderRadius: 6,
-                cursor: 'pointer',
-                boxShadow: '0 2px 10px rgba(14, 165, 233, 0.4)',
-                transition: 'opacity 0.15s ease, transform 0.1s ease',
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.opacity = '0.92';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.opacity = '1';
-              }}
-            >
-              {onCancel ? 'Save Profile' : 'Join Room'}
-            </button>
-          </div>
-        </form>
-      </div>
+  return presentation === 'dialog' ? (
+    <div className="profile-dialog-backdrop" onMouseDown={onClose}>
+      <div onMouseDown={(event) => event.stopPropagation()}>{content}</div>
     </div>
+  ) : (
+    content
   );
 }
