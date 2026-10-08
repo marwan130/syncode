@@ -6,7 +6,7 @@ import { MonacoCrdtBinding } from '../../bindings/MonacoCrdtBinding';
 import { useAwareness } from '../../hooks/useAwareness';
 import { useCrdtSync } from '../../hooks/useCrdtSync';
 import {
-  getOrCreateSiteId,
+  createSiteId,
   getStoredColor,
   getStoredDisplayName,
 } from '../../utils/userStorage';
@@ -19,15 +19,53 @@ import {
   type LanguageMode,
 } from './languageModes';
 import { RoomHeader } from '../room/RoomHeader';
-import { RoomJoin } from '../room/RoomJoin';
 import { useChat } from '../../hooks/useChat';
 import { ChatPanel } from '../chat/ChatPanel';
 import { FileExplorer } from './FileExplorer';
+import { ResizeHandle } from './ResizeHandle';
 import type { RoomEntry } from '../../providers/SignalRCrdtProvider';
 
 interface EditorProps {
   roomId?: string;
   accessKey: string;
+}
+
+const PREVIEW_WIDTH_KEY = 'syncode_live_preview_width';
+const PREVIEW_CLOSE_THRESHOLD = 24;
+
+function getStoredActiveFileId(roomId: string): string | null {
+  try {
+    return sessionStorage.getItem(`syncode_active_file:${roomId}`);
+  } catch {
+    return null;
+  }
+}
+
+function storeActiveFileId(roomId: string, fileId: string): void {
+  try {
+    sessionStorage.setItem(`syncode_active_file:${roomId}`, fileId);
+  } catch {
+    // Keep the selected file for the current session when storage is available.
+  }
+}
+
+function getStoredPreviewWidth(): number {
+  try {
+    const width = Number(localStorage.getItem(PREVIEW_WIDTH_KEY));
+    return Number.isFinite(width) && width > 0
+      ? Math.max(120, Math.min(1000, width))
+      : 420;
+  } catch {
+    return 420;
+  }
+}
+
+function storePreviewWidth(width: number): void {
+  try {
+    localStorage.setItem(PREVIEW_WIDTH_KEY, String(width));
+  } catch {
+    // The preview still works for this session if storage is unavailable.
+  }
 }
 
 function getEntryPath(entry: RoomEntry, entries: RoomEntry[]): string {
@@ -49,13 +87,19 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
   const navigate = useNavigate();
   const roomId = propRoomId ?? params.roomId ?? '';
 
-  const [displayName, setDisplayName] = useState(getStoredDisplayName);
+  const [profile, setProfile] = useState(() => ({
+    roomId,
+    displayName: getStoredDisplayName(roomId) ?? '',
+  }));
+  const displayName =
+    profile.roomId === roomId
+      ? profile.displayName
+      : (getStoredDisplayName(roomId) ?? '');
   const [localColor, setLocalColor] = useState(getStoredColor);
-  const [isProfileOpen, setProfileOpen] = useState(false);
   const [entries, setEntries] = useState<RoomEntry[]>([]);
   const [activeFileId, setActiveFileId] = useState('main.cpp');
   const [isExplorerOpen, setExplorerOpen] = useState(true);
-  const [siteId] = useState(getOrCreateSiteId);
+  const [siteId] = useState(createSiteId);
   const [monacoApi, setMonacoApi] = useState<Monaco | null>(null);
   const [monacoEditor, setMonacoEditor] =
     useState<monaco.editor.IStandaloneCodeEditor | null>(null);
@@ -81,6 +125,15 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
     if (!provider) return;
     const offFiles = provider.onFilesChange((next) => {
       setEntries(next);
+      const preferredFileId = getStoredActiveFileId(roomId);
+      if (
+        preferredFileId &&
+        next.some((entry) => entry.id === preferredFileId && !entry.isFolder)
+      ) {
+        provider.setActiveFile(preferredFileId);
+        setActiveFileId(preferredFileId);
+        return;
+      }
       if (
         next.length &&
         !next.some((entry) => entry.id === activeFileId && !entry.isFolder)
@@ -89,15 +142,19 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
           next.find((entry) => !entry.isFolder)?.id ?? 'main.cpp'
         );
     });
-    const offActive = provider.onActiveFileChange((file) =>
-      setActiveFileId(file.id)
-    );
+    const offActive = provider.onActiveFileChange((file) => {
+      setActiveFileId(file.id);
+      storeActiveFileId(roomId, file.id);
+    });
     return () => {
       offFiles();
       offActive();
     };
-  }, [providerRef, status, activeFileId]);
+  }, [providerRef, roomId, status, activeFileId]);
   const [isChatOpen, setChatOpen] = useState(false);
+  const [chatWidth, setChatWidth] = useState(300);
+  const [previewWidth, setPreviewWidth] = useState(getStoredPreviewWidth);
+  const [isPreviewOpen, setPreviewOpen] = useState(true);
   const { messages, sendMessage } = useChat({ providerRef, status });
 
   useEffect(() => {
@@ -115,6 +172,7 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
     providerRef,
     status,
     enabled: isPreviewLanguage(language),
+    activeFileId,
   });
 
   useEffect(() => {
@@ -156,31 +214,25 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
 
   return (
     <div className="room-workspace">
-      {(!displayName || isProfileOpen) && (
-        <RoomJoin
-          defaultName={displayName || ''}
-          onCancel={displayName ? () => setProfileOpen(false) : undefined}
-          onJoin={({ displayName: name, color }) => {
-            setDisplayName(name);
-            setLocalColor(color);
-            setProfileOpen(false);
-          }}
-        />
-      )}
-
       <RoomHeader
         roomId={roomId}
         status={status}
-        localName={displayName || 'Joining...'}
+        localName={displayName}
         localColor={localColor}
+        onJoinProfile={({ displayName: name, color }) => {
+          setProfile({ roomId, displayName: name });
+          setLocalColor(color);
+        }}
+        onColorChange={setLocalColor}
         peers={peers}
-        onEditProfile={() => setProfileOpen(true)}
         editor={monacoEditor}
         monaco={monacoApi}
         explorerOpen={isExplorerOpen}
         onToggleExplorer={() => setExplorerOpen((open) => !open)}
         isChatOpen={isChatOpen}
         onToggleChat={() => setChatOpen((open) => !open)}
+        showPreviewButton={isPreviewLanguage(language)}
+        onShowPreview={() => setPreviewOpen((open) => !open)}
       />
 
       <div className="room-main">
@@ -210,6 +262,22 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
             }}
           />
         )}
+        {isChatOpen && (
+          <>
+            <ChatPanel
+              messages={messages}
+              onSendMessage={sendMessage}
+              disabled={status !== 'connected'}
+              style={{ flexBasis: chatWidth }}
+            />
+            <ResizeHandle
+              label="Resize chat panel"
+              onResize={(delta) =>
+                setChatWidth((width) => Math.max(200, Math.min(600, width + delta)))
+              }
+            />
+          </>
+        )}
         <div
           className={`room-editor${isPreviewLanguage(language) ? ' has-live-preview' : ''}`}
         >
@@ -234,25 +302,35 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
                 peers={peers}
                 providerRef={providerRef}
                 status={status}
+                fileId={activeFileId}
               />
             )}
           </div>
-          {isPreviewLanguage(language) && (
-            <LivePreview
-              source={previewSource}
-              language={language}
-              monaco={monacoApi}
-              editor={monacoEditor}
-            />
+          {isPreviewLanguage(language) && isPreviewOpen && (
+            <>
+              <ResizeHandle
+                label="Resize live preview"
+                reverse
+                onResize={(delta) => {
+                  const nextWidth = Math.min(1000, previewWidth + delta);
+                  if (nextWidth <= PREVIEW_CLOSE_THRESHOLD) {
+                    setPreviewOpen(false);
+                    return;
+                  }
+                  setPreviewWidth(nextWidth);
+                  storePreviewWidth(nextWidth);
+                }}
+              />
+              <LivePreview
+                project={previewSource}
+                language={language}
+                monaco={monacoApi}
+                editor={monacoEditor}
+                style={{ flex: `0 0 ${previewWidth}px` }}
+              />
+            </>
           )}
         </div>
-        {isChatOpen && (
-          <ChatPanel
-            messages={messages}
-            onSendMessage={sendMessage}
-            disabled={status !== 'connected'}
-          />
-        )}
       </div>
     </div>
   );
