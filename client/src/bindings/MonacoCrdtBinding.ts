@@ -20,6 +20,7 @@ export class MonacoCrdtBinding {
   private editor: monaco.editor.IStandaloneCodeEditor;
   private provider: SignalRCrdtProvider;
   private isApplyingRemote = false;
+  private isApplyingLocal = false;
   private disposables: monaco.IDisposable[] = [];
   private localCursorAnchor: CursorAnchor | null = null;
   private cursorListeners: Set<(anchor: CursorAnchor | null) => void> =
@@ -56,12 +57,17 @@ export class MonacoCrdtBinding {
           (a, b) => b.rangeOffset - a.rangeOffset
         );
 
-        for (const change of changes) {
-          this.applyLocalChange(
-            change.rangeOffset,
-            change.rangeLength,
-            change.text
-          );
+        this.isApplyingLocal = true;
+        try {
+          for (const change of changes) {
+            this.applyLocalChange(
+              change.rangeOffset,
+              change.rangeLength,
+              change.text
+            );
+          }
+        } finally {
+          this.isApplyingLocal = false;
         }
 
         this.updateLocalCursorAnchor();
@@ -133,7 +139,7 @@ export class MonacoCrdtBinding {
    */
   private registerRemoteChangeHandler(): void {
     const unsubscribe = this.provider.onDocumentChange(() => {
-      if (this.isApplyingRemote) return;
+      if (this.isApplyingRemote || this.isApplyingLocal) return;
 
       const newText = this.provider.doc.toVisibleString();
       const model = this.editor.getModel();

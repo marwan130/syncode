@@ -13,6 +13,7 @@ interface CursorsProps {
   peers: Map<string, AwarenessState>;
   providerRef: RefObject<SignalRCrdtProvider | null>;
   status: ConnectionStatus;
+  fileId: string;
 }
 
 interface RenderedCursor {
@@ -31,16 +32,16 @@ interface RenderedCursor {
  *
  * re-runs whenever the document changes, peers change, or the editor scrolls.
  */
-export function Cursors({ editor, peers, providerRef, status }: CursorsProps) {
+export function Cursors({ editor, peers, providerRef, status, fileId }: CursorsProps) {
   const [cursors, setCursors] = useState<RenderedCursor[]>([]);
 
   useEffect(() => {
     const provider = providerRef.current;
     if (!provider) return;
-    const doc = provider.doc;
-
+    const activeProvider = provider;
     function recompute() {
       const next: RenderedCursor[] = [];
+      const doc = activeProvider.doc;
 
       for (const [peerId, state] of peers) {
         if (!state.cursor) continue;
@@ -72,13 +73,13 @@ export function Cursors({ editor, peers, providerRef, status }: CursorsProps) {
       editor.onDidScrollChange(recompute),
       editor.onDidLayoutChange(recompute),
     ];
-    const unsubscribeDocument = provider.onDocumentChange(recompute);
+    const unsubscribeDocument = activeProvider.onDocumentChange(recompute);
 
     return () => {
       disposables.forEach((d) => d.dispose());
       unsubscribeDocument();
     };
-  }, [editor, peers, providerRef, status]);
+  }, [editor, fileId, peers, providerRef, status]);
 
   if (cursors.length === 0) return null;
 
