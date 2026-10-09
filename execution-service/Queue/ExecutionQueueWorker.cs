@@ -55,11 +55,22 @@ public sealed class ExecutionQueueWorker : BackgroundService
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
+                if (job is not null)
+                {
+                    try
+                    {
+                        await _queue.MarkCancelledAsync(job);
+                    }
+                    catch (Exception exception)
+                    {
+                        _logger.LogError(exception, "Could not mark execution {ExecutionId} as cancelled", job.Id);
+                    }
+                }
                 break;
             }
             catch (Exception exception)
             {
-                _logger.LogError(exception, "Execution worker {WorkerNumber} failed while processing a job", workerNumber);
+                _logger.LogError(exception, "Execution worker {WorkerNumber} failed on job {ExecutionId}", workerNumber, job?.Id ?? "unknown");
                 if (job is not null)
                 {
                     try
