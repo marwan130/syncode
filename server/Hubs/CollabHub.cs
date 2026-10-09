@@ -115,9 +115,13 @@ public class CollabHub : Hub
     public async Task SendFileSnapshotToPeer(string roomId, string fileId, string targetConnectionId, string snapshotJson)
     {
         await EnsureFileParticipantAsync(roomId, fileId);
+        if (string.IsNullOrEmpty(snapshotJson) || snapshotJson.Length > 5_000_000)
+            return;
         if (await _store.GetConnectionRoomAsync(targetConnectionId) != roomId ||
             !await _store.IsParticipantAsync(roomId, targetConnectionId))
-            throw new HubException("Snapshot target is not a participant in this room.");
+        {
+            return;
+        }
         await _store.SaveFileSnapshotAsync(roomId, fileId, snapshotJson);
         await Clients.Client(targetConnectionId).SendAsync("LoadFileSnapshot", fileId, snapshotJson);
     }
