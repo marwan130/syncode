@@ -13,9 +13,8 @@ const buttonStyle: CSSProperties = {
   height: 28,
   padding: 0,
   color: 'var(--text-muted)',
-  background: 'var(--control-bg)',
-  border: '1px solid var(--border)',
-  borderRadius: 6,
+  background: 'transparent',
+  border: 0,
   cursor: 'pointer',
 };
 

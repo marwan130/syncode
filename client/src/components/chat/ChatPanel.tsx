@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
+import type { CSSProperties } from 'react';
 import type { ChatMessage as ChatMessageData } from '../../providers/SignalRCrdtProvider';
 import { ChatMessage } from './ChatMessage';
 
@@ -6,12 +7,14 @@ interface ChatPanelProps {
   messages: ChatMessageData[];
   onSendMessage: (content: string) => Promise<void>;
   disabled?: boolean;
+  style?: CSSProperties;
 }
 
 export function ChatPanel({
   messages,
   onSendMessage,
   disabled = false,
+  style,
 }: ChatPanelProps) {
   const [draft, setDraft] = useState('');
   const [sendError, setSendError] = useState('');
@@ -35,7 +38,7 @@ export function ChatPanel({
   }
 
   return (
-    <aside className="chat-panel" aria-label="Room chat">
+    <aside className="chat-panel" style={style} aria-label="Room chat">
       <h2>Chat</h2>
       <div className="chat-messages" aria-live="polite">
         {messages.length === 0 ? (
