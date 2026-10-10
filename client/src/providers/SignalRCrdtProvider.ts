@@ -41,6 +41,25 @@ export interface ChatMessage {
   sentAt: string;
 }
 
+export type ExecutionLanguage = 'JavaScript' | 'Python';
+
+export interface ExecutionEvent {
+  roomId: string;
+  jobId: string;
+  requestId: string;
+  type: 'output' | 'completed' | 'failed';
+  stream?: 'stdout' | 'stderr';
+  text?: string;
+  exitCode?: number;
+  timedOut?: boolean;
+  outputLimitExceeded?: boolean;
+}
+
+export interface ExecutionSubmission {
+  jobId: string;
+  queuePosition: number;
+}
+
 export interface RoomEntry {
   id: string;
   name: string;
@@ -108,6 +127,7 @@ export class SignalRCrdtProvider {
   > = new Set();
   private chatMessageListeners = new Set<(message: ChatMessage) => void>();
   private chatHistoryListeners = new Set<(messages: ChatMessage[]) => void>();
+  private executionEventListeners = new Set<(event: ExecutionEvent) => void>();
 
   constructor(
     siteId: string,
@@ -304,6 +324,24 @@ export class SignalRCrdtProvider {
     await this.connection.invoke('SendChatMessage', this.roomId, content);
   }
 
+  public async runExecution(
+    language: ExecutionLanguage,
+    source: string,
+    requestId: string
+  ): Promise<ExecutionSubmission> {
+    return this.connection.invoke<ExecutionSubmission>(
+      'RunExecution',
+      language,
+      source,
+      requestId
+    );
+  }
+
+  public onExecutionEvent(listener: (event: ExecutionEvent) => void): () => void {
+    this.executionEventListeners.add(listener);
+    return () => this.executionEventListeners.delete(listener);
+  }
+
   public onChatMessage(listener: (message: ChatMessage) => void): () => void {
     this.chatMessageListeners.add(listener);
     return () => this.chatMessageListeners.delete(listener);
@@ -370,6 +408,13 @@ export class SignalRCrdtProvider {
   }
 
   private registerHubHandlers(): void {
+    const emitExecutionEvent = (event: ExecutionEvent) => {
+      this.executionEventListeners.forEach((listener) => listener(event));
+    };
+    this.connection.on('ExecutionOutput', emitExecutionEvent);
+    this.connection.on('ExecutionCompleted', emitExecutionEvent);
+    this.connection.on('ExecutionFailed', emitExecutionEvent);
+
     this.connection.on('ChatMessage', (raw: Record<string, unknown>) => {
       this.chatMessageListeners.forEach((listener) =>
         listener(this.normalizeChatMessage(raw))

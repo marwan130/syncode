@@ -1,5 +1,5 @@
 import Editor, { type Monaco, type OnMount } from '@monaco-editor/react';
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import type * as monaco from 'monaco-editor';
 import { useNavigate, useParams } from 'react-router-dom';
 import { MonacoCrdtBinding } from '../../bindings/MonacoCrdtBinding';
@@ -23,7 +23,12 @@ import { useChat } from '../../hooks/useChat';
 import { ChatPanel } from '../chat/ChatPanel';
 import { FileExplorer } from './FileExplorer';
 import { ResizeHandle } from './ResizeHandle';
+import { useExecutionStream } from '../../hooks/useExecutionStream';
 import type { RoomEntry } from '../../providers/SignalRCrdtProvider';
+
+const Terminal = lazy(() =>
+  import('./Terminal').then((module) => ({ default: module.Terminal }))
+);
 
 interface EditorProps {
   roomId?: string;
@@ -156,6 +161,24 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
   const [previewWidth, setPreviewWidth] = useState(getStoredPreviewWidth);
   const [isPreviewOpen, setPreviewOpen] = useState(true);
   const { messages, sendMessage } = useChat({ providerRef, status });
+  const {
+    chunks: executionChunks,
+    isRunning: isExecutionRunning,
+    message: executionMessage,
+    jobId: executionJobId,
+    runCode,
+    clear: clearExecutionOutput,
+  } = useExecutionStream({ providerRef, status });
+  const [isTerminalOpen, setTerminalOpen] = useState(false);
+  const executionLanguage =
+    language === 'javascript'
+      ? 'JavaScript'
+      : language === 'python'
+        ? 'Python'
+        : null;
+  const canRunCode = Boolean(
+    executionLanguage && status === 'connected' && monacoEditor
+  );
 
   useEffect(() => {
     if (evictedNewRoomId)
@@ -233,6 +256,13 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
         onToggleChat={() => setChatOpen((open) => !open)}
         showPreviewButton={isPreviewLanguage(language)}
         onShowPreview={() => setPreviewOpen((open) => !open)}
+        canRunCode={canRunCode}
+        isRunningCode={isExecutionRunning}
+        onRunCode={() => {
+          setTerminalOpen(true);
+          if (executionLanguage && monacoEditor)
+            void runCode(executionLanguage, monacoEditor.getValue());
+        }}
       />
 
       <div className="room-main">
@@ -332,6 +362,22 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
           )}
         </div>
       </div>
+      {isTerminalOpen && (
+        <Suspense
+          fallback={
+            <div className="execution-terminal-loading">Opening terminal…</div>
+          }
+        >
+          <Terminal
+            chunks={executionChunks}
+            message={executionMessage}
+            jobId={executionJobId}
+            isRunning={isExecutionRunning}
+            onClear={clearExecutionOutput}
+            onClose={() => setTerminalOpen(false)}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

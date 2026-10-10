@@ -4,6 +4,7 @@ export const LANGUAGE_MODES = [
   { id: 'css', label: 'CSS' },
   { id: 'javascript', label: 'JavaScript' },
   { id: 'typescript', label: 'TypeScript' },
+  { id: 'python', label: 'Python' },
   { id: 'csharp', label: 'C#' },
   { id: 'c', label: 'C' },
   { id: 'rust', label: 'Rust' },
@@ -26,6 +27,8 @@ export function isPreviewLanguage(
 }
 
 const EXTENSION_LANGUAGES: Record<string, LanguageMode> = {
+  py: 'python',
+  pyw: 'python',
   html: 'html',
   htm: 'html',
   css: 'css',

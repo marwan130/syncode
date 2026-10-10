@@ -147,6 +147,110 @@ code {
   min-height: 0;
 }
 
+.execution-run-button {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  padding: 0 8px;
+  border: 0;
+  color: var(--text-muted);
+  background: transparent;
+  font: 12px/1 var(--sans);
+  cursor: pointer;
+}
+
+.execution-run-button:hover:not(:disabled) {
+  color: var(--text-h);
+}
+
+.execution-run-button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.execution-terminal {
+  display: flex;
+  flex: 0 0 200px;
+  flex-direction: column;
+  min-height: 0;
+  border-top: 1px solid var(--border);
+  background: var(--app-bg);
+}
+
+.execution-terminal-loading {
+  flex: 0 0 200px;
+  padding: 12px;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
+  font: 12px var(--sans);
+}
+
+.execution-terminal-header {
+  display: flex;
+  flex: 0 0 32px;
+  align-items: center;
+  gap: 12px;
+  padding: 0 12px;
+  color: var(--text-muted);
+  font: 11px/1 var(--sans);
+}
+
+.execution-terminal-header strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.execution-terminal-status {
+  overflow: hidden;
+  flex: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.execution-terminal-job {
+  overflow: hidden;
+  max-width: 120px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+}
+
+.execution-terminal-header > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.execution-terminal-header button {
+  padding: 2px 4px;
+  border: 0;
+  color: var(--text-muted);
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+
+.execution-terminal-header button:hover:not(:disabled) {
+  color: var(--text-h);
+}
+
+.execution-terminal-header button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.execution-terminal-output {
+  flex: 1;
+  min-height: 0;
+  padding: 4px 10px 8px;
+}
+
+.execution-terminal-output .xterm {
+  height: 100%;
+}
+
 .resize-handle {
   position: relative;
   z-index: 2;

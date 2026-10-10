@@ -27,6 +27,9 @@ interface RoomHeaderProps {
   onToggleChat: () => void;
   showPreviewButton: boolean;
   onShowPreview: () => void;
+  canRunCode: boolean;
+  isRunningCode: boolean;
+  onRunCode: () => void;
 }
 
 const STATUS_COLORS: Record<ConnectionStatus, string> = {
@@ -84,6 +87,9 @@ export function RoomHeader({
   onToggleChat,
   showPreviewButton,
   onShowPreview,
+  canRunCode,
+  isRunningCode,
+  onRunCode,
 }: RoomHeaderProps) {
   const [isJoinModalOpen, setJoinModalOpen] = useState(false);
   const joinAnchorRef = useRef<HTMLDivElement>(null);
@@ -144,6 +150,16 @@ export function RoomHeader({
           <ThemePicker monaco={monaco} />
 
           <SearchReplace editor={editor} />
+
+          <button
+            className="execution-run-button"
+            type="button"
+            onClick={onRunCode}
+            disabled={!canRunCode || isRunningCode}
+            title={canRunCode ? 'Run current JavaScript or Python file' : 'Run is available for JavaScript and Python files while connected'}
+          >
+            {isRunningCode ? 'Running…' : 'Run'}
+          </button>
 
           {showPreviewButton && (
             <button
