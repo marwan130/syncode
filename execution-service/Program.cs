@@ -25,6 +25,12 @@ builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.C
 builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = 128 * 1024);
 builder.WebHost.UseUrls(builder.Configuration["ExecutionService:Urls"] ?? "http://127.0.0.1:5112");
 builder.Services.AddSingleton<IConnectionMultiplexer>(redis);
+var outputChannel = RedisChannel.Literal(
+    $"{builder.Configuration["ExecutionService:QueuePrefix"] ?? "syncode:execution"}:output:stream");
+builder.Services.AddSingleton(sp => new ExecutionOutputPublisher(
+    redis.GetSubscriber(),
+    outputChannel,
+    sp.GetRequiredService<ILogger<ExecutionOutputPublisher>>()));
 builder.Services.AddSingleton(sp => new ExecutionRateLimiter(
     sp.GetRequiredService<IConnectionMultiplexer>(),
     builder.Configuration["ExecutionService:QueuePrefix"] ?? "syncode:execution",
@@ -51,6 +57,7 @@ builder.Services.AddHostedService(sp => new ContainerLifecycle(
 builder.Services.AddHostedService(sp => new ExecutionQueueWorker(
     sp.GetRequiredService<ExecutionJobQueue>(),
     sp.GetRequiredService<ContainerRunner>(),
+    sp.GetRequiredService<ExecutionOutputPublisher>(),
     sp.GetRequiredService<ILogger<ExecutionQueueWorker>>(),
     builder.Configuration.GetValue("ExecutionService:WorkerCount", 3)));
 
@@ -65,6 +72,7 @@ app.MapPost("/api/executions", async (HttpContext context, QueueExecutionRequest
     if (string.IsNullOrWhiteSpace(request.RoomId) || request.RoomId.Length > 128 ||
         string.IsNullOrWhiteSpace(request.RequestedBy) || request.RequestedBy.Length > 128 ||
         request.Source is null || Encoding.UTF8.GetByteCount(request.Source) > ResourceLimits.Default.MaxSourceBytes ||
+        (request.RequestId is not null && !Guid.TryParse(request.RequestId, out _)) ||
         !Enum.IsDefined(request.Language))
         return Results.BadRequest(new { error = "Invalid execution request." });
 
@@ -80,7 +88,9 @@ app.MapPost("/api/executions", async (HttpContext context, QueueExecutionRequest
 
     var job = new ExecutionJob(
         Guid.NewGuid().ToString("N"), request.RoomId, request.RequestedBy, request.Language,
-        request.Source, DateTimeOffset.UtcNow);
+        request.Source, DateTimeOffset.UtcNow, request.RequestId is null
+            ? Guid.NewGuid().ToString("N")
+            : Guid.Parse(request.RequestId).ToString("D"));
     var position = await queue.EnqueueAsync(job, cancellationToken);
     return position is null
         ? Results.Problem("The execution queue is full. Try again shortly.", statusCode: StatusCodes.Status503ServiceUnavailable)
@@ -121,4 +131,5 @@ public sealed record QueueExecutionRequest(
     string RoomId,
     string RequestedBy,
     ExecutionLanguage Language,
-    string Source);
+    string Source,
+    string? RequestId = null);

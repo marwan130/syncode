@@ -12,7 +12,8 @@ public sealed record ExecutionJob(
     string RequestedBy,
     ExecutionLanguage Language,
     string Source,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    string RequestId = "");
 
 public enum ExecutionOutputStream
 {

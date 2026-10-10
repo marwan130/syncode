@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.SignalR;
+using System.Text;
 using server.Models;
 using server.Services;
 
@@ -7,7 +8,45 @@ namespace server.Hubs;
 public class CollabHub : Hub
 {
     private readonly RedisRoomStore _store;
-    public CollabHub(RedisRoomStore store) => _store = store;
+    private readonly ExecutionServiceClient _executionService;
+    public CollabHub(RedisRoomStore store, ExecutionServiceClient executionService)
+    {
+        _store = store;
+        _executionService = executionService;
+    }
+
+    public async Task<ExecutionSubmissionResult> RunExecution(
+        string language,
+        string source,
+        string requestId)
+    {
+        var roomId = await _store.GetConnectionRoomAsync(Context.ConnectionId);
+        if (string.IsNullOrEmpty(roomId))
+            throw new HubException("Join a room before running code.");
+        await EnsureParticipantAsync(roomId);
+
+        if (!Guid.TryParse(requestId, out var requestGuid))
+            throw new HubException("Invalid execution request.");
+        if (source is null || Encoding.UTF8.GetByteCount(source) > 64 * 1024)
+            throw new HubException("Source must be 64 KB or less.");
+
+        var executionLanguage = language?.Trim().ToLowerInvariant() switch
+        {
+            "javascript" => "JavaScript",
+            "python" => "Python",
+            _ => throw new HubException("Only JavaScript and Python files can be run currently."),
+        };
+        var participant = await _store.GetParticipantAsync(roomId, Context.ConnectionId)
+            ?? throw new HubException("Join a room before running code.");
+
+        return await _executionService.SubmitAsync(
+            roomId,
+            participant.UserId ?? participant.DisplayName,
+            executionLanguage,
+            source,
+            requestGuid.ToString("N"),
+            Context.ConnectionAborted);
+    }
 
     public async Task JoinRoom(
         string roomId,

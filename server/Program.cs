@@ -24,6 +24,9 @@ builder.Services.AddControllers();
 
 builder.Services.AddSingleton<RedisRoomStore>();
 builder.Services.AddHostedService<RoomLifecycleService>();
+builder.Services.AddHttpClient<ExecutionServiceClient>(client =>
+    client.Timeout = TimeSpan.FromSeconds(15));
+builder.Services.AddHostedService<ExecutionOutputRelayService>();
 
 var allowedOrigins = builder.Configuration.GetSection("AllowedOrigins").Get<string[]>();
 if (allowedOrigins is not { Length: > 0 })

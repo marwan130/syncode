@@ -8,17 +8,20 @@ public sealed class ExecutionQueueWorker : BackgroundService
 {
     private readonly ExecutionJobQueue _queue;
     private readonly ContainerRunner _runner;
+    private readonly ExecutionOutputPublisher _outputPublisher;
     private readonly ILogger<ExecutionQueueWorker> _logger;
     private readonly int _workerCount;
 
     public ExecutionQueueWorker(
         ExecutionJobQueue queue,
         ContainerRunner runner,
+        ExecutionOutputPublisher outputPublisher,
         ILogger<ExecutionQueueWorker> logger,
         int workerCount = 3)
     {
         _queue = queue;
         _runner = runner;
+        _outputPublisher = outputPublisher;
         _logger = logger;
         _workerCount = Math.Max(1, workerCount);
     }
@@ -45,10 +48,15 @@ public sealed class ExecutionQueueWorker : BackgroundService
 
                 var result = await _runner.RunAsync(
                     job,
-                    chunk => new ValueTask(_queue.AppendOutputAsync(job.Id, chunk)),
+                    async chunk =>
+                    {
+                        await _queue.AppendOutputAsync(job.Id, chunk);
+                        await _outputPublisher.PublishOutputAsync(job, chunk);
+                    },
                     stoppingToken);
 
                 await _queue.MarkCompletedAsync(job, result);
+                await _outputPublisher.PublishCompletedAsync(job, result);
                 _logger.LogInformation(
                     "Execution {ExecutionId} completed with exit code {ExitCode}; timed out: {TimedOut}; output limit exceeded: {OutputLimitExceeded}",
                     job.Id, result.ExitCode, result.TimedOut, result.OutputLimitExceeded);
@@ -76,6 +84,7 @@ public sealed class ExecutionQueueWorker : BackgroundService
                     try
                     {
                         await _queue.MarkFailedAsync(job);
+                        await _outputPublisher.PublishFailedAsync(job);
                     }
                     catch (Exception statusException)
                     {
