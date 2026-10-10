@@ -89,9 +89,9 @@ public sealed class DockerCli : IDockerCli
         {
             await process.WaitForExitAsync(cancellationToken);
             var stdout = await stdoutTask;
-            var stderr = await stderrTask;
+            _ = await stderrTask;
             if (process.ExitCode != 0)
-                throw new InvalidOperationException($"Docker command failed: {stderr.Trim()}");
+                throw new InvalidOperationException("Docker command failed.");
             return stdout;
         }
         catch (OperationCanceledException)

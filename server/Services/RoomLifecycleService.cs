@@ -47,7 +47,7 @@ public class RoomLifecycleService : BackgroundService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error during room cleanup");
+            _logger.LogError(ex, "Room cleanup sweep failed");
         }
     }
 }
