@@ -3,7 +3,13 @@ namespace Syncode.ExecutionService.Runner;
 public enum ExecutionLanguage
 {
     JavaScript,
-    Python
+    TypeScript,
+    Python,
+    CSharp,
+    C,
+    Cpp,
+    Rust,
+    Java
 }
 
 public sealed record ExecutionJob(

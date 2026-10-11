@@ -43,7 +43,13 @@ public sealed class ContainerRunner
         var (image, sourceName) = job.Language switch
         {
             ExecutionLanguage.JavaScript => ("syncode-runner-node", "main.js"),
+            ExecutionLanguage.TypeScript => ("syncode-runner-node", "main.ts"),
             ExecutionLanguage.Python => ("syncode-runner-python", "main.py"),
+            ExecutionLanguage.CSharp => ("syncode-runner-dotnet", "Program.cs"),
+            ExecutionLanguage.C => ("syncode-runner-c", "main.c"),
+            ExecutionLanguage.Cpp => ("syncode-runner-cpp", "main.cpp"),
+            ExecutionLanguage.Rust => ("syncode-runner-rust", "main.rs"),
+            ExecutionLanguage.Java => ("syncode-runner-java", "Main.java"),
             _ => throw new ArgumentOutOfRangeException(nameof(job), "Unsupported execution language.")
         };
 
@@ -124,6 +130,7 @@ public sealed class ContainerRunner
         "--pids-limit", _limits.ProcessLimit.ToString(System.Globalization.CultureInfo.InvariantCulture),
         "--read-only",
         "--tmpfs", $"/tmp:rw,noexec,nosuid,nodev,size={_limits.TemporaryStorageMegabytes}m,uid={RunnerUserId},gid={RunnerUserId}",
+        "--tmpfs", $"/runner:rw,exec,nosuid,nodev,size={_limits.BuildStorageMegabytes}m,uid={RunnerUserId},gid={RunnerUserId}",
         "--cap-drop=ALL",
         "--security-opt=no-new-privileges",
         "--user", $"{RunnerUserId}:{RunnerUserId}",
