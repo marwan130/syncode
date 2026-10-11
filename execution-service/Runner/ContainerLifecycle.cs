@@ -8,6 +8,7 @@ namespace Syncode.ExecutionService.Runner;
 public sealed class ContainerLifecycle : BackgroundService
 {
     private const string ContainerLabelFilter = "label=syncode.execution=true";
+    private static readonly TimeSpan InventoryLogInterval = TimeSpan.FromMinutes(5);
 
     private readonly IDockerCli _docker;
     private readonly ActiveContainerRegistry _activeContainers;
@@ -29,11 +30,17 @@ public sealed class ContainerLifecycle : BackgroundService
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(30));
+        var nextInventoryLogAt = DateTimeOffset.MinValue;
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
                 await SweepAsync(stoppingToken);
+                if (DateTimeOffset.UtcNow >= nextInventoryLogAt)
+                {
+                    await LogContainerInventoryAsync(stoppingToken);
+                    nextInventoryLogAt = DateTimeOffset.UtcNow + InventoryLogInterval;
+                }
                 await timer.WaitForNextTickAsync(stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -88,5 +95,19 @@ public sealed class ContainerLifecycle : BackgroundService
                 await _docker.TryRunAsync(["kill", parts[0]], cancellationToken);
             await _docker.TryRunAsync(["rm", "-f", parts[0]], cancellationToken);
         }
+    }
+
+    private async Task LogContainerInventoryAsync(CancellationToken cancellationToken)
+    {
+        var states = await _docker.RunTextAsync(
+            ["ps", "--all", "--filter", ContainerLabelFilter, "--format", "{{.State}}"],
+            cancellationToken);
+        var containerStates = states.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var runningCount = containerStates.Count(state => state == "running");
+
+        _logger.LogInformation(
+            "Execution container inventory: {TotalContainerCount} total, {RunningContainerCount} running",
+            containerStates.Length,
+            runningCount);
     }
 }

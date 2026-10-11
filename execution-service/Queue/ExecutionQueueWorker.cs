@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Syncode.ExecutionService.Runner;
@@ -34,6 +35,7 @@ public sealed class ExecutionQueueWorker : BackgroundService
         while (!stoppingToken.IsCancellationRequested)
         {
             ExecutionJob? job = null;
+            long? executionStartedAt = null;
             try
             {
                 job = await _queue.DequeueAsync(stoppingToken);
@@ -44,6 +46,7 @@ public sealed class ExecutionQueueWorker : BackgroundService
                 }
 
                 await _queue.MarkRunningAsync(job);
+                executionStartedAt = Stopwatch.GetTimestamp();
                 _logger.LogInformation("Worker {WorkerNumber} started execution {ExecutionId} for room {RoomId}", workerNumber, job.Id, job.RoomId);
 
                 var result = await _runner.RunAsync(
@@ -58,8 +61,14 @@ public sealed class ExecutionQueueWorker : BackgroundService
                 await _queue.MarkCompletedAsync(job, result);
                 await _outputPublisher.PublishCompletedAsync(job, result);
                 _logger.LogInformation(
-                    "Execution {ExecutionId} completed with exit code {ExitCode}; timed out: {TimedOut}; output limit exceeded: {OutputLimitExceeded}",
-                    job.Id, result.ExitCode, result.TimedOut, result.OutputLimitExceeded);
+                    "Execution {ExecutionId} completed for room {RoomId}; language {Language}; duration {DurationMs} ms; exit code {ExitCode}; timed out: {TimedOut}; output limit exceeded: {OutputLimitExceeded}",
+                    job.Id,
+                    job.RoomId,
+                    job.Language,
+                    result.Duration.TotalMilliseconds,
+                    result.ExitCode,
+                    result.TimedOut,
+                    result.OutputLimitExceeded);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -68,6 +77,14 @@ public sealed class ExecutionQueueWorker : BackgroundService
                     try
                     {
                         await _queue.MarkCancelledAsync(job);
+                        _logger.LogWarning(
+                            "Execution {ExecutionId} cancelled for room {RoomId}; language {Language}; duration {DurationMs} ms; exit code {ExitCode}; timed out: {TimedOut}",
+                            job.Id,
+                            job.RoomId,
+                            job.Language,
+                            executionStartedAt is { } startedAt ? Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds : 0,
+                            null,
+                            false);
                     }
                     catch (Exception exception)
                     {
@@ -78,7 +95,16 @@ public sealed class ExecutionQueueWorker : BackgroundService
             }
             catch (Exception exception)
             {
-                _logger.LogError(exception, "Execution worker {WorkerNumber} failed on job {ExecutionId}", workerNumber, job?.Id ?? "unknown");
+                _logger.LogError(
+                    exception,
+                    "Execution worker {WorkerNumber} failed on job {ExecutionId} for room {RoomId}; language {Language}; duration {DurationMs} ms; exit code {ExitCode}; timed out: {TimedOut}",
+                    workerNumber,
+                    job?.Id ?? "unknown",
+                    job?.RoomId,
+                    job?.Language,
+                    executionStartedAt is { } startedAt ? Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds : 0,
+                    null,
+                    false);
                 if (job is not null)
                 {
                     try
