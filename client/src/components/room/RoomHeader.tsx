@@ -156,7 +156,13 @@ export function RoomHeader({
             type="button"
             onClick={onRunCode}
             disabled={!canRunCode || isRunningCode}
-            title={canRunCode ? 'Run current JavaScript or Python file' : 'Run is available for JavaScript and Python files while connected'}
+            title={
+              canRunCode
+                ? 'Compile and run the active file'
+                : status !== 'connected'
+                  ? 'Connect to the room to run code'
+                  : 'This file type requires a project build and cannot run as a single file'
+            }
           >
             {isRunningCode ? 'Running…' : 'Run'}
           </button>

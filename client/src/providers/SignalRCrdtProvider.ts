@@ -41,7 +41,15 @@ export interface ChatMessage {
   sentAt: string;
 }
 
-export type ExecutionLanguage = 'JavaScript' | 'Python';
+export type ExecutionLanguage =
+  | 'JavaScript'
+  | 'TypeScript'
+  | 'Python'
+  | 'CSharp'
+  | 'C'
+  | 'Cpp'
+  | 'Rust'
+  | 'Java';
 
 export interface ExecutionEvent {
   roomId: string;

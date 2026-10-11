@@ -24,11 +24,25 @@ import { ChatPanel } from '../chat/ChatPanel';
 import { FileExplorer } from './FileExplorer';
 import { ResizeHandle } from './ResizeHandle';
 import { useExecutionStream } from '../../hooks/useExecutionStream';
-import type { RoomEntry } from '../../providers/SignalRCrdtProvider';
+import type {
+  ExecutionLanguage,
+  RoomEntry,
+} from '../../providers/SignalRCrdtProvider';
 
 const Terminal = lazy(() =>
   import('./Terminal').then((module) => ({ default: module.Terminal }))
 );
+
+const EXECUTION_LANGUAGES: Partial<Record<LanguageMode, ExecutionLanguage>> = {
+  javascript: 'JavaScript',
+  typescript: 'TypeScript',
+  python: 'Python',
+  csharp: 'CSharp',
+  c: 'C',
+  cpp: 'Cpp',
+  rust: 'Rust',
+  java: 'Java',
+};
 
 interface EditorProps {
   roomId?: string;
@@ -170,12 +184,12 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
     clear: clearExecutionOutput,
   } = useExecutionStream({ providerRef, status });
   const [isTerminalOpen, setTerminalOpen] = useState(false);
-  const executionLanguage =
-    language === 'javascript'
-      ? 'JavaScript'
-      : language === 'python'
-        ? 'Python'
-        : null;
+  const sourceExtension = activeFilePath.split('.').pop()?.toLowerCase();
+  const requiresProjectJsxTransform =
+    sourceExtension === 'jsx' || sourceExtension === 'tsx';
+  const executionLanguage = requiresProjectJsxTransform
+    ? null
+    : (EXECUTION_LANGUAGES[language] ?? null);
   const canRunCode = Boolean(
     executionLanguage && status === 'connected' && monacoEditor
   );

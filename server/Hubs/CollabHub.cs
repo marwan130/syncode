@@ -33,8 +33,14 @@ public class CollabHub : Hub
         var executionLanguage = language?.Trim().ToLowerInvariant() switch
         {
             "javascript" => "JavaScript",
+            "typescript" => "TypeScript",
             "python" => "Python",
-            _ => throw new HubException("Only JavaScript and Python files can be run currently."),
+            "csharp" or "c#" => "CSharp",
+            "c" => "C",
+            "cpp" or "c++" => "Cpp",
+            "rust" => "Rust",
+            "java" => "Java",
+            _ => throw new HubException("This file type cannot be run in the terminal."),
         };
         var participant = await _store.GetParticipantAsync(roomId, Context.ConnectionId)
             ?? throw new HubException("Join a room before running code.");
