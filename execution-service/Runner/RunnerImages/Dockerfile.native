@@ -1,0 +1,22 @@
+FROM alpine:3.22
+
+ARG RUNNER_RUNTIME
+ENV RUNNER_RUNTIME=${RUNNER_RUNTIME} \
+    TMPDIR=/runner/tmp \
+    TMP=/runner/tmp \
+    TEMP=/runner/tmp
+
+RUN test "$RUNNER_RUNTIME" = c -o "$RUNNER_RUNTIME" = cpp \
+    && apk add --no-cache build-base \
+    && addgroup -S -g 10001 runner \
+    && adduser -S -D -H -u 10001 -G runner runner \
+    && mkdir -p /workspace \
+    && chown runner:runner /workspace
+
+COPY entrypoint.sh /usr/local/bin/runner-entrypoint
+RUN chmod 0555 /usr/local/bin/runner-entrypoint
+
+WORKDIR /workspace
+USER 10001:10001
+
+ENTRYPOINT ["/usr/local/bin/runner-entrypoint"]

@@ -2,7 +2,10 @@ FROM python:3.12-alpine
 
 ENV RUNNER_RUNTIME=python \
     PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    TMPDIR=/runner/tmp \
+    TMP=/runner/tmp \
+    TEMP=/runner/tmp
 
 RUN addgroup -S -g 10001 runner \
     && adduser -S -D -H -u 10001 -G runner runner \

@@ -1,0 +1,24 @@
+FROM mcr.microsoft.com/dotnet/sdk:10.0-alpine
+
+ENV RUNNER_RUNTIME=csharp \
+    DOTNET_CLI_TELEMETRY_OPTOUT=1 \
+    DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1 \
+    DOTNET_NOLOGO=1 \
+    DOTNET_CLI_HOME=/runner/dotnet \
+    NUGET_PACKAGES=/runner/nuget \
+    TMPDIR=/runner/tmp \
+    TMP=/runner/tmp \
+    TEMP=/runner/tmp
+
+RUN addgroup -S -g 10001 runner \
+    && adduser -S -D -H -u 10001 -G runner runner \
+    && mkdir -p /workspace \
+    && chown runner:runner /workspace
+
+COPY entrypoint.sh /usr/local/bin/runner-entrypoint
+RUN chmod 0555 /usr/local/bin/runner-entrypoint
+
+WORKDIR /workspace
+USER 10001:10001
+
+ENTRYPOINT ["/usr/local/bin/runner-entrypoint"]
