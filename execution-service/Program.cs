@@ -39,6 +39,8 @@ builder.Services.AddSingleton(sp => new ExecutionRateLimiter(
 builder.Services.AddSingleton(new DockerCli(builder.Configuration["ExecutionService:DockerCli"] ?? "docker"));
 builder.Services.AddSingleton<IDockerCli>(sp => sp.GetRequiredService<DockerCli>());
 builder.Services.AddSingleton<ActiveContainerRegistry>();
+builder.Services.AddSingleton<InteractiveTerminalSessions>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<InteractiveTerminalSessions>());
 builder.Services.AddSingleton(ResourceLimits.Default);
 builder.Services.AddSingleton(sp => new ExecutionJobQueue(
     sp.GetRequiredService<IConnectionMultiplexer>(),
@@ -64,6 +66,35 @@ builder.Services.AddHostedService(sp => new ExecutionQueueWorker(
 var app = builder.Build();
 app.UseExceptionHandler(_ => { });
 app.MapGet("/health", () => Results.Ok(new { status = "healthy" }));
+app.MapPost("/api/terminals", async (HttpContext context, InteractiveTerminalSessions terminals, CancellationToken cancellationToken) =>
+{
+    if (!HasValidApiKey(context, apiKey)) return Results.Unauthorized();
+    try { return Results.Ok(await terminals.CreateAsync(cancellationToken)); }
+    catch (TerminalSessionLimitException exception) { return Results.Problem(exception.Message, statusCode: StatusCodes.Status429TooManyRequests); }
+    catch (Exception exception) when (exception is IOException or InvalidOperationException or System.ComponentModel.Win32Exception)
+    { return Results.Problem("The isolated Bash terminal could not start. Check that Docker is available and the syncode-runner-bash image is built.", statusCode: StatusCodes.Status503ServiceUnavailable); }
+});
+app.MapPost("/api/terminals/{sessionId}/input", async (HttpContext context, string sessionId, InputRequest request, InteractiveTerminalSessions terminals, CancellationToken cancellationToken) =>
+{
+    if (!HasValidApiKey(context, apiKey)) return Results.Unauthorized();
+    try { await terminals.WriteInputAsync(sessionId, request.Input, cancellationToken); return Results.NoContent(); }
+    catch (KeyNotFoundException) { return Results.NotFound(); }
+    catch (ArgumentException exception) { return Results.BadRequest(new { error = exception.Message }); }
+    catch (InvalidOperationException exception) { return Results.Conflict(new { error = exception.Message }); }
+});
+app.MapGet("/api/terminals/{sessionId}/output", async (HttpContext context, string sessionId, int offset, InteractiveTerminalSessions terminals, CancellationToken cancellationToken) =>
+{
+    if (!HasValidApiKey(context, apiKey)) return Results.Unauthorized();
+    if (offset < 0) return Results.BadRequest(new { error = "Invalid terminal output offset." });
+    try { return Results.Ok(await terminals.ReadOutputAsync(sessionId, offset, cancellationToken)); }
+    catch (KeyNotFoundException) { return Results.NotFound(); }
+});
+app.MapDelete("/api/terminals/{sessionId}", async (HttpContext context, string sessionId, InteractiveTerminalSessions terminals) =>
+{
+    if (!HasValidApiKey(context, apiKey)) return Results.Unauthorized();
+    await terminals.CloseAsync(sessionId);
+    return Results.NoContent();
+});
 app.MapPost("/api/executions", async (HttpContext context, QueueExecutionRequest request, ExecutionJobQueue queue, ExecutionRateLimiter rateLimiter, CancellationToken cancellationToken) =>
 {
     if (!HasValidApiKey(context, apiKey))
@@ -107,6 +138,19 @@ app.MapGet("/api/executions/{jobId}", async (HttpContext context, string jobId, 
     var status = await queue.GetStatusAsync(jobId, cancellationToken);
     return status is null ? Results.NotFound() : Results.Ok(status);
 });
+app.MapPost("/api/executions/{jobId}/input", async (HttpContext context, string jobId, InputRequest request, DockerCli docker, CancellationToken cancellationToken) =>
+{
+    if (!HasValidApiKey(context, apiKey)) return Results.Unauthorized();
+    if (jobId.Length != 32 || !jobId.All(Uri.IsHexDigit) || string.IsNullOrEmpty(request.Input) ||
+        request.Input.Length > 1024 || request.Input.Any(character =>
+            char.IsControl(character) && character is not '\r' and not '\n' and not '\t' and not '\b' and not '\x1b' and not '\x03'))
+        return Results.BadRequest(new { error = "Invalid terminal input." });
+    try { await docker.WriteExecutionInputAsync(jobId, request.Input, cancellationToken); return Results.NoContent(); }
+    catch (ExecutionInputBufferLimitException) { return Results.StatusCode(StatusCodes.Status429TooManyRequests); }
+    catch (KeyNotFoundException) { return Results.NotFound(); }
+    catch (InvalidOperationException) { return Results.NotFound(); }
+    catch (IOException) { return Results.Conflict(new { error = "This execution is no longer accepting input." }); }
+});
 
 try
 {
@@ -133,3 +177,5 @@ public sealed record QueueExecutionRequest(
     ExecutionLanguage Language,
     string Source,
     string? RequestId = null);
+
+public sealed record InputRequest(string Input);

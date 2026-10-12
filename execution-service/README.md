@@ -14,6 +14,7 @@ docker build -t syncode-runner-c --build-arg RUNNER_RUNTIME=c -f execution-servi
 docker build -t syncode-runner-cpp --build-arg RUNNER_RUNTIME=cpp -f execution-service/Runner/RunnerImages/Dockerfile.native execution-service/Runner/RunnerImages
 docker build -t syncode-runner-rust -f execution-service/Runner/RunnerImages/Dockerfile.rust execution-service/Runner/RunnerImages
 docker build -t syncode-runner-java -f execution-service/Runner/RunnerImages/Dockerfile.java execution-service/Runner/RunnerImages
+docker build -t syncode-runner-bash -f execution-service/Runner/RunnerImages/Dockerfile.bash execution-service/Runner/RunnerImages
 ```
 
 TypeScript uses the Node image and its pinned TypeScript compiler. The service uses `--pull=never`; build or deploy these reviewed images ahead of time instead of allowing runtime image pulls.
@@ -41,17 +42,28 @@ notepad infra/.env
 docker compose --env-file infra/.env -f infra/docker-compose.yml up --build
 ```
 
+Docker Desktop must be running with its Linux container engine before starting Compose. If startup stops while pulling a runner base image with a DNS lookup error, check that Docker Desktop has working internet access, then retry the Compose command. You can stop and recreate this stack without deleting its Redis data or runner image cache with:
+
+```powershell
+docker compose --env-file infra/.env -f infra/docker-compose.yml down
+docker compose --env-file infra/.env -f infra/docker-compose.yml up --build
+```
+
 The default Redis host port is `6380`, avoiding the common local Redis port `6379`; change `REDIS_PORT` in `infra/.env` if needed. The service binds to `http://127.0.0.1:5112`. To connect a room server running directly on the host, set its Redis connection to `localhost:6380`, `ExecutionService__BaseUrl` to `http://127.0.0.1:5112`, and `ExecutionService__ApiKey` to the same secret used in `infra/.env`.
 
-The stack builds all supported runner images into the sibling daemon before starting the execution service. If you remove runner images while keeping the Compose stack up, rerun the builder with `docker compose --env-file infra/.env -f infra/docker-compose.yml run --rm runner-images`.
+The stack builds all supported runner images into the sibling daemon before starting the execution service. The one-shot image builder uses Docker's classic builder because BuildKit's nested DNS resolver can fail to resolve Docker Hub from Docker-in-Docker on some Docker Desktop setups. If you remove runner images while keeping the Compose stack up, rerun the builder with `docker compose --env-file infra/.env -f infra/docker-compose.yml run --rm runner-images`.
 
-The sibling daemon has a separate persistent Docker data volume and its API is available only on an internal Compose network. Source files use a shared, size-limited temporary volume so the execution service and sibling daemon can both access them; normal job cleanup removes each job directory. `docker compose down` stops the stack while preserving Redis data and runner image cache.
+The same builder creates the Bash image used by interactive terminal tabs. Each tab runs its own Bash process in a no-network container with 256 MiB memory, half a CPU, 32 processes, a 64 MiB temporary workspace, and a 256 KiB output cap. Sessions are limited to three per SignalR connection, close when their tab or room connection closes, and expire after inactivity. The shell workspace is temporary and isolated from the room's collaborative files and the host filesystem.
+
+The browser terminal accepts and runs complete Bash commands, with command history and cursor editing. It is line-oriented rather than a full pseudo-terminal, so full-screen terminal programs and Bash tab completion are not supported.
+
+The sibling daemon has a separate persistent Docker data volume and its TLS-authenticated API is available only on an internal Compose network. Source files use a shared, size-limited temporary volume so the execution service and sibling daemon can both access them; normal job cleanup removes each job directory. `docker compose down` stops the stack while preserving Redis data and runner image cache.
 
 ### Docker access and isolation tradeoff
 
-The execution service does not mount `/var/run/docker.sock` from the host. It talks to a sibling Docker-in-Docker daemon over a private Compose network. The sibling daemon has its own image store, and the daemon API on port 2375 is not published to the host. The execution service and daemon share a size-limited temporary volume because the inner daemon needs to read each job's source file when it starts a runner container.
+The execution service does not mount `/var/run/docker.sock` from the host. It talks to a sibling Docker-in-Docker daemon over a private Compose network using client certificates. The sibling daemon has its own image store, and its TLS API on port 2376 is not published to the host. The execution service and daemon share a size-limited temporary volume because the inner daemon needs to read each job's source file when it starts a runner container.
 
-Docker-in-Docker must run privileged to start nested containers. That gives it elevated access to the host kernel, so a Docker or kernel vulnerability could cross the boundary. This is a compromise that avoids handing the execution service direct access to the host Docker socket; it is not complete isolation and is not suitable as is for a public multi-tenant execution service. Keep port 2375 private and do not expose this development stack to untrusted networks. A narrowly allow-listed Docker socket proxy is another deployment option, but do not mount the raw host Docker socket into the execution service.
+Docker-in-Docker must run privileged to start nested containers. That gives it elevated access to the host kernel, so a Docker or kernel vulnerability could cross the boundary. This is a compromise that avoids handing the execution service direct access to the host Docker socket; it is not complete isolation and is not suitable as is for a public multi-tenant execution service. Keep port 2376 private and do not expose this development stack to untrusted networks. A narrowly allow-listed Docker socket proxy is another deployment option, but do not mount the raw host Docker socket into the execution service.
 
 Execution submissions are limited to 10 per room per rolling minute by default. Excess submissions receive HTTP `429 Too Many Requests`, a `Retry-After` header, and a message suitable for display in the client. Set `ExecutionService__MaxExecutionsPerRoomPerMinute` or `ExecutionService__ExecutionRateWindowMinutes` to adjust the limit. Rate-limit state is shared through Redis across service instances.
 
