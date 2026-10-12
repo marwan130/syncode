@@ -59,6 +59,8 @@ public sealed class ContainerRunnerTests
         Assert.False(result.TimedOut);
         Assert.Equal("hello\n", Assert.Single(received).Text);
         var runArgs = Assert.Single(docker.StreamingArguments);
+        Assert.Contains("--interactive", runArgs);
+        Assert.DoesNotContain("--tty", runArgs);
         Assert.Contains("--network=none", runArgs);
         Assert.Contains("--read-only", runArgs);
         Assert.Contains("--cap-drop=ALL", runArgs);
@@ -144,6 +146,7 @@ public sealed class ContainerRunnerTests
         public bool WaitUntilCancelled { get; init; }
 
         public async Task<int> RunStreamingAsync(
+            string executionId,
             IReadOnlyList<string> arguments,
             Func<ExecutionOutputStream, string, ValueTask> onOutput,
             CancellationToken cancellationToken)
@@ -155,6 +158,8 @@ public sealed class ContainerRunnerTests
                 await onOutput(ExecutionOutputStream.StandardOutput, Output);
             return 0;
         }
+
+        public Task WriteExecutionInputAsync(string executionId, string input, CancellationToken cancellationToken) => Task.CompletedTask;
 
         public Task<string> RunTextAsync(IReadOnlyList<string> arguments, CancellationToken cancellationToken) => Task.FromResult(string.Empty);
 

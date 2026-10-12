@@ -47,7 +47,6 @@ public sealed class ExecutionQueueWorker : BackgroundService
 
                 await _queue.MarkRunningAsync(job);
                 executionStartedAt = Stopwatch.GetTimestamp();
-                _logger.LogInformation("Worker {WorkerNumber} started execution {ExecutionId} for room {RoomId}", workerNumber, job.Id, job.RoomId);
 
                 var result = await _runner.RunAsync(
                     job,

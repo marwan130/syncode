@@ -7,8 +7,9 @@ namespace Syncode.ExecutionService.Runner;
 
 public sealed class ContainerLifecycle : BackgroundService
 {
-    private const string ContainerLabelFilter = "label=syncode.execution=true";
-    private static readonly TimeSpan InventoryLogInterval = TimeSpan.FromMinutes(5);
+    private const string ExecutionContainerLabel = "label=syncode.execution=true";
+    private const string TerminalContainerLabel = "label=syncode.terminal=true";
+    private static readonly TimeSpan TerminalMaxOrphanAge = TimeSpan.FromMinutes(15);
 
     private readonly IDockerCli _docker;
     private readonly ActiveContainerRegistry _activeContainers;
@@ -30,17 +31,11 @@ public sealed class ContainerLifecycle : BackgroundService
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(30));
-        var nextInventoryLogAt = DateTimeOffset.MinValue;
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
                 await SweepAsync(stoppingToken);
-                if (DateTimeOffset.UtcNow >= nextInventoryLogAt)
-                {
-                    await LogContainerInventoryAsync(stoppingToken);
-                    nextInventoryLogAt = DateTimeOffset.UtcNow + InventoryLogInterval;
-                }
                 await timer.WaitForNextTickAsync(stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
@@ -65,7 +60,7 @@ public sealed class ContainerLifecycle : BackgroundService
     private async Task SweepAsync(CancellationToken cancellationToken)
     {
         var containers = await _docker.RunTextAsync(
-            ["ps", "--all", "--filter", ContainerLabelFilter, "--format", "{{.ID}}|{{.Names}}"],
+            ["ps", "--all", "--filter", ExecutionContainerLabel, "--filter", TerminalContainerLabel, "--format", "{{.ID}}|{{.Names}}"],
             cancellationToken);
 
         foreach (var row in containers.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
@@ -81,33 +76,23 @@ public sealed class ContainerLifecycle : BackgroundService
             if (detailParts.Length != 3)
                 continue;
 
+            var isTerminal = parts[1].StartsWith("syncode-terminal-", StringComparison.Ordinal);
+            var maxAge = isTerminal ? TerminalMaxOrphanAge : _limits.Timeout + _limits.OrphanGracePeriod;
+
             var isStale = detailParts[0] != "running";
             if (!isStale && DateTimeOffset.TryParse(detailParts[1], CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var startedAt))
-                isStale = DateTimeOffset.UtcNow - startedAt > _limits.Timeout + _limits.OrphanGracePeriod;
+                isStale = DateTimeOffset.UtcNow - startedAt > maxAge;
             else if (!isStale && DateTimeOffset.TryParse(detailParts[2], CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out var createdAt))
-                isStale = DateTimeOffset.UtcNow - createdAt > _limits.Timeout + _limits.OrphanGracePeriod;
+                isStale = DateTimeOffset.UtcNow - createdAt > maxAge;
 
             if (!isStale)
                 continue;
 
-            _logger.LogWarning("Removing orphaned execution container {ContainerName}", parts[1]);
+            _logger.LogWarning("Removing orphaned {ContainerType} container {ContainerName}", isTerminal ? "terminal" : "execution", parts[1]);
             if (detailParts[0] == "running")
                 await _docker.TryRunAsync(["kill", parts[0]], cancellationToken);
             await _docker.TryRunAsync(["rm", "-f", parts[0]], cancellationToken);
         }
     }
 
-    private async Task LogContainerInventoryAsync(CancellationToken cancellationToken)
-    {
-        var states = await _docker.RunTextAsync(
-            ["ps", "--all", "--filter", ContainerLabelFilter, "--format", "{{.State}}"],
-            cancellationToken);
-        var containerStates = states.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        var runningCount = containerStates.Count(state => state == "running");
-
-        _logger.LogInformation(
-            "Execution container inventory: {TotalContainerCount} total, {RunningContainerCount} running",
-            containerStates.Length,
-            runningCount);
-    }
 }

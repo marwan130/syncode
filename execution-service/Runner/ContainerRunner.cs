@@ -74,7 +74,7 @@ public sealed class ContainerRunner
             int exitCode;
             try
             {
-                exitCode = await _docker.RunStreamingAsync(arguments, async (stream, text) =>
+                exitCode = await _docker.RunStreamingAsync(job.Id, arguments, async (stream, text) =>
                 {
                     var bytes = Encoding.UTF8.GetByteCount(text);
                     var total = Interlocked.Add(ref outputBytes, bytes);
@@ -121,6 +121,7 @@ public sealed class ContainerRunner
     private IReadOnlyList<string> BuildRunArguments(string name, string image, string sourcePath, string sourceName) =>
     [
         "run", "--name", name,
+        "--interactive",
         "--pull=never",
         "--label", ContainerLabel,
         "--network=none",

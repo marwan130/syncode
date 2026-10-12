@@ -21,11 +21,17 @@ services:
   docker:
     image: docker:27.5.1-dind
     privileged: true
+    hostname: docker
     environment:
-      DOCKER_TLS_CERTDIR: ""
-    command: ["--host=tcp://0.0.0.0:2375", "--host=unix:///var/run/docker.sock"]
+      DOCKER_TLS_CERTDIR: /certs
+      DOCKER_TLS_SAN: DNS:docker
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    command: ["--dns=8.8.8.8", "--dns=1.1.1.1"]
     volumes:
       - docker-data:/var/lib/docker
+      - docker-client-certs:/certs/client
       - execution-source:/execution-source
     networks:
       - docker-control
@@ -41,9 +47,13 @@ services:
   runner-images:
     image: docker:27.5.1-cli
     environment:
-      DOCKER_HOST: tcp://docker:2375
+      DOCKER_HOST: tcp://docker:2376
+      DOCKER_TLS_VERIFY: "1"
+      DOCKER_CERT_PATH: /certs/client
+      DOCKER_BUILDKIT: "0"
     volumes:
       - ..:/workspace:ro
+      - docker-client-certs:/certs/client:ro
     entrypoint: ["sh", "/workspace/infra/build-runner-images.sh"]
     depends_on:
       docker:
@@ -62,7 +72,9 @@ services:
       ExecutionService__Urls: http://0.0.0.0:5112
       ExecutionService__WorkerCount: ${EXECUTION_WORKER_COUNT:-3}
       Redis: redis:6379
-      DOCKER_HOST: tcp://docker:2375
+      DOCKER_HOST: tcp://docker:2376
+      DOCKER_TLS_VERIFY: "1"
+      DOCKER_CERT_PATH: /certs/client
       TMPDIR: /execution-source
       TMP: /execution-source
       TEMP: /execution-source
@@ -70,6 +82,7 @@ services:
       - "127.0.0.1:5112:5112"
     volumes:
       - execution-source:/execution-source
+      - docker-client-certs:/certs/client:ro
     depends_on:
       redis:
         condition: service_healthy
@@ -84,7 +97,6 @@ services:
 
 networks:
   service-network:
-    internal: true
   docker-control:
     internal: true
   docker-egress:
@@ -92,6 +104,7 @@ networks:
 volumes:
   redis-data:
   docker-data:
+  docker-client-certs:
   execution-source:
     driver: local
     driver_opts:

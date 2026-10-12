@@ -5,24 +5,45 @@ namespace Syncode.ExecutionService.Runner;
 
 public interface IDockerCli
 {
-    Task<int> RunStreamingAsync(IReadOnlyList<string> arguments, Func<ExecutionOutputStream, string, ValueTask> onOutput, CancellationToken cancellationToken);
+    Task<int> RunStreamingAsync(string executionId, IReadOnlyList<string> arguments, Func<ExecutionOutputStream, string, ValueTask> onOutput, CancellationToken cancellationToken);
+    Task WriteExecutionInputAsync(string executionId, string input, CancellationToken cancellationToken);
     Task<string> RunTextAsync(IReadOnlyList<string> arguments, CancellationToken cancellationToken);
     Task TryRunAsync(IReadOnlyList<string> arguments, CancellationToken cancellationToken);
 }
 
+public sealed class ExecutionInputBufferLimitException : Exception { }
+
 public sealed class DockerCli : IDockerCli
 {
     private readonly string _executable;
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, InteractiveInput> _interactiveProcesses = new(StringComparer.Ordinal);
 
     public DockerCli(string executable = "docker") => _executable = executable;
 
     public async Task<int> RunStreamingAsync(
+        string executionId,
         IReadOnlyList<string> arguments,
         Func<ExecutionOutputStream, string, ValueTask> onOutput,
         CancellationToken cancellationToken)
     {
-        using var process = CreateProcess(arguments);
+        using var process = CreateProcess(arguments, redirectInput: true);
         process.Start();
+        var input = _interactiveProcesses.GetOrAdd(executionId, static _ => new InteractiveInput());
+        lock (input.Gate)
+        {
+            if (input.Process is not null)
+            {
+                KillProcess(process);
+                throw new InvalidOperationException("An execution with this id is already running.");
+            }
+            input.Process = process;
+            while (input.Pending.TryDequeue(out var pending))
+            {
+                input.PendingCharacters -= pending.Length;
+                process.StandardInput.Write(pending);
+            }
+            process.StandardInput.Flush();
+        }
         var stdoutPump = PumpOutputAsync(process.StandardOutput, ExecutionOutputStream.StandardOutput, onOutput, cancellationToken);
         var stderrPump = PumpOutputAsync(process.StandardError, ExecutionOutputStream.StandardError, onOutput, cancellationToken);
         using var registration = cancellationToken.Register(KillProcess, process);
@@ -40,6 +61,43 @@ public sealed class DockerCli : IDockerCli
             await IgnoreCancellationAsync(stderrPump);
             throw;
         }
+        finally
+        {
+            lock (input.Gate) input.Process = null;
+            if (_interactiveProcesses.TryGetValue(executionId, out var current) && ReferenceEquals(input, current))
+                _interactiveProcesses.TryRemove(executionId, out _);
+        }
+    }
+
+    public Task WriteExecutionInputAsync(string executionId, string input, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var session = _interactiveProcesses.GetOrAdd(executionId, static _ => new InteractiveInput());
+        lock (session.Gate)
+        {
+            if (session.Process is null)
+            {
+                if (session.PendingCharacters + input.Length > 8192)
+                    throw new ExecutionInputBufferLimitException();
+                session.Pending.Enqueue(input);
+                session.PendingCharacters += input.Length;
+            }
+            else
+            {
+                if (session.Process.HasExited) throw new KeyNotFoundException("This execution is no longer accepting input.");
+                session.Process.StandardInput.Write(input);
+                session.Process.StandardInput.Flush();
+            }
+        }
+        return Task.CompletedTask;
+    }
+
+    private sealed class InteractiveInput
+    {
+        public object Gate { get; } = new();
+        public Process? Process { get; set; }
+        public Queue<string> Pending { get; } = new();
+        public int PendingCharacters { get; set; }
     }
 
     private static async Task PumpOutputAsync(
@@ -112,7 +170,7 @@ public sealed class DockerCli : IDockerCli
         }
     }
 
-    private Process CreateProcess(IReadOnlyList<string> arguments)
+    private Process CreateProcess(IReadOnlyList<string> arguments, bool redirectInput = false)
     {
         var startInfo = new ProcessStartInfo
         {
@@ -120,6 +178,7 @@ public sealed class DockerCli : IDockerCli
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
+            RedirectStandardInput = redirectInput,
             CreateNoWindow = true
         };
 
