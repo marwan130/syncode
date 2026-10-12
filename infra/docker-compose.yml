@@ -1,0 +1,100 @@
+name: syncode-execution
+
+services:
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6380}:6379"
+    networks:
+      - service-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    restart: unless-stopped
+
+  docker:
+    image: docker:27.5.1-dind
+    privileged: true
+    environment:
+      DOCKER_TLS_CERTDIR: ""
+    command: ["--host=tcp://0.0.0.0:2375", "--host=unix:///var/run/docker.sock"]
+    volumes:
+      - docker-data:/var/lib/docker
+      - execution-source:/execution-source
+    networks:
+      - docker-control
+      - docker-egress
+    healthcheck:
+      test: ["CMD", "docker", "info"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    restart: unless-stopped
+
+  runner-images:
+    image: docker:27.5.1-cli
+    environment:
+      DOCKER_HOST: tcp://docker:2375
+    volumes:
+      - ..:/workspace:ro
+    entrypoint: ["sh", "/workspace/infra/build-runner-images.sh"]
+    depends_on:
+      docker:
+        condition: service_healthy
+    networks:
+      - docker-control
+    restart: "no"
+
+  execution-service:
+    build:
+      context: ..
+      dockerfile: execution-service/Dockerfile
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ExecutionService__ApiKey: ${SYNCODE_EXECUTION_API_KEY:?Set SYNCODE_EXECUTION_API_KEY in infra/.env}
+      ExecutionService__Urls: http://0.0.0.0:5112
+      ExecutionService__WorkerCount: ${EXECUTION_WORKER_COUNT:-3}
+      Redis: redis:6379
+      DOCKER_HOST: tcp://docker:2375
+      TMPDIR: /execution-source
+      TMP: /execution-source
+      TEMP: /execution-source
+    ports:
+      - "127.0.0.1:5112:5112"
+    volumes:
+      - execution-source:/execution-source
+    depends_on:
+      redis:
+        condition: service_healthy
+      docker:
+        condition: service_healthy
+      runner-images:
+        condition: service_completed_successfully
+    networks:
+      - service-network
+      - docker-control
+    restart: unless-stopped
+
+networks:
+  service-network:
+    internal: true
+  docker-control:
+    internal: true
+  docker-egress:
+
+volumes:
+  redis-data:
+  docker-data:
+  execution-source:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: size=64m,uid=10001,gid=10001,mode=0750

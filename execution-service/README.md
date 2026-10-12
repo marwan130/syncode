@@ -30,6 +30,29 @@ dotnet run --project execution-service/Syncode.ExecutionService.csproj
 
 The API key is required at startup. Internal callers send it in the `X-Execution-Service-Key` header. Set `ExecutionService__Urls` only when deployment requires another internal bind address; do not expose this service to the public internet.
 
+## Run with Docker Compose
+
+The Compose stack runs the execution service, its Redis instance, a sibling Docker-in-Docker daemon, and a one-shot service that builds all supported runner images. It does not start the Syncode room server or client. The execution API and Redis are published only on loopback so a separately run local room server can connect to them.
+
+From the repository root, create `infra/.env` if it does not exist. Set `SYNCODE_EXECUTION_API_KEY` to at least 32 random bytes, and set `REDIS_PORT` if the default port is unavailable. Keep this file private. Then start the stack:
+
+```powershell
+notepad infra/.env
+docker compose --env-file infra/.env -f infra/docker-compose.yml up --build
+```
+
+The default Redis host port is `6380`, avoiding the common local Redis port `6379`; change `REDIS_PORT` in `infra/.env` if needed. The service binds to `http://127.0.0.1:5112`. To connect a room server running directly on the host, set its Redis connection to `localhost:6380`, `ExecutionService__BaseUrl` to `http://127.0.0.1:5112`, and `ExecutionService__ApiKey` to the same secret used in `infra/.env`.
+
+The stack builds all supported runner images into the sibling daemon before starting the execution service. If you remove runner images while keeping the Compose stack up, rerun the builder with `docker compose --env-file infra/.env -f infra/docker-compose.yml run --rm runner-images`.
+
+The sibling daemon has a separate persistent Docker data volume and its API is available only on an internal Compose network. Source files use a shared, size-limited temporary volume so the execution service and sibling daemon can both access them; normal job cleanup removes each job directory. `docker compose down` stops the stack while preserving Redis data and runner image cache.
+
+### Docker access and isolation tradeoff
+
+The execution service does not mount `/var/run/docker.sock` from the host. It talks to a sibling Docker-in-Docker daemon over a private Compose network. The sibling daemon has its own image store, and the daemon API on port 2375 is not published to the host. The execution service and daemon share a size-limited temporary volume because the inner daemon needs to read each job's source file when it starts a runner container.
+
+Docker-in-Docker must run privileged to start nested containers. That gives it elevated access to the host kernel, so a Docker or kernel vulnerability could cross the boundary. This is a compromise that avoids handing the execution service direct access to the host Docker socket; it is not complete isolation and is not suitable as is for a public multi-tenant execution service. Keep port 2375 private and do not expose this development stack to untrusted networks. A narrowly allow-listed Docker socket proxy is another deployment option, but do not mount the raw host Docker socket into the execution service.
+
 Execution submissions are limited to 10 per room per rolling minute by default. Excess submissions receive HTTP `429 Too Many Requests`, a `Retry-After` header, and a message suitable for display in the client. Set `ExecutionService__MaxExecutionsPerRoomPerMinute` or `ExecutionService__ExecutionRateWindowMinutes` to adjust the limit. Rate-limit state is shared through Redis across service instances.
 
 ## Connect it to the Syncode room server

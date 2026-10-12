@@ -13,7 +13,7 @@
   --accent-border: rgba(56, 189, 248, 0.5);
   --social-bg: var(--surface-bg);
   --danger: #f87171;
-  --button-bg: linear-gradient(135deg, #0284c7 0%, #0ea5e9 100%);
+  --button-bg: #0284c7;
   --button-fg: #ffffff;
 
   --sans: system-ui, 'Segoe UI', Roboto, sans-serif;

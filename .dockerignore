@@ -1,0 +1,10 @@
+.git
+.github
+**/bin
+**/obj
+**/node_modules
+**/dist
+**/.vite
+infra/.env
+**/*.user
+**/*.suo
