@@ -7,13 +7,39 @@ import vscodeFileIcons from './vscodeFileIcons.json';
 addCollection(vscodeFileIcons);
 
 const EXTENSION_ICONS: Record<string, string> = {
-  c: 'c', h: 'c', cc: 'cpp', cpp: 'cpp', cxx: 'cpp', hpp: 'cpp',
-  cs: 'csharp', css: 'css', env: 'dotenv', htm: 'html', html: 'html',
-  java: 'java', js: 'js', cjs: 'js', mjs: 'js', json: 'json', md: 'markdown',
-  py: 'python', pyw: 'python', rs: 'rust', sh: 'shell', bash: 'shell',
-  svg: 'svg', ts: 'typescript', mts: 'typescript', cts: 'typescript',
-  tsx: 'reactjs', jsx: 'reactjs', xml: 'xml', yaml: 'yaml', yml: 'yaml',
-  toml: 'toml', txt: 'text',
+  c: 'c',
+  h: 'c',
+  cc: 'cpp',
+  cpp: 'cpp',
+  cxx: 'cpp',
+  hpp: 'cpp',
+  cs: 'csharp',
+  css: 'css',
+  env: 'dotenv',
+  htm: 'html',
+  html: 'html',
+  java: 'java',
+  js: 'js',
+  cjs: 'js',
+  mjs: 'js',
+  json: 'json',
+  md: 'markdown',
+  py: 'python',
+  pyw: 'python',
+  rs: 'rust',
+  sh: 'shell',
+  bash: 'shell',
+  svg: 'svg',
+  ts: 'typescript',
+  mts: 'typescript',
+  cts: 'typescript',
+  tsx: 'reactjs',
+  jsx: 'reactjs',
+  xml: 'xml',
+  yaml: 'yaml',
+  yml: 'yaml',
+  toml: 'toml',
+  txt: 'text',
 };
 
 function getFileIcon(entry: RoomEntry, expanded: boolean): string {
@@ -35,11 +61,13 @@ interface FileExplorerProps {
   onCreateFolder: (parentId: string | null) => Promise<string | void>;
   onRename: (entry: RoomEntry) => void;
   onDelete: (entry: RoomEntry) => void;
+  fileDiagnostics?: Record<string, 'error' | 'warning'>;
 }
 
 export function FileExplorer({
   entries,
   activeFileId,
+  fileDiagnostics,
   onSelect,
   onCreateFile,
   onCreateFolder,
@@ -79,7 +107,11 @@ export function FileExplorer({
     (childrenByParent.get(parentId) ?? []).map((entry) => {
       const isExpanded = expandedFolders.has(entry.id);
       return (
-        <li key={entry.id}>
+        <li
+          key={entry.id}
+          role="treeitem"
+          aria-expanded={entry.isFolder ? isExpanded : undefined}
+        >
           <div
             className={`file-explorer-row${entry.id === activeFileId ? ' is-active' : ''}`}
           >
@@ -92,13 +124,84 @@ export function FileExplorer({
               }
               aria-expanded={entry.isFolder ? isExpanded : undefined}
               title={entry.name}
+              draggable={!entry.isFolder}
+              onDragStart={(event) => {
+                if (entry.isFolder) return;
+                event.dataTransfer.setData(
+                  'application/x-syncode-file-id',
+                  entry.id
+                );
+                event.dataTransfer.effectAllowed = 'copy';
+              }}
+              onKeyDown={(event) => {
+                const buttons = Array.from(
+                  event.currentTarget
+                    .closest('.file-explorer')
+                    ?.querySelectorAll<HTMLButtonElement>(
+                      '.file-explorer-select'
+                    ) ?? []
+                );
+                const index = buttons.indexOf(event.currentTarget);
+                if (
+                  event.key === 'ArrowDown' ||
+                  event.key === 'ArrowUp' ||
+                  event.key === 'Home' ||
+                  event.key === 'End'
+                ) {
+                  event.preventDefault();
+                  const next =
+                    event.key === 'Home'
+                      ? 0
+                      : event.key === 'End'
+                        ? buttons.length - 1
+                        : Math.max(
+                            0,
+                            Math.min(
+                              buttons.length - 1,
+                              index + (event.key === 'ArrowDown' ? 1 : -1)
+                            )
+                          );
+                  buttons[next]?.focus();
+                } else if (event.key === 'ArrowRight' && entry.isFolder) {
+                  event.preventDefault();
+                  if (!isExpanded) toggleFolder(entry.id);
+                  else buttons[index + 1]?.focus();
+                } else if (
+                  event.key === 'ArrowLeft' &&
+                  entry.isFolder &&
+                  isExpanded
+                ) {
+                  event.preventDefault();
+                  toggleFolder(entry.id);
+                } else if (event.key === 'ArrowLeft' && depth > 0) {
+                  event.preventDefault();
+                  const parent = event.currentTarget
+                    .closest('ul[role="group"]')
+                    ?.closest('li[role="treeitem"]');
+                  parent
+                    ?.querySelector<HTMLButtonElement>(
+                      ':scope > .file-explorer-row .file-explorer-select'
+                    )
+                    ?.focus();
+                }
+              }}
             >
               <Icon
                 className="file-explorer-icon"
                 icon={getFileIcon(entry, isExpanded)}
                 aria-hidden="true"
               />
-              <span className="file-explorer-name">{entry.name}</span>
+              <span
+                className={`file-explorer-name${
+                  fileDiagnostics?.[entry.id] === 'error'
+                    ? ' has-error'
+                    : fileDiagnostics?.[entry.id] === 'warning'
+                      ? ' has-warning'
+                      : ''
+                }`}
+              >
+                {entry.name}
+              </span>
             </button>
             <div className="file-explorer-actions">
               {entry.isFolder && (
@@ -155,7 +258,7 @@ export function FileExplorer({
             </div>
           </div>
           {entry.isFolder && isExpanded && (
-            <ul>{renderChildren(entry.id, depth + 1)}</ul>
+            <ul role="group">{renderChildren(entry.id, depth + 1)}</ul>
           )}
         </li>
       );
@@ -189,7 +292,9 @@ export function FileExplorer({
           </button>
         </div>
       </div>
-      <ul>{renderChildren(null)}</ul>
+      <ul role="tree" aria-label="Project files">
+        {renderChildren(null)}
+      </ul>
     </aside>
   );
 }
