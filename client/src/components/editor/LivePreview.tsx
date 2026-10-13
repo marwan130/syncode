@@ -88,7 +88,10 @@ function createPreviewDocument(
   const files = new Map(
     project.files.map((file) => [file.path.toLowerCase(), file.content])
   );
-  const activeDirectory = project.activeFilePath.split('/').slice(0, -1).join('/');
+  const activeDirectory = project.activeFilePath
+    .split('/')
+    .slice(0, -1)
+    .join('/');
   const htmlEntry =
     project.files.find((file) => file.path.toLowerCase() === 'index.html') ??
     project.files.find(
@@ -99,7 +102,9 @@ function createPreviewDocument(
     project.files.find(
       (file) => file.path === project.activeFilePath && language === 'html'
     ) ??
-    project.files.find((file) => file.path.toLowerCase().endsWith('/index.html'));
+    project.files.find((file) =>
+      file.path.toLowerCase().endsWith('/index.html')
+    );
 
   if (htmlEntry) {
     let html = htmlEntry.content;
@@ -138,7 +143,10 @@ function createPreviewDocument(
       return html.replace(/<head\b[^>]*>/i, (head) => `${head}${policy}`);
     }
     if (/<html\b[^>]*>/i.test(html)) {
-      return html.replace(/<html\b[^>]*>/i, (root) => `${root}<head>${policy}</head>`);
+      return html.replace(
+        /<html\b[^>]*>/i,
+        (root) => `${root}<head>${policy}</head>`
+      );
     }
     return `<!doctype html><html><head>${policy}</head><body>${html}</body></html>`;
   }
@@ -146,7 +154,10 @@ function createPreviewDocument(
   const source = javascriptOverride ?? project.source;
   const styles = project.files
     .filter((file) => file.path.toLowerCase().endsWith('.css'))
-    .map((file) => `<style>${file.content.replace(/<\/style/gi, '<\\/style')}</style>`)
+    .map(
+      (file) =>
+        `<style>${file.content.replace(/<\/style/gi, '<\\/style')}</style>`
+    )
     .join('');
 
   if (language === 'css') {
@@ -181,11 +192,21 @@ export function LivePreview({
         typeof state.tabId !== 'number' ||
         typeof state.canGoBack !== 'boolean' ||
         typeof state.canGoForward !== 'boolean'
-      ) return;
-      if (event.source !== frameRefs.current.get(state.tabId)?.contentWindow) return;
-      setTabs((current) => current.map((tab) => tab.id === state.tabId
-        ? { ...tab, canGoBack: state.canGoBack, canGoForward: state.canGoForward }
-        : tab));
+      )
+        return;
+      if (event.source !== frameRefs.current.get(state.tabId)?.contentWindow)
+        return;
+      setTabs((current) =>
+        current.map((tab) =>
+          tab.id === state.tabId
+            ? {
+                ...tab,
+                canGoBack: state.canGoBack,
+                canGoForward: state.canGoForward,
+              }
+            : tab
+        )
+      );
     };
     window.addEventListener('message', updateHistory);
     return () => window.removeEventListener('message', updateHistory);
@@ -270,16 +291,22 @@ export function LivePreview({
   };
 
   const moveHistory = (direction: 'back' | 'forward') => {
-    frameRefs.current.get(activeTabId)?.contentWindow?.postMessage(
-      { type: 'syncode-preview-history-move', tabId: activeTabId, direction },
-      '*'
-    );
+    frameRefs.current
+      .get(activeTabId)
+      ?.contentWindow?.postMessage(
+        { type: 'syncode-preview-history-move', tabId: activeTabId, direction },
+        '*'
+      );
   };
   const activeTab = tabs.find((tab) => tab.id === activeTabId);
 
   return (
     <section className="live-preview" style={style} aria-label="Live preview">
-      <div className="preview-tab-strip" role="tablist" aria-label="Preview tabs">
+      <div
+        className="preview-tab-strip"
+        role="tablist"
+        aria-label="Preview tabs"
+      >
         {tabs.map((tab, index) => (
           <div
             className={`preview-tab${activeTabId === tab.id ? ' is-active' : ''}`}
@@ -364,10 +391,14 @@ export function LivePreview({
             sandbox="allow-scripts"
             referrerPolicy="no-referrer"
             srcDoc={getDocument(tab.id)}
-            onLoad={() => frameRefs.current.get(tab.id)?.contentWindow?.postMessage(
-              { type: 'syncode-preview-history-state', tabId: tab.id },
-              '*'
-            )}
+            onLoad={() =>
+              frameRefs.current
+                .get(tab.id)
+                ?.contentWindow?.postMessage(
+                  { type: 'syncode-preview-history-state', tabId: tab.id },
+                  '*'
+                )
+            }
             hidden={activeTabId !== tab.id}
           />
         ))}

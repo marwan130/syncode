@@ -18,6 +18,8 @@ export function ChatPanel({
 }: ChatPanelProps) {
   const [draft, setDraft] = useState('');
   const [sendError, setSendError] = useState('');
+  const [isSending, setIsSending] = useState(false);
+  const sendingRef = useRef(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -27,13 +29,18 @@ export function ChatPanel({
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const content = draft.trim();
-    if (!content || disabled) return;
+    if (!content || disabled || sendingRef.current) return;
+    sendingRef.current = true;
+    setIsSending(true);
     setSendError('');
     try {
       await onSendMessage(content);
       setDraft('');
     } catch {
       setSendError('Message could not be sent. Wait a moment and try again.');
+    } finally {
+      sendingRef.current = false;
+      setIsSending(false);
     }
   }
 
@@ -56,24 +63,36 @@ export function ChatPanel({
             {sendError}
           </p>
         )}
-        <textarea
-          aria-label="Message"
-          placeholder="Write a message…"
-          value={draft}
-          maxLength={2000}
-          disabled={disabled}
-          onChange={(event) => setDraft(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter' && !event.shiftKey) {
-              event.preventDefault();
-              event.currentTarget.form?.requestSubmit();
-            }
-          }}
-          rows={2}
-        />
-        <button type="submit" disabled={disabled || !draft.trim()}>
-          Send
-        </button>
+        <div className="chat-composer">
+          <textarea
+            aria-label="Message"
+            placeholder="Write a message…"
+            value={draft}
+            maxLength={2000}
+            disabled={disabled}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                event.currentTarget.form?.requestSubmit();
+              }
+            }}
+            rows={1}
+          />
+          <button
+            type="submit"
+            aria-label="Send message"
+            title="Send message"
+            disabled={disabled || isSending || !draft.trim()}
+          >
+            <svg viewBox="0 0 20 20" aria-hidden="true">
+              <path
+                d="M2.5 9.1 17.2 2.7c.6-.3 1.2.3.9.9l-6.4 14.7c-.3.7-1.3.6-1.4-.2l-.9-5.7-5.7-.9c-.8-.1-.9-1.1-.2-1.4Zm7.5 1.2 5.2-5.2-6.5 4.3 1.3.9Z"
+                fill="currentColor"
+              />
+            </svg>
+          </button>
+        </div>
       </form>
     </aside>
   );
