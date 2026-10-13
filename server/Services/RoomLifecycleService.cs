@@ -20,10 +20,6 @@ public class RoomLifecycleService : BackgroundService
 
         _expiryThreshold = TimeSpan.FromMinutes(expiryMinutes);
         _cleanupInterval = TimeSpan.FromMinutes(intervalMinutes);
-
-        _logger.LogInformation(
-            "RoomLifecycleService started. Expiry threshold: {Threshold}m, Cleanup interval: {Interval}m",
-            expiryMinutes, intervalMinutes);
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)

@@ -23,6 +23,7 @@ builder.Services.AddOpenApi();
 builder.Services.AddControllers();
 
 builder.Services.AddSingleton<RedisRoomStore>();
+builder.Services.AddSingleton<TerminalSessionRegistry>();
 builder.Services.AddHostedService<RoomLifecycleService>();
 builder.Services.AddHttpClient<ExecutionServiceClient>(client =>
     client.Timeout = TimeSpan.FromSeconds(15));

@@ -9,10 +9,57 @@ public class CollabHub : Hub
 {
     private readonly RedisRoomStore _store;
     private readonly ExecutionServiceClient _executionService;
-    public CollabHub(RedisRoomStore store, ExecutionServiceClient executionService)
+    private readonly TerminalSessionRegistry _terminalSessions;
+    public CollabHub(RedisRoomStore store, ExecutionServiceClient executionService, TerminalSessionRegistry terminalSessions)
     {
         _store = store;
         _executionService = executionService;
+        _terminalSessions = terminalSessions;
+    }
+
+    public async Task<TerminalSessionStartResult> StartTerminal()
+    {
+        var roomId = await _store.GetConnectionRoomAsync(Context.ConnectionId);
+        if (string.IsNullOrEmpty(roomId)) throw new HubException("Join a room before opening a terminal.");
+        await EnsureParticipantAsync(roomId);
+        var session = await _executionService.StartTerminalAsync(Context.ConnectionAborted);
+        if (_terminalSessions.TryAdd(Context.ConnectionId, roomId, session.SessionId)) return session;
+        await _executionService.CloseTerminalAsync(session.SessionId, Context.ConnectionAborted);
+        throw new HubException("You can have up to three terminal tabs open at once.");
+    }
+
+    public async Task WriteTerminalInput(string sessionId, string input)
+    {
+        var roomId = await EnsureTerminalOwnerAsync(sessionId);
+        if (string.IsNullOrEmpty(input) || input.Length > 4096 || !_terminalSessions.AllowCommand(Context.ConnectionId, roomId, sessionId))
+            throw new HubException("Terminal input rate limit reached. Wait a moment and try again.");
+        await _executionService.WriteTerminalInputAsync(sessionId, input, Context.ConnectionAborted);
+    }
+
+    public async Task<TerminalOutputResult> ReadTerminalOutput(string sessionId, int offset)
+    {
+        var roomId = await EnsureTerminalOwnerAsync(sessionId);
+        if (!_terminalSessions.AllowPoll(Context.ConnectionId, roomId, sessionId))
+            throw new HubException("Terminal output is being requested too quickly.");
+        return await _executionService.ReadTerminalOutputAsync(sessionId, offset, Context.ConnectionAborted);
+    }
+
+    public async Task CloseTerminal(string sessionId)
+    {
+        var roomId = await EnsureTerminalOwnerAsync(sessionId);
+        _terminalSessions.Remove(Context.ConnectionId, roomId, sessionId);
+        await _executionService.CloseTerminalAsync(sessionId, Context.ConnectionAborted);
+    }
+
+    private async Task<string> EnsureTerminalOwnerAsync(string sessionId)
+    {
+        var roomId = await _store.GetConnectionRoomAsync(Context.ConnectionId);
+        if (string.IsNullOrEmpty(roomId)) throw new HubException("Join a room before using a terminal.");
+        await EnsureParticipantAsync(roomId);
+        if (sessionId.Length != 32 || !sessionId.All(Uri.IsHexDigit) ||
+            !_terminalSessions.Owns(Context.ConnectionId, roomId, sessionId))
+            throw new HubException("Terminal session not found.");
+        return roomId;
     }
 
     public async Task<ExecutionSubmissionResult> RunExecution(
@@ -45,13 +92,28 @@ public class CollabHub : Hub
         var participant = await _store.GetParticipantAsync(roomId, Context.ConnectionId)
             ?? throw new HubException("Join a room before running code.");
 
-        return await _executionService.SubmitAsync(
+        var submission = await _executionService.SubmitAsync(
             roomId,
             participant.UserId ?? participant.DisplayName,
             executionLanguage,
             source,
             requestGuid.ToString("N"),
             Context.ConnectionAborted);
+        if (!_terminalSessions.TryAddExecution(Context.ConnectionId, roomId, submission.JobId))
+            throw new HubException("Could not attach an interactive terminal to this run.");
+        return submission;
+    }
+
+    public async Task WriteExecutionInput(string jobId, string input)
+    {
+        var roomId = await _store.GetConnectionRoomAsync(Context.ConnectionId);
+        if (string.IsNullOrEmpty(roomId)) throw new HubException("Join a room before using the terminal.");
+        await EnsureParticipantAsync(roomId);
+        if (jobId.Length != 32 || !jobId.All(Uri.IsHexDigit) || !_terminalSessions.OwnsExecution(Context.ConnectionId, roomId, jobId))
+            throw new HubException("Execution not found.");
+        if (string.IsNullOrEmpty(input) || input.Length > 1024 || !_terminalSessions.AllowExecutionInput(Context.ConnectionId, roomId, jobId))
+            throw new HubException("Terminal input rate limit reached. Wait a moment and try again.");
+        await _executionService.WriteExecutionInputAsync(jobId, input, Context.ConnectionAborted);
     }
 
     public async Task JoinRoom(
@@ -107,6 +169,11 @@ public class CollabHub : Hub
         var oldRoomId = await _store.GetConnectionRoomAsync(Context.ConnectionId);
         if (!string.IsNullOrEmpty(oldRoomId) && oldRoomId != roomId)
         {
+            foreach (var sessionId in _terminalSessions.RemoveAll(Context.ConnectionId))
+            {
+                try { await _executionService.CloseTerminalAsync(sessionId, CancellationToken.None); }
+                catch (HubException) { }
+            }
             await Groups.RemoveFromGroupAsync(Context.ConnectionId, oldRoomId);
             await _store.RemoveParticipantAsync(oldRoomId, Context.ConnectionId);
             await _store.ClearConnectionRoomAsync(Context.ConnectionId);
@@ -300,6 +367,12 @@ public class CollabHub : Hub
 
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
+        foreach (var sessionId in _terminalSessions.RemoveAll(Context.ConnectionId))
+        {
+            try { await _executionService.CloseTerminalAsync(sessionId, CancellationToken.None); }
+            catch (HubException) { }
+        }
+        _terminalSessions.RemoveExecutions(Context.ConnectionId);
         var roomId = await _store.GetConnectionRoomAsync(Context.ConnectionId);
         if (!string.IsNullOrEmpty(roomId))
         {

@@ -8,6 +8,7 @@ namespace server.Services;
 public sealed class ExecutionOutputRelayService(
     IConnectionMultiplexer redis,
     IHubContext<CollabHub> hub,
+    TerminalSessionRegistry terminalSessions,
     IConfiguration configuration,
     ILogger<ExecutionOutputRelayService> logger) : BackgroundService
 {
@@ -36,6 +37,8 @@ public sealed class ExecutionOutputRelayService(
                 {
                     await hub.Clients.Group(executionEvent.RoomId)
                         .SendAsync(eventName, payload, stoppingToken);
+                    if (executionEvent.Type is "completed" or "failed")
+                        terminalSessions.RemoveExecution(executionEvent.JobId);
                 }
             }
             catch (Exception exception)

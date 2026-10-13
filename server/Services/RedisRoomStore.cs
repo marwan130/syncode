@@ -104,12 +104,10 @@ public class RedisRoomStore
     };
 
     private readonly IDatabase _db;
-    private readonly ILogger<RedisRoomStore> _logger;
 
-    public RedisRoomStore(IConnectionMultiplexer redis, ILogger<RedisRoomStore> logger)
+    public RedisRoomStore(IConnectionMultiplexer redis)
     {
         _db = redis.GetDatabase();
-        _logger = logger;
     }
 
     public async Task CreateRoomAsync(string roomId, string accessKeyHash)
@@ -123,8 +121,6 @@ public class RedisRoomStore
             new HashEntry("accessKeyHash", accessKeyHash),
         ]);
         await _db.HashSetAsync(FilesKey(roomId), "main.cpp", JsonSerializer.Serialize(new RoomEntry("main.cpp", "main.cpp", null, false)));
-
-        _logger.LogInformation("Created room {RoomId}", roomId);
     }
 
     public async Task<bool> ValidateRoomAccessAsync(string roomId, string accessKey)
@@ -165,7 +161,6 @@ public class RedisRoomStore
             FilesKey(roomId),
         }.Concat(fileIds.Select(id => (RedisKey)FileSnapshotKey(roomId, (string)id!))).ToArray();
         await _db.KeyDeleteAsync(keys);
-        _logger.LogInformation("Deleted room {RoomId}", roomId);
     }
 
     public async Task AppendChatMessageAsync(string roomId, ChatMessage message)
