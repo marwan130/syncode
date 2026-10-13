@@ -32,7 +32,13 @@ interface RenderedCursor {
  *
  * re-runs whenever the document changes, peers change, or the editor scrolls.
  */
-export function Cursors({ editor, peers, providerRef, status, fileId }: CursorsProps) {
+export function Cursors({
+  editor,
+  peers,
+  providerRef,
+  status,
+  fileId,
+}: CursorsProps) {
   const [cursors, setCursors] = useState<RenderedCursor[]>([]);
 
   useEffect(() => {

@@ -1,35 +1,21 @@
-import type { CSSProperties } from 'react';
 import type { editor as MonacoEditor } from 'monaco-editor';
 
 interface SearchReplaceProps {
   editor: MonacoEditor.IStandaloneCodeEditor | null;
 }
 
-const buttonStyle: CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  width: 28,
-  height: 28,
-  padding: 0,
-  color: 'var(--text-muted)',
-  background: 'transparent',
-  border: 0,
-  cursor: 'pointer',
-};
-
 export function SearchReplace({ editor }: SearchReplaceProps) {
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+    <div className="search-replace-actions">
       <button
         type="button"
+        className="search-replace-button"
         aria-label="Find in file"
         title="Find (Ctrl+F)"
         disabled={!editor}
         onClick={() => {
           void editor?.getAction('actions.find')?.run();
         }}
-        style={{ ...buttonStyle, opacity: editor ? 1 : 0.5 }}
       >
         <svg
           width="14"
@@ -48,13 +34,13 @@ export function SearchReplace({ editor }: SearchReplaceProps) {
       </button>
       <button
         type="button"
+        className="search-replace-button"
         aria-label="Find and replace in file"
         title="Find and replace"
         disabled={!editor}
         onClick={() => {
           void editor?.getAction('editor.action.startFindReplaceAction')?.run();
         }}
-        style={{ ...buttonStyle, opacity: editor ? 1 : 0.5 }}
       >
         <svg
           width="14"

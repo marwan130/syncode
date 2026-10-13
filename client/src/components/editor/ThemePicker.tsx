@@ -133,9 +133,7 @@ function readSaved(): ThemeEntry {
         parsed.value.semanticTokenColors)
     )
       return parsed;
-  } catch {
-    /* Use the built-in default when saved theme data is invalid. */
-  }
+  } catch {}
   return BUILT_INS[0];
 }
 function apply(entry: ThemeEntry, monaco: Monaco | null) {
@@ -149,6 +147,7 @@ function apply(entry: ThemeEntry, monaco: Monaco | null) {
     'sideBar.border',
     theme.type === 'light' ? '#d4d4d4' : '#3c3c3c'
   );
+  const isLightTheme = theme.type?.toLowerCase().includes('light') ?? false;
   const vars: Record<string, string> = {
     '--app-bg': get('titleBar.activeBackground', get('sideBar.background', bg)),
     '--surface-bg': get('panel.background', get('sideBar.background', bg)),
@@ -168,6 +167,19 @@ function apply(entry: ThemeEntry, monaco: Monaco | null) {
     '--accent-bg': `${get('focusBorder', '#38bdf8')}22`,
     '--accent-border': get('focusBorder', '#38bdf8'),
     '--danger': get('errorForeground', '#ef4444'),
+    '--scrollbar-track': get('scrollbar.background', 'transparent'),
+    '--scrollbar-thumb': get(
+      'scrollbarSlider.background',
+      isLightTheme ? 'rgba(100, 100, 100, 0.4)' : 'rgba(121, 121, 121, 0.4)'
+    ),
+    '--scrollbar-thumb-hover': get(
+      'scrollbarSlider.hoverBackground',
+      'rgba(100, 100, 100, 0.7)'
+    ),
+    '--scrollbar-thumb-active': get(
+      'scrollbarSlider.activeBackground',
+      isLightTheme ? 'rgba(0, 0, 0, 0.6)' : 'rgba(191, 191, 191, 0.4)'
+    ),
   };
   Object.entries(vars).forEach(([key, value]) =>
     root.style.setProperty(key, value)
@@ -239,9 +251,7 @@ export function ThemePicker({ monaco }: { monaco: Monaco | null }) {
     setSelected(entry);
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(entry));
-    } catch {
-      // Apply the selected theme for this session even when storage is unavailable.
-    }
+    } catch {}
     apply(entry, monaco);
   };
   const importTheme = async (file?: File) => {

@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import type { RefObject } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -26,10 +26,12 @@ export function JoinRoomModal({
 }: JoinRoomModalProps) {
   const [inviteLink, setInviteLink] = useState('');
   const [error, setError] = useState('');
+  const submittedRef = useRef(false);
   const navigate = useNavigate();
 
   useEffect(() => {
     if (!isOpen) return;
+    submittedRef.current = false;
     const dismissOnOutsidePress = (event: PointerEvent) => {
       if (!containerRef.current?.contains(event.target as Node)) onClose();
     };
@@ -42,6 +44,7 @@ export function JoinRoomModal({
 
   const handleJoin = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (submittedRef.current) return;
     if (!currentName) {
       setError('Choose a name from your avatar menu first.');
       return;
@@ -50,7 +53,8 @@ export function JoinRoomModal({
     let invite: URL;
     try {
       invite = new URL(
-        inviteLink.trim().startsWith('/') || inviteLink.trim().startsWith('http')
+        inviteLink.trim().startsWith('/') ||
+          inviteLink.trim().startsWith('http')
           ? inviteLink.trim()
           : `/room/${inviteLink.trim()}`,
         window.location.origin
@@ -61,7 +65,8 @@ export function JoinRoomModal({
     }
 
     const roomId = invite.pathname.match(/\/room\/([a-zA-Z0-9_-]+)\/?$/)?.[1];
-    const accessKey = new URLSearchParams(invite.hash.slice(1)).get('key') ?? '';
+    const accessKey =
+      new URLSearchParams(invite.hash.slice(1)).get('key') ?? '';
     if (!roomId || !/^[0-9a-f]{64}$/i.test(accessKey)) {
       setError('Use a complete room invite link.');
       return;
@@ -71,6 +76,7 @@ export function JoinRoomModal({
       return;
     }
 
+    submittedRef.current = true;
     setStoredDisplayName(roomId, getStoredDisplayName(roomId) ?? currentName);
     setStoredColor(currentColor);
     onClose();

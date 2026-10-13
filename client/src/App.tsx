@@ -11,7 +11,11 @@ import EditorComponent from './components/editor/Editor';
 import { RoomJoin } from './components/room/RoomJoin';
 import type { RoomProfileForm } from './components/room/RoomJoin';
 import { ThemeInitializer } from './components/editor/ThemePicker';
-import { getStoredDisplayName, setStoredColor, setStoredDisplayName } from './utils/userStorage';
+import {
+  getStoredDisplayName,
+  setStoredColor,
+  setStoredDisplayName,
+} from './utils/userStorage';
 
 function Home() {
   const navigate = useNavigate();
@@ -19,7 +23,11 @@ function Home() {
   const [creating, setCreating] = useState(false);
   const [intent, setIntent] = useState<'create' | 'join' | null>(null);
 
-  async function startRoom({ displayName, color, inviteLink }: RoomProfileForm) {
+  async function startRoom({
+    displayName,
+    color,
+    inviteLink,
+  }: RoomProfileForm) {
     if (intent === 'create') setCreating(true);
     setError('');
     if (intent === 'create') {
@@ -53,8 +61,11 @@ function Home() {
       setError('Enter a valid room invite link.');
       return;
     }
-    const roomId = inviteUrl.pathname.match(/\/room\/([a-zA-Z0-9_-]+)\/?$/)?.[1];
-    const accessKey = new URLSearchParams(inviteUrl.hash.slice(1)).get('key') ?? '';
+    const roomId = inviteUrl.pathname.match(
+      /\/room\/([a-zA-Z0-9_-]+)\/?$/
+    )?.[1];
+    const accessKey =
+      new URLSearchParams(inviteUrl.hash.slice(1)).get('key') ?? '';
     if (!roomId || !/^[0-9a-f]{64}$/i.test(accessKey)) {
       setError('Use a complete room invite link with its access key.');
       return;
@@ -72,10 +83,7 @@ function Home() {
         <button onClick={() => setIntent('create')} disabled={creating}>
           Create a room
         </button>
-        <button
-          className="home-secondary"
-          onClick={() => setIntent('join')}
-        >
+        <button className="home-secondary" onClick={() => setIntent('join')}>
           Join a room
         </button>
       </div>
@@ -85,7 +93,7 @@ function Home() {
           mode={intent}
           presentation="dialog"
           onClose={() => setIntent(null)}
-          onStart={(profile) => void startRoom(profile)}
+          onStart={startRoom}
         />
       )}
     </main>
@@ -102,10 +110,19 @@ function RoomRoute() {
   if (!/^[0-9a-f]{64}$/i.test(accessKey)) {
     return (
       <main className="home-page">
-        <p style={{ color: 'var(--text-muted)', fontSize: 14, textAlign: 'center', maxWidth: 340 }}>
+        <p
+          style={{
+            color: 'var(--text-muted)',
+            fontSize: 14,
+            textAlign: 'center',
+            maxWidth: 340,
+          }}
+        >
           This room link is missing its access key. Ask for a fresh invite link.
         </p>
-        <button className="home-secondary" onClick={() => navigate('/')}>Back to home</button>
+        <button className="home-secondary" onClick={() => navigate('/')}>
+          Back to home
+        </button>
       </main>
     );
   }

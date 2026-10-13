@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   CURSOR_COLORS,
   getStoredColor,
@@ -21,7 +21,7 @@ interface RoomJoinProps {
   currentRoomId?: string;
   onJoin?: (info: { displayName: string; color: string }) => void;
   onColorChange?: (color: string) => void;
-  onStart?: (info: RoomProfileForm) => void;
+  onStart?: (info: RoomProfileForm) => void | Promise<void>;
   onClose: () => void;
 }
 
@@ -40,15 +40,18 @@ export function RoomJoin({
   const [selectedColor, setSelectedColor] = useState(getStoredColor);
   const [inviteLink, setInviteLink] = useState('');
   const [error, setError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const submittingRef = useRef(false);
   let linkedRoomId = '';
   if (mode === 'join' && inviteLink) {
     try {
-      linkedRoomId = new URL(
-        inviteLink.startsWith('/') || inviteLink.startsWith('http')
-          ? inviteLink
-          : `/room/${inviteLink}`,
-        window.location.origin
-      ).pathname.match(/\/room\/([a-zA-Z0-9_-]+)\/?$/)?.[1] ?? '';
+      linkedRoomId =
+        new URL(
+          inviteLink.startsWith('/') || inviteLink.startsWith('http')
+            ? inviteLink
+            : `/room/${inviteLink}`,
+          window.location.origin
+        ).pathname.match(/\/room\/([a-zA-Z0-9_-]+)\/?$/)?.[1] ?? '';
     } catch {
       linkedRoomId = '';
     }
@@ -71,7 +74,7 @@ export function RoomJoin({
     onColorChange?.(color);
   };
 
-  const handleSubmit = (event: React.FormEvent) => {
+  const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     const trimmedName = (lockedName || name).trim();
     if (!trimmedName) {
@@ -118,7 +121,17 @@ export function RoomJoin({
         return;
       }
     }
-    onStart?.({ ...info, inviteLink: inviteLink.trim() });
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+    setIsSubmitting(true);
+    try {
+      await onStart?.({ ...info, inviteLink: inviteLink.trim() });
+    } catch {
+      setError('Could not continue. Please try again.');
+    } finally {
+      submittingRef.current = false;
+      setIsSubmitting(false);
+    }
   };
 
   const content = (
@@ -173,13 +186,19 @@ export function RoomJoin({
           ))}
         </div>
 
-        <button className="profile-join-button" type="submit">
-          {mode === 'profile'
-            ? 'Save changes'
-            : mode === 'create'
-              ? 'Create room'
-              : 'Join room'}
-        </button>
+        {mode !== 'profile' && (
+          <button
+            className="profile-join-button"
+            type="submit"
+            disabled={isSubmitting}
+          >
+            {isSubmitting
+              ? 'Please wait…'
+              : mode === 'create'
+                ? 'Create room'
+                : 'Join room'}
+          </button>
+        )}
       </form>
     </section>
   );
