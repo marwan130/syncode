@@ -19,6 +19,7 @@ import { createCursorAnchor, resolveCursorAnchor } from '../crdt/CursorAnchor';
 export class MonacoCrdtBinding {
   private editor: monaco.editor.IStandaloneCodeEditor;
   private provider: SignalRCrdtProvider;
+  private fileId: string;
   private isApplyingRemote = false;
   private isApplyingLocal = false;
   private disposables: monaco.IDisposable[] = [];
@@ -28,10 +29,12 @@ export class MonacoCrdtBinding {
 
   constructor(
     editor: monaco.editor.IStandaloneCodeEditor,
-    provider: SignalRCrdtProvider
+    provider: SignalRCrdtProvider,
+    fileId = provider.activeFileId
   ) {
     this.editor = editor;
     this.provider = provider;
+    this.fileId = fileId;
 
     this.registerLocalChangeHandler();
     this.registerRemoteChangeHandler();
@@ -97,7 +100,10 @@ export class MonacoCrdtBinding {
     if (!model || !position) return;
 
     const offset = model.getOffsetAt(position);
-    this.localCursorAnchor = createCursorAnchor(this.provider.doc, offset);
+    this.localCursorAnchor = createCursorAnchor(
+      this.provider.getDocument(this.fileId),
+      offset
+    );
     this.cursorListeners.forEach((l) => l(this.localCursorAnchor));
   }
 
@@ -106,7 +112,7 @@ export class MonacoCrdtBinding {
     deleteCount: number,
     insertedText: string
   ): void {
-    const doc = this.provider.doc;
+    const doc = this.provider.getDocument(this.fileId);
 
     /**
      * build an index of visible characters so we can map monaco's
@@ -122,13 +128,13 @@ export class MonacoCrdtBinding {
         originId = char.id;
       }
       if (textOffset < offset + deleteCount && charEnd > offset) {
-        this.provider.localDelete(char.id);
+        this.provider.localDelete(char.id, this.fileId);
       }
       textOffset = charEnd;
     }
 
     for (const ch of insertedText) {
-      const op = this.provider.localInsert(originId, ch);
+      const op = this.provider.localInsert(originId, ch, this.fileId);
       originId = op.char.id;
     }
   }
@@ -141,7 +147,8 @@ export class MonacoCrdtBinding {
     const unsubscribe = this.provider.onDocumentChange(() => {
       if (this.isApplyingRemote || this.isApplyingLocal) return;
 
-      const newText = this.provider.doc.toVisibleString();
+      const doc = this.provider.getDocument(this.fileId);
+      const newText = doc.toVisibleString();
       const model = this.editor.getModel();
       if (!model) return;
 
@@ -186,10 +193,7 @@ export class MonacoCrdtBinding {
         ]);
 
         if (this.localCursorAnchor) {
-          const resolved = resolveCursorAnchor(
-            this.provider.doc,
-            this.localCursorAnchor
-          );
+          const resolved = resolveCursorAnchor(doc, this.localCursorAnchor);
           this.editor.setPosition({
             lineNumber: resolved.lineNumber,
             column: resolved.column,

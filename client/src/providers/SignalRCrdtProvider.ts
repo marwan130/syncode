@@ -68,6 +68,17 @@ export interface ExecutionSubmission {
   queuePosition: number;
 }
 
+export interface TerminalSessionStart {
+  sessionId: string;
+}
+
+export interface TerminalOutput {
+  text: string;
+  offset: number;
+  exited: boolean;
+  exitCode: number | null;
+}
+
 export interface RoomEntry {
   id: string;
   name: string;
@@ -100,10 +111,13 @@ export class SignalRCrdtProvider {
       cursor: null,
       name: this.displayName,
       color,
-    }).catch(() => { });
+    }).catch(() => {});
   }
   public getFileContent(fileId: string): string {
     return this.documentFor(fileId).toVisibleString();
+  }
+  public getDocument(fileId: string): CrdtDocument {
+    return this.documentFor(fileId);
   }
   public readonly siteId: string;
   private connection: HubConnection;
@@ -173,7 +187,7 @@ export class SignalRCrdtProvider {
       this.emitStatus('connected');
     } catch (err) {
       if (this.connection.state !== HubConnectionState.Disconnected) {
-        await this.connection.stop().catch(() => { });
+        await this.connection.stop().catch(() => {});
       }
       this.emitStatus('disconnected');
       throw err;
@@ -194,7 +208,7 @@ export class SignalRCrdtProvider {
               fileId,
               this.documentFor(fileId).toSnapshot()
             )
-            .catch(() => { })
+            .catch(() => {})
         )
       );
     }
@@ -204,11 +218,14 @@ export class SignalRCrdtProvider {
     this.emitStatus('disconnected');
   }
 
-  public localInsert(originId: CrdtId | null, value: string): InsertOp {
-    const fileId = this.activeFile;
+  public localInsert(
+    originId: CrdtId | null,
+    value: string,
+    fileId = this.activeFile
+  ): InsertOp {
     const op = this.documentFor(fileId).localInsert(originId, value);
     this.emitChange();
-    this.sendOp(fileId, op).catch(() => { });
+    this.sendOp(fileId, op).catch(() => {});
     this.scheduleSnapshotSave(fileId);
     return op;
   }
@@ -290,11 +307,10 @@ export class SignalRCrdtProvider {
     this.emitChange();
   }
 
-  public localDelete(id: CrdtId): DeleteOp {
-    const fileId = this.activeFile;
+  public localDelete(id: CrdtId, fileId = this.activeFile): DeleteOp {
     const op = this.documentFor(fileId).localDelete(id);
     this.emitChange();
-    this.sendOp(fileId, op).catch(() => { });
+    this.sendOp(fileId, op).catch(() => {});
     this.scheduleSnapshotSave(fileId);
     return op;
   }
@@ -312,7 +328,7 @@ export class SignalRCrdtProvider {
             fileId,
             this.documentFor(fileId).toSnapshot()
           )
-          .catch(() => { });
+          .catch(() => {});
       }
     }, 1000);
     this.snapshotSaveTimers.set(fileId, timer);
@@ -323,7 +339,10 @@ export class SignalRCrdtProvider {
     try {
       await this.connection.invoke('UpdateAwareness', this.roomId, state);
     } catch (err) {
-      console.error('[SignalRCrdtProvider] Failed to send awareness:', errorMessage(err));
+      console.error(
+        '[SignalRCrdtProvider] Failed to send awareness:',
+        errorMessage(err)
+      );
     }
   }
 
@@ -345,7 +364,42 @@ export class SignalRCrdtProvider {
     );
   }
 
-  public onExecutionEvent(listener: (event: ExecutionEvent) => void): () => void {
+  public async startTerminal(): Promise<TerminalSessionStart> {
+    return this.connection.invoke<TerminalSessionStart>('StartTerminal');
+  }
+
+  public async writeExecutionInput(
+    jobId: string,
+    input: string
+  ): Promise<void> {
+    await this.connection.invoke('WriteExecutionInput', jobId, input);
+  }
+
+  public async writeTerminalInput(
+    sessionId: string,
+    input: string
+  ): Promise<void> {
+    await this.connection.invoke('WriteTerminalInput', sessionId, input);
+  }
+
+  public async readTerminalOutput(
+    sessionId: string,
+    offset: number
+  ): Promise<TerminalOutput> {
+    return this.connection.invoke<TerminalOutput>(
+      'ReadTerminalOutput',
+      sessionId,
+      offset
+    );
+  }
+
+  public async closeTerminal(sessionId: string): Promise<void> {
+    await this.connection.invoke('CloseTerminal', sessionId);
+  }
+
+  public onExecutionEvent(
+    listener: (event: ExecutionEvent) => void
+  ): () => void {
     this.executionEventListeners.add(listener);
     return () => this.executionEventListeners.delete(listener);
   }
@@ -466,7 +520,10 @@ export class SignalRCrdtProvider {
           this.emitChange();
           this.scheduleSnapshotSave(fileId);
         } catch (err) {
-          console.error('[SignalRCrdtProvider] Failed to load snapshot:', errorMessage(err));
+          console.error(
+            '[SignalRCrdtProvider] Failed to load snapshot:',
+            errorMessage(err)
+          );
         }
       }
     );
@@ -542,7 +599,7 @@ export class SignalRCrdtProvider {
       (userId: string, newRoomId?: string) => {
         if (userId === this.siteId) {
           this.evictedListeners.forEach((l) => l(newRoomId));
-          this.disconnect().catch(() => { });
+          this.disconnect().catch(() => {});
         } else {
           this.peerLeftByUserListeners.forEach((l) => l(userId, newRoomId));
         }
@@ -563,7 +620,7 @@ export class SignalRCrdtProvider {
           '[SignalRCrdtProvider] Failed to rejoin room after reconnect:',
           errorMessage(err)
         );
-        await this.connection.stop().catch(() => { });
+        await this.connection.stop().catch(() => {});
       }
     });
 
@@ -594,14 +651,14 @@ export class SignalRCrdtProvider {
   }
 
   private async sendOp(fileId: string, op: CrdtOp): Promise<void> {
-    if (this.connection.state !== HubConnectionState.Connected) {
-      console.warn('[SignalRCrdtProvider] sendOp skipped: not connected');
-      return;
-    }
+    if (this.connection.state !== HubConnectionState.Connected) return;
     try {
       await this.connection.invoke('SendFileOp', this.roomId, fileId, op);
     } catch (err) {
-      console.error('[SignalRCrdtProvider] Failed to send op:', errorMessage(err));
+      console.error(
+        '[SignalRCrdtProvider] Failed to send op:',
+        errorMessage(err)
+      );
     }
   }
 

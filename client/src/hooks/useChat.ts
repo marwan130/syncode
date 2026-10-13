@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 import type {
   ChatMessage,
@@ -13,6 +13,7 @@ interface UseChatProps {
 
 export function useChat({ providerRef, status }: UseChatProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const sendingRef = useRef(false);
 
   useEffect(() => {
     const provider = providerRef.current;
@@ -46,8 +47,13 @@ export function useChat({ providerRef, status }: UseChatProps) {
   const sendMessage = useCallback(
     async (content: string) => {
       const text = content.trim();
-      if (!text || text.length > 2000) return;
-      await providerRef.current?.sendChatMessage(text);
+      if (!text || text.length > 2000 || sendingRef.current) return;
+      sendingRef.current = true;
+      try {
+        await providerRef.current?.sendChatMessage(text);
+      } finally {
+        sendingRef.current = false;
+      }
     },
     [providerRef]
   );

@@ -22,6 +22,7 @@ export function useExecutionStream({
   status,
 }: UseExecutionStreamProps) {
   const [chunks, setChunks] = useState<TerminalOutputChunk[]>([]);
+  const [outputRevision, setOutputRevision] = useState(0);
   const [isRunning, setIsRunning] = useState(false);
   const [message, setMessage] = useState('Ready');
   const [jobId, setJobId] = useState<string | null>(null);
@@ -64,6 +65,7 @@ export function useExecutionStream({
 
   const runCode = useCallback(
     async (language: ExecutionLanguage, source: string) => {
+      if (runningRef.current) return;
       const provider = providerRef.current;
       if (!provider || status !== 'connected') {
         setMessage('Connect to the room before running code.');
@@ -75,12 +77,18 @@ export function useExecutionStream({
       runningRef.current = true;
       setIsRunning(true);
       setChunks([]);
+      setOutputRevision((revision) => revision + 1);
       setJobId(null);
       setMessage('Submitting…');
 
       try {
-        const submission = await provider.runExecution(language, source, requestId);
-        if (activeRequestId.current !== requestId || !runningRef.current) return;
+        const submission = await provider.runExecution(
+          language,
+          source,
+          requestId
+        );
+        if (activeRequestId.current !== requestId || !runningRef.current)
+          return;
         setJobId(submission.jobId);
         setMessage(
           submission.queuePosition > 1
@@ -101,11 +109,5 @@ export function useExecutionStream({
     [providerRef, status]
   );
 
-  const clear = useCallback(() => {
-    setChunks([]);
-    setJobId(null);
-    if (!runningRef.current) setMessage('Ready');
-  }, []);
-
-  return { chunks, isRunning, message, jobId, runCode, clear };
+  return { chunks, outputRevision, isRunning, message, jobId, runCode };
 }
