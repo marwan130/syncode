@@ -1,37 +1,49 @@
-import Editor, { type Monaco, type OnMount } from '@monaco-editor/react';
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import type { Monaco, OnMount } from '@monaco-editor/react';
 import type * as monaco from 'monaco-editor';
 import { useNavigate, useParams } from 'react-router-dom';
 import { MonacoCrdtBinding } from '../../bindings/MonacoCrdtBinding';
 import { useAwareness } from '../../hooks/useAwareness';
 import { useCrdtSync } from '../../hooks/useCrdtSync';
+import { useChat } from '../../hooks/useChat';
+import { useDebouncedPreview } from '../../hooks/useDebouncedPreview';
+import { useExecutionStream } from '../../hooks/useExecutionStream';
+import { useFileDiagnostics } from '../../hooks/useFileDiagnostics';
 import {
   createSiteId,
   getStoredColor,
   getStoredDisplayName,
 } from '../../utils/userStorage';
-import { Cursors } from './Cursors';
-import { LivePreview } from './LivePreview';
-import { useDebouncedPreview } from '../../hooks/useDebouncedPreview';
+import { RoomHeader } from '../room/RoomHeader';
 import {
   isPreviewLanguage,
   languageForFileName,
   type LanguageMode,
 } from './languageModes';
-import { RoomHeader } from '../room/RoomHeader';
-import { useChat } from '../../hooks/useChat';
-import { ChatPanel } from '../chat/ChatPanel';
-import { FileExplorer } from './FileExplorer';
-import { ResizeHandle } from './ResizeHandle';
-import { useExecutionStream } from '../../hooks/useExecutionStream';
+import {
+  DEFAULT_CHAT_WIDTH,
+  getEntryPath,
+  getStoredActiveFileId,
+  getStoredExplorerWidth,
+  getStoredPreviewWidth,
+  getStoredTerminalHeight,
+  storeActiveFileId,
+} from './editorLayoutStorage';
+import { EditorWorkspace } from './EditorWorkspace';
+import { FileExplorerPanel } from './FileExplorerPanel';
+import { ChatPanelContainer } from './ChatPanelContainer';
+import { PreviewPanel } from './PreviewPanel';
+import { TerminalPanel } from './TerminalPanel';
+import { ShortcutGuideDialog } from './ShortcutGuideDialog';
+import {
+  validateCodeForExecution,
+  type CodeValidationResult,
+} from '../../utils/codeValidation';
+import { configureMonacoDiagnostics } from '../../utils/monacoDiagnostics';
 import type {
   ExecutionLanguage,
   RoomEntry,
 } from '../../providers/SignalRCrdtProvider';
-
-const Terminal = lazy(() =>
-  import('./Terminal').then((module) => ({ default: module.Terminal }))
-);
 
 const EXECUTION_LANGUAGES: Partial<Record<LanguageMode, ExecutionLanguage>> = {
   javascript: 'JavaScript',
@@ -47,58 +59,6 @@ const EXECUTION_LANGUAGES: Partial<Record<LanguageMode, ExecutionLanguage>> = {
 interface EditorProps {
   roomId?: string;
   accessKey: string;
-}
-
-const PREVIEW_WIDTH_KEY = 'syncode_live_preview_width';
-const PREVIEW_CLOSE_THRESHOLD = 24;
-
-function getStoredActiveFileId(roomId: string): string | null {
-  try {
-    return sessionStorage.getItem(`syncode_active_file:${roomId}`);
-  } catch {
-    return null;
-  }
-}
-
-function storeActiveFileId(roomId: string, fileId: string): void {
-  try {
-    sessionStorage.setItem(`syncode_active_file:${roomId}`, fileId);
-  } catch {
-    // Keep the selected file for the current session when storage is available.
-  }
-}
-
-function getStoredPreviewWidth(): number {
-  try {
-    const width = Number(localStorage.getItem(PREVIEW_WIDTH_KEY));
-    return Number.isFinite(width) && width > 0
-      ? Math.max(120, Math.min(1000, width))
-      : 420;
-  } catch {
-    return 420;
-  }
-}
-
-function storePreviewWidth(width: number): void {
-  try {
-    localStorage.setItem(PREVIEW_WIDTH_KEY, String(width));
-  } catch {
-    // The preview still works for this session if storage is unavailable.
-  }
-}
-
-function getEntryPath(entry: RoomEntry, entries: RoomEntry[]): string {
-  const path = [entry.name];
-  let parentId = entry.parentId;
-  while (parentId) {
-    const parent = entries.find(
-      (item) => item.id === parentId && item.isFolder
-    );
-    if (!parent) break;
-    path.unshift(parent.name);
-    parentId = parent.parentId;
-  }
-  return path.join('/');
 }
 
 function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
@@ -117,17 +77,32 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
   const [localColor, setLocalColor] = useState(getStoredColor);
   const [entries, setEntries] = useState<RoomEntry[]>([]);
   const [activeFileId, setActiveFileId] = useState('main.cpp');
+  const activeFileIdRef = useRef(activeFileId);
+  activeFileIdRef.current = activeFileId;
+  const [openFileIds, setOpenFileIds] = useState<string[]>(['main.cpp']);
+  const [splitFileId, setSplitFileId] = useState<string | null>(null);
+  const [isSplitWorkspaceOpen, setSplitWorkspaceOpen] = useState(false);
+  const [activeEditorGroup, setActiveEditorGroup] = useState<
+    'primary' | 'secondary'
+  >('primary');
+  const [splitWidth, setSplitWidth] = useState(50);
   const [isExplorerOpen, setExplorerOpen] = useState(true);
+  const [explorerWidth, setExplorerWidth] = useState(getStoredExplorerWidth);
   const [siteId] = useState(createSiteId);
   const [monacoApi, setMonacoApi] = useState<Monaco | null>(null);
   const [monacoEditor, setMonacoEditor] =
     useState<monaco.editor.IStandaloneCodeEditor | null>(null);
-  const activeFile =
-    entries.find((entry) => entry.id === activeFileId && !entry.isFolder) ??
-    entries.find((entry) => !entry.isFolder);
-  const activeFilePath = activeFile
-    ? getEntryPath(activeFile, entries)
-    : 'main.cpp';
+  const [splitMonacoEditor, setSplitMonacoEditor] =
+    useState<monaco.editor.IStandaloneCodeEditor | null>(null);
+
+  const activeFile = entries.find(
+    (entry) => entry.id === activeFileId && !entry.isFolder
+  );
+  const splitFile = splitFileId
+    ? entries.find((entry) => entry.id === splitFileId && !entry.isFolder)
+    : undefined;
+  const activeFilePath = activeFile ? getEntryPath(activeFile, entries) : '';
+  const splitFilePath = splitFile ? getEntryPath(splitFile, entries) : '';
   const language: LanguageMode = languageForFileName(activeFilePath);
 
   const { status, providerRef, evictedNewRoomId } = useCrdtSync({
@@ -144,6 +119,16 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
     if (!provider) return;
     const offFiles = provider.onFilesChange((next) => {
       setEntries(next);
+      setOpenFileIds((current) =>
+        current.filter((id) =>
+          next.some((entry) => entry.id === id && !entry.isFolder)
+        )
+      );
+      setSplitFileId((current) =>
+        current && next.some((entry) => entry.id === current && !entry.isFolder)
+          ? current
+          : null
+      );
       const preferredFileId = getStoredActiveFileId(roomId);
       if (
         preferredFileId &&
@@ -151,38 +136,60 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
       ) {
         provider.setActiveFile(preferredFileId);
         setActiveFileId(preferredFileId);
+        setOpenFileIds((current) =>
+          current.includes(preferredFileId)
+            ? current
+            : [...current, preferredFileId]
+        );
         return;
       }
       if (
         next.length &&
-        !next.some((entry) => entry.id === activeFileId && !entry.isFolder)
-      )
-        setActiveFileId(
-          next.find((entry) => !entry.isFolder)?.id ?? 'main.cpp'
+        !next.some(
+          (entry) => entry.id === activeFileIdRef.current && !entry.isFolder
+        )
+      ) {
+        const fallback =
+          next.find((entry) => !entry.isFolder)?.id ?? 'main.cpp';
+        setActiveFileId(fallback);
+        setOpenFileIds((current) =>
+          current.includes(fallback) ? current : [...current, fallback]
         );
+      }
     });
     const offActive = provider.onActiveFileChange((file) => {
       setActiveFileId(file.id);
+      setOpenFileIds((current) =>
+        current.includes(file.id) ? current : [...current, file.id]
+      );
       storeActiveFileId(roomId, file.id);
     });
     return () => {
       offFiles();
       offActive();
     };
-  }, [providerRef, roomId, status, activeFileId]);
+  }, [providerRef, roomId, status]);
+
   const [isChatOpen, setChatOpen] = useState(false);
-  const [chatWidth, setChatWidth] = useState(300);
+  const [chatWidth, setChatWidth] = useState(DEFAULT_CHAT_WIDTH);
   const [previewWidth, setPreviewWidth] = useState(getStoredPreviewWidth);
   const [isPreviewOpen, setPreviewOpen] = useState(true);
+  const [terminalHeight, setTerminalHeight] = useState(getStoredTerminalHeight);
+  const [isShortcutGuideOpen, setShortcutGuideOpen] = useState(false);
+  const [newTerminalRequest, setNewTerminalRequest] = useState(0);
+  const [startBashOnTerminalOpen, setStartBashOnTerminalOpen] = useState(false);
+  const pendingFileActions = useRef(new Map<string, Promise<unknown>>());
+
   const { messages, sendMessage } = useChat({ providerRef, status });
   const {
     chunks: executionChunks,
+    outputRevision: executionOutputRevision,
     isRunning: isExecutionRunning,
     message: executionMessage,
     jobId: executionJobId,
     runCode,
-    clear: clearExecutionOutput,
   } = useExecutionStream({ providerRef, status });
+
   const [isTerminalOpen, setTerminalOpen] = useState(false);
   const sourceExtension = activeFilePath.split('.').pop()?.toLowerCase();
   const requiresProjectJsxTransform =
@@ -190,9 +197,175 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
   const executionLanguage = requiresProjectJsxTransform
     ? null
     : (EXECUTION_LANGUAGES[language] ?? null);
-  const canRunCode = Boolean(
-    executionLanguage && status === 'connected' && monacoEditor
+  const [validationResult, setValidationResult] = useState<CodeValidationResult>(() =>
+    validateCodeForExecution({
+      code: '',
+      language,
+      filePath: activeFilePath,
+      isConnected: Boolean(activeFile && status === 'connected'),
+    })
   );
+
+  useEffect(() => {
+    const checkValidation = () => {
+      const model = monacoEditor?.getModel();
+      const code = model ? model.getValue() : '';
+
+      const result = validateCodeForExecution({
+        code,
+        language,
+        filePath: activeFilePath,
+        isConnected: Boolean(activeFile && status === 'connected'),
+        monacoApi,
+        model,
+      });
+
+      setValidationResult(result);
+    };
+
+    checkValidation();
+
+    if (!monacoEditor) return;
+
+    const disposableContent =
+      monacoEditor.onDidChangeModelContent(checkValidation);
+    const disposableMarkers =
+      monacoApi?.editor.onDidChangeMarkers(checkValidation);
+
+    return () => {
+      disposableContent.dispose();
+      disposableMarkers?.dispose();
+    };
+  }, [monacoEditor, monacoApi, language, activeFilePath, activeFile, status]);
+
+  const canRunCode = Boolean(
+    validationResult.canRun && executionLanguage && monacoEditor
+  );
+  const runDisabledReason = !executionLanguage
+    ? requiresProjectJsxTransform
+      ? 'This file type requires a project build and cannot run as a single file'
+      : 'This file type cannot be executed'
+    : validationResult.reason;
+
+  const handleRunCode = () => {
+    if (!canRunCode || isExecutionRunning || !executionLanguage || !monacoEditor)
+      return;
+    setStartBashOnTerminalOpen(false);
+    setTerminalOpen(true);
+    void runCode(executionLanguage, monacoEditor.getValue());
+  };
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && isShortcutGuideOpen) {
+        setShortcutGuideOpen(false);
+        return;
+      }
+      if (isShortcutGuideOpen) return;
+      if (event.key === 'F6') {
+        event.preventDefault();
+        const regions = [
+          '.file-explorer',
+          '.room-code-editor',
+          '.chat-panel',
+          '.live-preview',
+          '.execution-terminal',
+        ]
+          .map((selector) => document.querySelector<HTMLElement>(selector))
+          .filter((element): element is HTMLElement =>
+            Boolean(element && element.getClientRects().length)
+          );
+        if (!regions.length) return;
+        const active = document.activeElement;
+        const current = regions.findIndex(
+          (region) => region === active || region.contains(active)
+        );
+        const direction = event.shiftKey ? -1 : 1;
+        const nextIndex =
+          current < 0
+            ? direction > 0
+              ? 0
+              : regions.length - 1
+            : (current + direction + regions.length) % regions.length;
+        const next = regions[nextIndex];
+        if (next.matches('.room-code-editor')) monacoEditor?.focus();
+        else
+          (
+            next.querySelector<HTMLElement>('button, input, [tabindex="0"]') ??
+            next
+          ).focus();
+        return;
+      }
+      if (!(event.ctrlKey || event.metaKey) || !event.altKey || event.repeat)
+        return;
+      const target = event.target as HTMLElement | null;
+      switch (event.key.toLowerCase()) {
+        case 'k':
+          event.preventDefault();
+          setShortcutGuideOpen((open) => !open);
+          break;
+        case 't':
+          event.preventDefault();
+          if (isTerminalOpen) setTerminalOpen(false);
+          else {
+            setStartBashOnTerminalOpen(true);
+            setTerminalOpen(true);
+          }
+          break;
+        case 'n':
+          event.preventDefault();
+          if (isTerminalOpen) setNewTerminalRequest((value) => value + 1);
+          else {
+            setStartBashOnTerminalOpen(true);
+            setTerminalOpen(true);
+          }
+          break;
+        case 'q':
+          if (isTerminalOpen && target?.closest('.execution-terminal')) {
+            event.preventDefault();
+            window.dispatchEvent(new Event('syncode:terminal-close-active'));
+          }
+          break;
+        case 'e':
+          event.preventDefault();
+          setExplorerOpen((open) => !open);
+          break;
+        case 'c':
+          event.preventDefault();
+          setChatOpen((open) => !open);
+          break;
+        case 'p':
+          if (isPreviewLanguage(language)) {
+            event.preventDefault();
+            setPreviewOpen((open) => !open);
+          }
+          break;
+        case 'r':
+          if (canRunCode && executionLanguage && monacoEditor) {
+            event.preventDefault();
+            handleRunCode();
+          }
+          break;
+        case 'w':
+          if (isTerminalOpen) {
+            event.preventDefault();
+            setStartBashOnTerminalOpen(false);
+            setTerminalOpen(false);
+          }
+          break;
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [
+    isShortcutGuideOpen,
+    isTerminalOpen,
+    language,
+    canRunCode,
+    executionLanguage,
+    monacoEditor,
+    runCode,
+  ]);
 
   useEffect(() => {
     if (evictedNewRoomId)
@@ -205,19 +378,44 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
     localName: displayName || 'Anonymous',
     localColor,
   });
+
   const previewSource = useDebouncedPreview({
     providerRef,
     status,
-    enabled: isPreviewLanguage(language),
+    enabled: Boolean(activeFile && isPreviewLanguage(language)),
     activeFileId,
   });
+
+  const fileDiagnostics = useFileDiagnostics({
+    monacoApi,
+    entries,
+  });
+
+  useEffect(() => {
+    if (!monacoApi || !providerRef.current) return;
+    const provider = providerRef.current;
+
+    openFileIds.forEach((fileId) => {
+      const entry = entries.find((e) => e.id === fileId && !e.isFolder);
+      if (!entry) return;
+      const filePath = getEntryPath(entry, entries);
+      const uri = monacoApi.Uri.parse(filePath);
+      const existing = monacoApi.editor.getModel(uri);
+      if (!existing) {
+        const content = provider.getFileContent(fileId);
+        const lang = languageForFileName(filePath);
+        monacoApi.editor.createModel(content, lang, uri);
+      }
+    });
+  }, [monacoApi, openFileIds, entries, providerRef]);
 
   useEffect(() => {
     const provider = providerRef.current;
     if (!monacoEditor || !provider) return;
 
-    monacoEditor.setValue(provider.doc.toVisibleString());
-    const binding = new MonacoCrdtBinding(monacoEditor, provider);
+    if (!activeFileId) return;
+    monacoEditor.setValue(provider.getFileContent(activeFileId));
+    const binding = new MonacoCrdtBinding(monacoEditor, provider, activeFileId);
     const unsubscribeCursor = binding.onCursorChange(broadcastCursor);
 
     return () => {
@@ -226,17 +424,86 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
     };
   }, [monacoEditor, providerRef, status, broadcastCursor, activeFileId]);
 
+  useEffect(() => {
+    const provider = providerRef.current;
+    if (!splitMonacoEditor || !provider || !splitFileId) return;
+    splitMonacoEditor.setValue(provider.getFileContent(splitFileId));
+    const binding = new MonacoCrdtBinding(
+      splitMonacoEditor,
+      provider,
+      splitFileId
+    );
+    return () => binding.dispose();
+  }, [splitMonacoEditor, providerRef, status, splitFileId]);
+
   const handleEditorMount: OnMount = (editor, monacoInstance) => {
+    configureMonacoDiagnostics(monacoInstance);
     setMonacoEditor(editor);
     setMonacoApi(monacoInstance);
   };
 
-  const runFileAction = <T,>(action: () => Promise<T>): Promise<T | void> =>
-    action().catch((error: unknown) => {
-      window.alert(
-        error instanceof Error ? error.message : 'File operation failed.'
-      );
-    });
+  const openFile = (fileId: string, group = activeEditorGroup) => {
+    setOpenFileIds((current) =>
+      current.includes(fileId) ? current : [...current, fileId]
+    );
+    setActiveEditorGroup(group);
+    if (group === 'secondary' && isSplitWorkspaceOpen) setSplitFileId(fileId);
+    else {
+      if (splitFileId === fileId) setSplitFileId(null);
+      setActiveFileId(fileId);
+      providerRef.current?.setActiveFile(fileId);
+    }
+  };
+
+  const closeFileTab = (fileId: string) => {
+    const index = openFileIds.indexOf(fileId);
+    const next = openFileIds.filter((id) => id !== fileId);
+    setOpenFileIds(next);
+    if (splitFileId === fileId) setSplitFileId(null);
+    if (activeFileId === fileId) {
+      const nextActive = next[Math.min(index, next.length - 1)];
+      if (nextActive) {
+        setActiveFileId(nextActive);
+        providerRef.current?.setActiveFile(nextActive);
+      } else {
+        setActiveFileId('');
+      }
+    }
+  };
+
+  const handleDropFile = (fileId: string, group: 'primary' | 'secondary') => {
+    setOpenFileIds((current) =>
+      current.includes(fileId) ? current : [...current, fileId]
+    );
+    if (group === 'primary') {
+      setSplitWorkspaceOpen(true);
+      setSplitFileId(fileId);
+      setActiveEditorGroup('secondary');
+    } else {
+      setSplitFileId(fileId);
+      setActiveEditorGroup('secondary');
+    }
+  };
+
+  const runFileAction = <T,>(
+    key: string,
+    action: () => Promise<T>
+  ): Promise<T | void> => {
+    const pending = pendingFileActions.current.get(key);
+    if (pending) return pending as Promise<T | void>;
+    const operation = action()
+      .catch((error: unknown) => {
+        window.alert(
+          error instanceof Error ? error.message : 'File operation failed.'
+        );
+      })
+      .finally(() => {
+        if (pendingFileActions.current.get(key) === operation)
+          pendingFileActions.current.delete(key);
+      });
+    pendingFileActions.current.set(key, operation);
+    return operation;
+  };
 
   const createEntry = (isFolder: boolean, parentId: string | null) => {
     const name = window.prompt(
@@ -244,8 +511,9 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
       isFolder ? 'New Folder' : 'untitled.ts'
     );
     if (!name?.trim() || !providerRef.current) return Promise.resolve();
-    return runFileAction(() =>
-      providerRef.current!.createEntry(name, parentId, isFolder)
+    return runFileAction(
+      `create:${isFolder ? 'folder' : 'file'}:${parentId ?? 'root'}`,
+      () => providerRef.current!.createEntry(name, parentId, isFolder)
     );
   };
 
@@ -271,127 +539,150 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
         showPreviewButton={isPreviewLanguage(language)}
         onShowPreview={() => setPreviewOpen((open) => !open)}
         canRunCode={canRunCode}
+        runDisabledReason={runDisabledReason}
         isRunningCode={isExecutionRunning}
-        onRunCode={() => {
+        onOpenTerminal={() => {
+          if (isTerminalOpen) setNewTerminalRequest((value) => value + 1);
+          else setStartBashOnTerminalOpen(true);
           setTerminalOpen(true);
-          if (executionLanguage && monacoEditor)
-            void runCode(executionLanguage, monacoEditor.getValue());
         }}
+        onRunCode={handleRunCode}
       />
 
       <div className="room-main">
-        {isExplorerOpen && (
-          <FileExplorer
-            entries={entries}
-            activeFileId={activeFileId}
-            onSelect={(id) => providerRef.current?.setActiveFile(id)}
-            onCreateFile={(parentId) => createEntry(false, parentId)}
-            onCreateFolder={(parentId) => createEntry(true, parentId)}
-            onRename={(entry) => {
-              const name = window.prompt(
-                `Rename ${entry.isFolder ? 'folder' : 'file'}`,
-                entry.name
+        <FileExplorerPanel
+          isOpen={isExplorerOpen}
+          width={explorerWidth}
+          entries={entries}
+          activeFileId={activeFileId}
+          fileDiagnostics={fileDiagnostics}
+          onWidthChange={setExplorerWidth}
+          onClose={() => setExplorerOpen(false)}
+          onSelect={openFile}
+          onCreateFile={(parentId) => createEntry(false, parentId)}
+          onCreateFolder={(parentId) => createEntry(true, parentId)}
+          onRename={(entry) => {
+            const name = window.prompt(
+              `Rename ${entry.isFolder ? 'folder' : 'file'}`,
+              entry.name
+            );
+            if (name?.trim())
+              runFileAction(`rename:${entry.id}`, () =>
+                providerRef.current!.renameEntry(entry.id, name)
               );
-              if (name?.trim())
-                runFileAction(() =>
-                  providerRef.current!.renameEntry(entry.id, name)
-                );
-            }}
-            onDelete={(entry) => {
-              const prompt = entry.isFolder
-                ? `Delete folder "${entry.name}" and everything inside it?`
-                : `Delete ${entry.name}?`;
-              if (window.confirm(prompt))
-                runFileAction(() => providerRef.current!.deleteEntry(entry.id));
-            }}
-          />
-        )}
-        {isChatOpen && (
-          <>
-            <ChatPanel
-              messages={messages}
-              onSendMessage={sendMessage}
-              disabled={status !== 'connected'}
-              style={{ flexBasis: chatWidth }}
-            />
-            <ResizeHandle
-              label="Resize chat panel"
-              onResize={(delta) =>
-                setChatWidth((width) => Math.max(200, Math.min(600, width + delta)))
-              }
-            />
-          </>
-        )}
-        <div
-          className={`room-editor${isPreviewLanguage(language) ? ' has-live-preview' : ''}`}
+          }}
+          onDelete={(entry) => {
+            const prompt = entry.isFolder
+              ? `Delete folder "${entry.name}" and everything inside it?`
+              : `Delete ${entry.name}?`;
+            if (window.confirm(prompt))
+              runFileAction(`delete:${entry.id}`, () =>
+                providerRef.current!.deleteEntry(entry.id)
+              );
+          }}
+        />
+
+        <ChatPanelContainer
+          isOpen={isChatOpen}
+          width={chatWidth}
+          messages={messages}
+          status={status}
+          onWidthChange={setChatWidth}
+          onClose={() => setChatOpen(false)}
+          onSendMessage={sendMessage}
+        />
+
+        <section
+          className="workbench-main-column"
+          aria-label="Editor and terminal area"
         >
-          <div className="room-code-editor">
-            <Editor
-              height="100%"
+          <div
+            className={`room-editor${isPreviewLanguage(language) ? ' has-live-preview' : ''}`}
+          >
+            <EditorWorkspace
+              entries={entries}
+              activeFileId={activeFileId}
+              activeFile={activeFile}
+              activeFilePath={activeFilePath}
+              openFileIds={openFileIds}
+              fileDiagnostics={fileDiagnostics}
+              splitFileId={splitFileId}
+              splitFile={splitFile}
+              splitFilePath={splitFilePath}
+              isSplitWorkspaceOpen={isSplitWorkspaceOpen}
+              splitWidth={splitWidth}
+              status={status}
               language={language}
-              path={activeFilePath}
-              defaultValue=""
-              theme="vs-dark"
-              onMount={handleEditorMount}
-              options={{
-                automaticLayout: true,
-                fontSize: 14,
-                minimap: { enabled: true },
-                readOnly: status !== 'connected',
+              peers={peers}
+              providerRef={providerRef}
+              monacoEditor={monacoEditor}
+              onMountPrimary={handleEditorMount}
+              onMountSecondary={(editor) => setSplitMonacoEditor(editor)}
+              onOpenFile={openFile}
+              onCloseFileTab={closeFileTab}
+              onSplitWorkspace={() => setSplitWorkspaceOpen(true)}
+              onCloseSplitGroup={() => {
+                setSplitWorkspaceOpen(false);
+                setSplitFileId(null);
+                setActiveEditorGroup('primary');
               }}
+              onSplitWidthChange={setSplitWidth}
+              onSetActiveGroup={setActiveEditorGroup}
+              onDropFile={handleDropFile}
             />
-            {monacoEditor && (
-              <Cursors
-                editor={monacoEditor}
-                peers={peers}
-                providerRef={providerRef}
-                status={status}
-                fileId={activeFileId}
-              />
-            )}
+
+            <PreviewPanel
+              isOpen={isPreviewOpen}
+              width={previewWidth}
+              hasActiveFile={Boolean(activeFile)}
+              language={language}
+              project={previewSource}
+              monaco={monacoApi}
+              editor={monacoEditor}
+              onWidthChange={setPreviewWidth}
+              onClose={() => setPreviewOpen(false)}
+            />
           </div>
-          {isPreviewLanguage(language) && isPreviewOpen && (
-            <>
-              <ResizeHandle
-                label="Resize live preview"
-                reverse
-                onResize={(delta) => {
-                  const nextWidth = Math.min(1000, previewWidth + delta);
-                  if (nextWidth <= PREVIEW_CLOSE_THRESHOLD) {
-                    setPreviewOpen(false);
-                    return;
-                  }
-                  setPreviewWidth(nextWidth);
-                  storePreviewWidth(nextWidth);
-                }}
-              />
-              <LivePreview
-                project={previewSource}
-                language={language}
-                monaco={monacoApi}
-                editor={monacoEditor}
-                style={{ flex: `0 0 ${previewWidth}px` }}
-              />
-            </>
-          )}
-        </div>
-      </div>
-      {isTerminalOpen && (
-        <Suspense
-          fallback={
-            <div className="execution-terminal-loading">Opening terminal…</div>
-          }
-        >
-          <Terminal
+
+          <TerminalPanel
+            isOpen={isTerminalOpen}
+            height={terminalHeight}
             chunks={executionChunks}
+            outputRevision={executionOutputRevision}
             message={executionMessage}
             jobId={executionJobId}
             isRunning={isExecutionRunning}
-            onClear={clearExecutionOutput}
-            onClose={() => setTerminalOpen(false)}
+            providerRef={providerRef}
+            status={status}
+            newTerminalRequest={newTerminalRequest}
+            startBashOnMount={startBashOnTerminalOpen}
+            onHeightChange={setTerminalHeight}
+            onClose={() => {
+              setStartBashOnTerminalOpen(false);
+              setTerminalOpen(false);
+            }}
+            onEmpty={() => {
+              setStartBashOnTerminalOpen(false);
+              setTerminalOpen(false);
+            }}
           />
-        </Suspense>
-      )}
+        </section>
+      </div>
+
+      <footer className="workspace-footer">
+        <button
+          className="keyboard-shortcut-hint"
+          type="button"
+          onClick={() => setShortcutGuideOpen(true)}
+        >
+          Keyboard shortcuts <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>K</kbd>
+        </button>
+      </footer>
+
+      <ShortcutGuideDialog
+        isOpen={isShortcutGuideOpen}
+        onClose={() => setShortcutGuideOpen(false)}
+      />
     </div>
   );
 }
