@@ -8,7 +8,7 @@ export type DiagnosticSeverity = 'error' | 'warning';
 export type FileDiagnosticsMap = Record<string, DiagnosticSeverity>;
 
 /**
- * Computes diagnostic severities (error = red, warning = yellow) for each room file
+ * Computes diagnostic severities for each room file
  * by querying Monaco's native marker service.
  */
 export function computeFileDiagnostics(
@@ -35,7 +35,6 @@ export function computeFileDiagnostics(
     let hasWarning = false;
 
     for (const marker of fileMarkers) {
-      // 8 = MarkerSeverity.Error, 4 = MarkerSeverity.Warning
       if (marker.severity === 8) {
         hasError = true;
         break;
