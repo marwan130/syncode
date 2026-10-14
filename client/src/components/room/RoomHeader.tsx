@@ -28,47 +28,10 @@ interface RoomHeaderProps {
   showPreviewButton: boolean;
   onShowPreview: () => void;
   canRunCode: boolean;
+  runDisabledReason?: string;
   isRunningCode: boolean;
   onRunCode: () => void;
-}
-
-const STATUS_COLORS: Record<ConnectionStatus, string> = {
-  connected: '#4ade80',
-  connecting: '#facc15',
-  reconnecting: '#f97316',
-  disconnected: '#6b7280',
-};
-
-const STATUS_LABELS: Record<ConnectionStatus, string> = {
-  connected: 'Connected',
-  connecting: 'Connecting…',
-  reconnecting: 'Reconnecting…',
-  disconnected: 'Offline',
-};
-
-function StatusDot({ status }: { status: ConnectionStatus }) {
-  const color = STATUS_COLORS[status];
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-      <div
-        style={{
-          width: 7,
-          height: 7,
-          borderRadius: '50%',
-          background: color,
-        }}
-      />
-      <span
-        style={{
-          fontSize: 12,
-          color: 'var(--text-muted)',
-          fontFamily: 'system-ui, sans-serif',
-        }}
-      >
-        {STATUS_LABELS[status]}
-      </span>
-    </div>
-  );
+  onOpenTerminal: () => void;
 }
 
 export function RoomHeader({
@@ -88,142 +51,152 @@ export function RoomHeader({
   showPreviewButton,
   onShowPreview,
   canRunCode,
+  runDisabledReason,
   isRunningCode,
   onRunCode,
+  onOpenTerminal,
 }: RoomHeaderProps) {
   const [isJoinModalOpen, setJoinModalOpen] = useState(false);
   const joinAnchorRef = useRef<HTMLDivElement>(null);
 
   return (
-    <>
-      <header
-        className="room-header"
-        style={{
-          position: 'relative',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '0 16px',
-          height: 40,
-          background: 'var(--app-bg)',
-          borderBottom: '1px solid var(--border)',
-          flexShrink: 0,
-          userSelect: 'none',
-        }}
-      >
-        <div className="room-header-left">
-          <button
-            className="syncode-brand-toggle"
-            type="button"
-            title={explorerOpen ? 'Hide file explorer' : 'Show file explorer'}
-            aria-label={
-              explorerOpen ? 'Hide file explorer' : 'Show file explorer'
-            }
-            aria-expanded={explorerOpen}
-            onClick={onToggleExplorer}
-          >
-            syncode
-          </button>
-          <button
-            className={`chat-toggle${isChatOpen ? ' is-active' : ''}`}
-            type="button"
-            aria-pressed={isChatOpen}
-            onClick={onToggleChat}
-          >
-            Chat
-          </button>
-        </div>
-
-        <div
-          style={{
-            position: 'absolute',
-            left: '50%',
-            top: '50%',
-            transform: 'translate(-50%, -50%)',
-            pointerEvents: 'none',
-          }}
+    <header
+      className="room-header"
+      style={{
+        position: 'relative',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: '0 16px',
+        height: 40,
+        background: 'var(--app-bg)',
+        flexShrink: 0,
+        userSelect: 'none',
+      }}
+    >
+      <div className="room-header-left">
+        <button
+          className="syncode-brand-toggle"
+          type="button"
+          title={explorerOpen ? 'Hide file explorer' : 'Show file explorer'}
+          aria-label={
+            explorerOpen ? 'Hide file explorer' : 'Show file explorer'
+          }
+          aria-expanded={explorerOpen}
+          aria-keyshortcuts="Control+Alt+E"
+          onClick={onToggleExplorer}
         >
-          <StatusDot status={status} />
-        </div>
+          syncode
+        </button>
+        <button
+          className={`chat-toggle${isChatOpen ? ' is-active' : ''}`}
+          type="button"
+          aria-pressed={isChatOpen}
+          aria-keyshortcuts="Control+Alt+C"
+          onClick={onToggleChat}
+        >
+          Chat
+        </button>
+      </div>
 
-        <div className="room-header-right">
-          <ThemePicker monaco={monaco} />
+      <div className="room-header-right">
+        <ThemePicker monaco={monaco} />
 
-          <SearchReplace editor={editor} />
+        <SearchReplace editor={editor} />
 
-          <button
-            className="execution-run-button"
-            type="button"
-            onClick={onRunCode}
-            disabled={!canRunCode || isRunningCode}
-            title={
-              canRunCode
-                ? 'Compile and run the active file'
-                : status !== 'connected'
-                  ? 'Connect to the room to run code'
-                  : 'This file type requires a project build and cannot run as a single file'
-            }
-          >
-            {isRunningCode ? 'Running…' : 'Run'}
-          </button>
-
-          {showPreviewButton && (
-            <button
-              className="preview-view-button"
-              type="button"
-              onClick={onShowPreview}
-            >
-              View
-            </button>
-          )}
-
-          <div className="room-join-anchor" ref={joinAnchorRef}>
-            <button
-              className="room-join-toggle"
-              type="button"
-              onClick={() => setJoinModalOpen((open) => !open)}
-              title="Join another room with a link"
-              aria-expanded={isJoinModalOpen}
-            >
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
-                <polyline points="10 17 15 12 10 7" />
-                <line x1="15" y1="12" x2="3" y2="12" />
+        <button
+          className="execution-run-button"
+          type="button"
+          onClick={onRunCode}
+          disabled={!canRunCode || isRunningCode}
+          aria-keyshortcuts="Control+Alt+R"
+          title={
+            isRunningCode
+              ? 'Execution in progress…'
+              : canRunCode
+                ? 'Compile and run the active file (Ctrl+Alt+R)'
+                : runDisabledReason || 'Cannot run code'
+          }
+        >
+          {isRunningCode ? (
+            'Running…'
+          ) : (
+            <>
+              <svg className="run-icon" viewBox="0 0 16 16" aria-hidden="true">
+                <path d="M4 2.8v10.4L13 8z" fill="currentColor" />
               </svg>
-              <span>Join</span>
-            </button>
-            <JoinRoomModal
-              isOpen={isJoinModalOpen}
-              currentRoomId={roomId}
-              currentName={localName}
-              currentColor={localColor}
-              containerRef={joinAnchorRef}
-              onClose={() => setJoinModalOpen(false)}
-            />
-          </div>
+              <span className="visually-hidden">Run</span>
+            </>
+          )}
+        </button>
 
-          <ShareLinkButton />
+        <button
+          className="execution-run-button"
+          type="button"
+          onClick={onOpenTerminal}
+          disabled={status !== 'connected'}
+          title="Open a Bash terminal without running code (Ctrl+Alt+T)"
+          aria-keyshortcuts="Control+Alt+T"
+        >
+          Terminal
+        </button>
 
-          <ParticipantList
-            roomId={roomId}
-            localName={localName}
-            localColor={localColor}
-            peers={peers}
-            onJoinProfile={onJoinProfile}
-            onColorChange={onColorChange}
+        {showPreviewButton && (
+          <button
+            className="preview-view-button"
+            type="button"
+            onClick={onShowPreview}
+            aria-keyshortcuts="Control+Alt+P"
+          >
+            View
+          </button>
+        )}
+
+        <div className="room-join-anchor" ref={joinAnchorRef}>
+          <button
+            className="room-join-toggle"
+            type="button"
+            onClick={() => setJoinModalOpen((open) => !open)}
+            title="Join another room with a link"
+            aria-expanded={isJoinModalOpen}
+          >
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
+              <polyline points="10 17 15 12 10 7" />
+              <line x1="15" y1="12" x2="3" y2="12" />
+            </svg>
+            <span>Join</span>
+          </button>
+          <JoinRoomModal
+            isOpen={isJoinModalOpen}
+            currentRoomId={roomId}
+            currentName={localName}
+            currentColor={localColor}
+            containerRef={joinAnchorRef}
+            onClose={() => setJoinModalOpen(false)}
           />
         </div>
-      </header>
 
-    </>
+        <ShareLinkButton />
+
+        <ParticipantList
+          roomId={roomId}
+          localName={localName}
+          localColor={localColor}
+          peers={peers}
+          onJoinProfile={onJoinProfile}
+          onColorChange={onColorChange}
+        />
+      </div>
+    </header>
   );
 }
