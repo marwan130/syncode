@@ -66,6 +66,14 @@ services:
     build:
       context: ..
       dockerfile: execution-service/Dockerfile
+    user: "10001:10001"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,uid=10001,gid=10001
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     environment:
       ASPNETCORE_ENVIRONMENT: Production
       ExecutionService__ApiKey: ${SYNCODE_EXECUTION_API_KEY:?Set SYNCODE_EXECUTION_API_KEY in infra/.env}

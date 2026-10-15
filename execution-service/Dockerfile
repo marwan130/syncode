@@ -18,5 +18,6 @@ ENV ASPNETCORE_URLS=http://0.0.0.0:5112 \
     TMPDIR=/execution-source \
     TMP=/execution-source \
     TEMP=/execution-source
+USER 10001:10001
 EXPOSE 5112
 ENTRYPOINT ["dotnet", "Syncode.ExecutionService.dll"]
