@@ -14,7 +14,9 @@ public sealed class TerminalSessionRegistry
         lock (_gate)
         {
             PurgeExpiredExecutions(DateTimeOffset.UtcNow);
-            if (_executions.Count >= 1000 || _executions.ContainsKey(jobId)) return false;
+            if (_executions.TryGetValue(jobId, out var existing))
+                return existing.ConnectionId == connectionId && existing.RoomId == roomId;
+            if (_executions.Count >= 1000) return false;
             _executions[jobId] = (connectionId, roomId, DateTimeOffset.UtcNow, new Queue<DateTimeOffset>());
             return true;
         }

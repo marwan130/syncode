@@ -7,13 +7,16 @@ namespace Syncode.ExecutionService.Queue;
 public sealed class ExecutionJobQueue
 {
     private const string EnqueueScript = """
+        local existing = redis.call('GET', KEYS[4])
+        if existing then return {0, existing, 0} end
         local length = redis.call('LLEN', KEYS[1])
-        if length >= tonumber(ARGV[1]) then return -1 end
+        if length >= tonumber(ARGV[1]) then return {-1, '', 0} end
         redis.call('RPUSH', KEYS[1], ARGV[2])
         redis.call('SET', KEYS[3], ARGV[3], 'EX', ARGV[4])
         redis.call('HSET', KEYS[2], 'state', 'pending', 'queuePosition', length + 1)
         redis.call('EXPIRE', KEYS[2], ARGV[4])
-        return length + 1
+        redis.call('SET', KEYS[4], ARGV[2], 'EX', ARGV[4])
+        return {1, ARGV[2], length + 1}
         """;
 
     private static readonly TimeSpan StatusLifetime = TimeSpan.FromDays(1);
@@ -40,19 +43,33 @@ public sealed class ExecutionJobQueue
         _payloadPrefix = $"{keyPrefix}:job:";
     }
 
-    public async Task<int?> EnqueueAsync(ExecutionJob job, CancellationToken cancellationToken = default)
+    public async Task<ExecutionEnqueueResult> EnqueueOrGetAsync(ExecutionJob job, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         var payload = JsonSerializer.Serialize(job, JsonOptions);
         var statusKey = StatusKey(job.Id);
         var payloadKey = PayloadKey(job.Id);
-        var result = await _database.ScriptEvaluateAsync(
+        var idempotencyKey = IdempotencyKey(job.RoomId, job.RequestId);
+        var result = (RedisResult[]?)await _database.ScriptEvaluateAsync(
             EnqueueScript,
-            [_queueKey, statusKey, payloadKey],
+            [_queueKey, statusKey, payloadKey, idempotencyKey],
             [_maxPendingJobs, job.Id, payload, (long)StatusLifetime.TotalSeconds]);
 
-        var position = (long)result;
-        return position < 0 ? null : checked((int)position);
+        if (result is not { Length: 3 })
+            throw new InvalidOperationException("Redis returned an invalid execution enqueue result.");
+        var state = (long)result[0]!;
+        if (state < 0) return new ExecutionEnqueueResult(null, 0, IsFull: true, IsDuplicate: false);
+        var jobId = (string?)result[1];
+        if (string.IsNullOrEmpty(jobId)) throw new InvalidOperationException("Redis returned an invalid execution id.");
+        if (state == 0)
+        {
+            var status = await GetStatusAsync(jobId, cancellationToken);
+            var position = status is not null && int.TryParse(status.GetValueOrDefault("queuePosition"), out var pendingPosition)
+                ? pendingPosition
+                : 1;
+            return new ExecutionEnqueueResult(jobId, position, IsFull: false, IsDuplicate: true);
+        }
+        return new ExecutionEnqueueResult(jobId, checked((int)(long)result[2]!), IsFull: false, IsDuplicate: false);
     }
 
     public async Task<ExecutionJob?> DequeueAsync(CancellationToken cancellationToken)
@@ -136,4 +153,11 @@ public sealed class ExecutionJobQueue
     private RedisKey StatusKey(string jobId) => $"{_statusPrefix}{jobId}";
     private RedisKey OutputKey(string jobId) => $"{_outputPrefix}{jobId}";
     private RedisKey PayloadKey(string jobId) => $"{_payloadPrefix}{jobId}";
+    private RedisKey IdempotencyKey(string roomId, string requestId)
+    {
+        var bytes = System.Text.Encoding.UTF8.GetBytes($"{roomId}\n{requestId}");
+        return $"{_statusPrefix}request:{Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)).ToLowerInvariant()}";
+    }
 }
+
+public sealed record ExecutionEnqueueResult(string? JobId, int QueuePosition, bool IsFull, bool IsDuplicate);

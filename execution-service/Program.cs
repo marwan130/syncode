@@ -122,10 +122,10 @@ app.MapPost("/api/executions", async (HttpContext context, QueueExecutionRequest
         request.Source, DateTimeOffset.UtcNow, request.RequestId is null
             ? Guid.NewGuid().ToString("N")
             : Guid.Parse(request.RequestId).ToString("D"));
-    var position = await queue.EnqueueAsync(job, cancellationToken);
-    return position is null
+    var enqueue = await queue.EnqueueOrGetAsync(job, cancellationToken);
+    return enqueue.IsFull
         ? Results.Problem("The execution queue is full. Try again shortly.", statusCode: StatusCodes.Status503ServiceUnavailable)
-        : Results.Accepted($"/api/executions/{job.Id}", new { jobId = job.Id, queuePosition = position });
+        : Results.Accepted($"/api/executions/{enqueue.JobId}", new { jobId = enqueue.JobId, queuePosition = enqueue.QueuePosition });
 });
 app.MapGet("/api/executions/{jobId}", async (HttpContext context, string jobId, ExecutionJobQueue queue, CancellationToken cancellationToken) =>
 {
