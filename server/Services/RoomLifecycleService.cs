@@ -24,6 +24,7 @@ public class RoomLifecycleService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        await RunCleanupAsync();
         while (!stoppingToken.IsCancellationRequested)
         {
             await Task.Delay(_cleanupInterval, stoppingToken);
@@ -35,6 +36,7 @@ public class RoomLifecycleService : BackgroundService
     {
         try
         {
+            await _store.PruneInactiveRoomsAsync();
             var stale = await _store.GetStaleRoomsAsync(_expiryThreshold);
             foreach (var roomId in stale)
             {

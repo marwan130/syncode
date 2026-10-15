@@ -9,13 +9,12 @@ public class RedisRoomStore
 {
     public sealed record RoomEntry(string Id, string Name, string? ParentId, bool IsFolder);
     private const int ChatHistoryLimit = 100;
-    private const string ConsumeChatRateLimitScript = """
+    private const string ConsumeRateLimitScript = """
         local now = tonumber(ARGV[1])
         local member = ARGV[2]
-        local limits = {5, 10000, 30, 60000, 100, 10000, 500, 60000}
         for i, key in ipairs(KEYS) do
-            local limit = limits[(i - 1) * 2 + 1]
-            local window = limits[(i - 1) * 2 + 2]
+            local limit = tonumber(ARGV[(i - 1) * 2 + 3])
+            local window = tonumber(ARGV[(i - 1) * 2 + 4])
             redis.call('ZREMRANGEBYSCORE', key, '-inf', now - window)
             if redis.call('ZCARD', key) >= limit then
                 return 0
@@ -23,7 +22,8 @@ public class RedisRoomStore
         end
         for i, key in ipairs(KEYS) do
             redis.call('ZADD', key, now, member)
-            redis.call('PEXPIRE', key, limits[(i - 1) * 2 + 2] + 1000)
+            local window = tonumber(ARGV[(i - 1) * 2 + 4])
+            redis.call('PEXPIRE', key, window + 1000)
         end
         return 1
         """;
@@ -97,6 +97,100 @@ public class RedisRoomStore
         end
         return result
         """;
+    private const string AdmitParticipantScript = """
+        if redis.call('EXISTS', KEYS[2]) == 0 then return -1 end
+        local alreadyInRoom = redis.call('HEXISTS', KEYS[1], ARGV[1]) == 1
+        if not alreadyInRoom then
+            if redis.call('HLEN', KEYS[1]) >= tonumber(ARGV[4]) then return 0 end
+            local roomIsActive = redis.call('SISMEMBER', KEYS[3], ARGV[5]) == 1
+            if not roomIsActive and redis.call('SCARD', KEYS[3]) >= tonumber(ARGV[6]) then return -2 end
+            local connectionExists = redis.call('SISMEMBER', KEYS[4], ARGV[1]) == 1
+            if not connectionExists and redis.call('SCARD', KEYS[4]) >= tonumber(ARGV[7]) then return -3 end
+        end
+        local participant = cjson.decode(ARGV[2])
+        if alreadyInRoom then
+            local previous = cjson.decode(redis.call('HGET', KEYS[1], ARGV[1]))
+            participant.IsAdmin = previous.IsAdmin or previous.isAdmin or false
+            participant.IsLocked = previous.IsLocked or previous.isLocked or false
+        else
+            local hasAdmin = false
+            for _, value in ipairs(redis.call('HVALS', KEYS[1])) do
+                local existing = cjson.decode(value)
+                if existing.IsAdmin or existing.isAdmin then
+                    hasAdmin = true
+                    break
+                end
+            end
+            if not hasAdmin then
+                participant.IsAdmin = true
+                participant.IsLocked = false
+            end
+        end
+        redis.call('HSET', KEYS[1], ARGV[1], cjson.encode(participant))
+        redis.call('SADD', KEYS[3], ARGV[5])
+        redis.call('SADD', KEYS[4], ARGV[1])
+        redis.call('PEXPIRE', KEYS[4], 120000)
+        redis.call('SET', KEYS[5], ARGV[5], 'EX', 86400)
+        return 1
+        """;
+    private const string RemoveParticipantScript = """
+        redis.call('HDEL', KEYS[1], ARGV[1])
+        if redis.call('GET', KEYS[3]) == ARGV[2] then
+            redis.call('DEL', KEYS[3])
+            redis.call('SREM', KEYS[4], ARGV[1])
+        end
+        if redis.call('HLEN', KEYS[1]) == 0 then
+            redis.call('SREM', KEYS[2], ARGV[2])
+        end
+        return 1
+        """;
+    private const string ToggleParticipantLockScript = """
+        local actorValue = redis.call('HGET', KEYS[1], ARGV[1])
+        if not actorValue then return '-2' end
+        local actor = cjson.decode(actorValue)
+        if not (actor.IsAdmin or actor.isAdmin) then return '-2' end
+
+        local value = redis.call('HGET', KEYS[1], ARGV[2])
+        if not value then return '0' end
+        local participant = cjson.decode(value)
+        if participant.IsAdmin or participant.isAdmin then return '-1' end
+        local locked = participant.IsLocked or participant.isLocked or false
+        participant.IsLocked = not locked
+        local updated = cjson.encode(participant)
+        redis.call('HSET', KEYS[1], ARGV[2], updated)
+        return updated
+        """;
+    private const string UpdateParticipantColorScript = """
+        local value = redis.call('HGET', KEYS[1], ARGV[1])
+        if not value then return '0' end
+        local participant = cjson.decode(value)
+        participant.Color = ARGV[2]
+        local updated = cjson.encode(participant)
+        redis.call('HSET', KEYS[1], ARGV[1], updated)
+        return updated
+        """;
+    private const string SetParticipantAdminScript = """
+        local actorValue = redis.call('HGET', KEYS[1], ARGV[1])
+        if not actorValue then return '-1' end
+        local actor = cjson.decode(actorValue)
+        if not (actor.IsAdmin or actor.isAdmin) then return '-1' end
+
+        local targetValue = redis.call('HGET', KEYS[1], ARGV[2])
+        if not targetValue then return '0' end
+        local target = cjson.decode(targetValue)
+        target.IsAdmin = ARGV[3] == '1'
+        if target.IsAdmin then target.IsLocked = false end
+        local updated = cjson.encode(target)
+        redis.call('HSET', KEYS[1], ARGV[2], updated)
+        return updated
+        """;
+    private const string RegisterConnectionScript = """
+        if redis.call('SISMEMBER', KEYS[1], ARGV[1]) == 1 then return 1 end
+        if redis.call('SCARD', KEYS[1]) >= tonumber(ARGV[2]) then return 0 end
+        redis.call('SADD', KEYS[1], ARGV[1])
+        redis.call('PEXPIRE', KEYS[1], 120000)
+        return 1
+        """;
 
     private static readonly JsonSerializerOptions _jsonOptions = new()
     {
@@ -161,6 +255,7 @@ public class RedisRoomStore
             FilesKey(roomId),
         }.Concat(fileIds.Select(id => (RedisKey)FileSnapshotKey(roomId, (string)id!))).ToArray();
         await _db.KeyDeleteAsync(keys);
+        await _db.SetRemoveAsync(ActiveRoomsKey, roomId);
     }
 
     public async Task AppendChatMessageAsync(string roomId, ChatMessage message)
@@ -176,15 +271,61 @@ public class RedisRoomStore
         string connectionId,
         string messageId)
     {
-        var result = await _db.ScriptEvaluateAsync(
-            ConsumeChatRateLimitScript,
+        return await TryConsumeRateLimitAsync(
             [
                 ChatConnectionRateKey(roomId, connectionId, "10s"),
                 ChatConnectionRateKey(roomId, connectionId, "1m"),
                 ChatRoomRateKey(roomId, "10s"),
                 ChatRoomRateKey(roomId, "1m"),
             ],
-            [DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), messageId]);
+            messageId,
+            connectionBurstLimit: 10,
+            connectionMinuteLimit: 60,
+            roomBurstLimit: 100,
+            roomMinuteLimit: 500);
+    }
+
+    public async Task<bool> TryConsumeFileEntryCreateRateLimitAsync(
+        string roomId,
+        string connectionId,
+        string operationId) =>
+        await TryConsumeRateLimitAsync(
+            [
+                FileEntryCreateConnectionRateKey(roomId, connectionId, "10s"),
+                FileEntryCreateConnectionRateKey(roomId, connectionId, "1m"),
+                FileEntryCreateRoomRateKey(roomId, "10s"),
+                FileEntryCreateRoomRateKey(roomId, "1m"),
+            ],
+            operationId,
+            connectionBurstLimit: 20,
+            connectionMinuteLimit: 120,
+            roomBurstLimit: 200,
+            roomMinuteLimit: 500);
+
+    private async Task<bool> TryConsumeRateLimitAsync(
+        RedisKey[] keys,
+        string operationId,
+        int connectionBurstLimit,
+        int connectionMinuteLimit,
+        int roomBurstLimit,
+        int roomMinuteLimit)
+    {
+        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var result = await _db.ScriptEvaluateAsync(
+            ConsumeRateLimitScript,
+            keys,
+            [
+                now,
+                operationId,
+                connectionBurstLimit,
+                10_000,
+                connectionMinuteLimit,
+                60_000,
+                roomBurstLimit,
+                10_000,
+                roomMinuteLimit,
+                60_000,
+            ]);
         return (int)result == 1;
     }
 
@@ -217,14 +358,90 @@ public class RedisRoomStore
         return stale;
     }
 
-    public async Task AddParticipantAsync(string roomId, Participant participant)
+    public async Task PruneInactiveRoomsAsync()
     {
-        var json = JsonSerializer.Serialize(participant);
-        await _db.HashSetAsync(ParticipantsKey(roomId), participant.ConnectionId, json);
+        var activeRooms = await _db.SetMembersAsync(ActiveRoomsKey);
+        foreach (var roomId in activeRooms)
+            await GetParticipantsAsync((string)roomId!);
     }
 
-    public async Task RemoveParticipantAsync(string roomId, string connectionId) =>
-        await _db.HashDeleteAsync(ParticipantsKey(roomId), connectionId);
+    public async Task<int> TryAdmitParticipantAsync(
+        string roomId,
+        Participant participant,
+        string instanceId,
+        int maxParticipants,
+        int maxActiveRooms,
+        int maxConnections)
+    {
+        return (int)await _db.ScriptEvaluateAsync(
+            AdmitParticipantScript,
+            [ParticipantsKey(roomId), MetaKey(roomId), ActiveRoomsKey, InstanceConnectionsKey(instanceId), ConnectionRoomKey(participant.ConnectionId)],
+            [participant.ConnectionId, JsonSerializer.Serialize(participant), instanceId, maxParticipants, roomId, maxActiveRooms, maxConnections]);
+    }
+
+    public async Task<bool> TryRegisterConnectionAsync(string connectionId, string instanceId, int maxConnections) =>
+        (int)await _db.ScriptEvaluateAsync(
+            RegisterConnectionScript,
+            [InstanceConnectionsKey(instanceId)],
+            [connectionId, maxConnections]) == 1;
+
+    public async Task UnregisterConnectionAsync(string connectionId, string instanceId) =>
+        await _db.SetRemoveAsync(InstanceConnectionsKey(instanceId), connectionId);
+
+    public async Task RefreshInstanceConnectionLeaseAsync(string instanceId) =>
+        await _db.KeyExpireAsync(InstanceConnectionsKey(instanceId), TimeSpan.FromMinutes(2));
+
+    public async Task RemoveParticipantAsync(string roomId, string connectionId, string instanceId) =>
+        await _db.ScriptEvaluateAsync(
+            RemoveParticipantScript,
+            [ParticipantsKey(roomId), ActiveRoomsKey, ConnectionRoomKey(connectionId), InstanceConnectionsKey(instanceId)],
+            [connectionId, roomId]);
+
+    public async Task<(int Status, Participant? Participant)> ToggleParticipantLockedAsync(
+        string roomId,
+        string actorConnectionId,
+        string targetConnectionId)
+    {
+        var result = await _db.ScriptEvaluateAsync(
+            ToggleParticipantLockScript,
+            [ParticipantsKey(roomId)],
+            [actorConnectionId, targetConnectionId]);
+        var value = (string?)result;
+        if (int.TryParse(value, out var status)) return (status, null);
+        var participant = JsonSerializer.Deserialize<Participant>(value!, _jsonOptions);
+        return participant is null ? (0, null) : (1, participant);
+    }
+
+    public async Task<Participant?> UpdateParticipantColorAsync(
+        string roomId,
+        string connectionId,
+        string color)
+    {
+        var result = await _db.ScriptEvaluateAsync(
+            UpdateParticipantColorScript,
+            [ParticipantsKey(roomId)],
+            [connectionId, color]);
+        var value = (string?)result;
+        return string.IsNullOrEmpty(value) || value == "0"
+            ? null
+            : JsonSerializer.Deserialize<Participant>(value, _jsonOptions);
+    }
+
+    public async Task<(int Status, Participant? Participant)> SetParticipantAdminAsync(
+        string roomId,
+        string actorConnectionId,
+        string targetConnectionId,
+        bool isAdmin)
+    {
+        var result = await _db.ScriptEvaluateAsync(
+            SetParticipantAdminScript,
+            [ParticipantsKey(roomId)],
+            [actorConnectionId, targetConnectionId, isAdmin ? "1" : "0"]);
+        var value = (string?)result;
+        if (int.TryParse(value, out var status)) return (status, null);
+        var participant = JsonSerializer.Deserialize<Participant>(value!, _jsonOptions);
+        return participant is null ? (0, null) : (1, participant);
+    }
 
     public async Task<bool> IsParticipantAsync(string roomId, string connectionId) =>
         await _db.HashExistsAsync(ParticipantsKey(roomId), connectionId);
@@ -232,12 +449,18 @@ public class RedisRoomStore
     public async Task<IReadOnlyList<Participant>> GetParticipantsAsync(string roomId)
     {
         var entries = await _db.HashGetAllAsync(ParticipantsKey(roomId));
+        if (entries.Length == 0)
+            await _db.SetRemoveAsync(ActiveRoomsKey, roomId);
         var participants = new List<Participant>();
 
         foreach (var entry in entries)
         {
             var p = JsonSerializer.Deserialize<Participant>((string)entry.Value!, _jsonOptions);
-            if (p is not null) participants.Add(p);
+            if (p is null) continue;
+            var isLive = !string.IsNullOrEmpty(p.InstanceId) &&
+                await _db.SetContainsAsync(InstanceConnectionsKey(p.InstanceId), p.ConnectionId);
+            if (isLive) participants.Add(p);
+            else await RemoveParticipantAsync(roomId, p.ConnectionId, p.InstanceId);
         }
 
         return participants;
@@ -264,15 +487,6 @@ public class RedisRoomStore
         return (string?)await _db.StringGetAsync(ConnectionRoomKey(connectionId));
     }
 
-    public async Task SetConnectionRoomAsync(string connectionId, string roomId) =>
-        await _db.StringSetAsync(ConnectionRoomKey(connectionId), roomId, TimeSpan.FromHours(24));
-
-    public async Task ClearConnectionRoomAsync(string connectionId)
-    {
-        if (!string.IsNullOrEmpty(connectionId))
-            await _db.KeyDeleteAsync(ConnectionRoomKey(connectionId));
-    }
-
     public async Task SetUserRoomAsync(string userId, string roomId)
     {
         if (string.IsNullOrEmpty(userId)) return;
@@ -283,20 +497,6 @@ public class RedisRoomStore
     {
         if (string.IsNullOrEmpty(userId)) return;
         await _db.KeyDeleteAsync(UserRoomKey(userId));
-    }
-
-    public async Task RemoveUserFromRoomAsync(string roomId, string userId)
-    {
-        if (string.IsNullOrEmpty(roomId) || string.IsNullOrEmpty(userId)) return;
-        var entries = await _db.HashGetAllAsync(ParticipantsKey(roomId));
-        foreach (var entry in entries)
-        {
-            var p = JsonSerializer.Deserialize<Participant>((string)entry.Value!, _jsonOptions);
-            if (p is not null && p.UserId == userId)
-            {
-                await _db.HashDeleteAsync(ParticipantsKey(roomId), entry.Name);
-            }
-        }
     }
 
     public async Task<string?> GetSnapshotAsync(string roomId)
@@ -350,6 +550,8 @@ public class RedisRoomStore
 
     private static string MetaKey(string roomId) => $"room:{roomId}:meta";
     private static string ParticipantsKey(string roomId) => $"room:{roomId}:participants";
+    private static RedisKey ActiveRoomsKey => "syncode:active-rooms";
+    private static string InstanceConnectionsKey(string instanceId) => $"syncode:instance:{instanceId}:connections";
     private static string UserRoomKey(string userId) => $"user:{userId}:room";
     private static string ConnectionRoomKey(string connectionId) => $"connection:{connectionId}:room";
     private static string SnapshotKey(string roomId) => $"room:{roomId}:snapshot";
@@ -363,4 +565,11 @@ public class RedisRoomStore
         $"room:{{{roomId}}}:chat:rate:connection:{connectionId}:{window}";
     private static string ChatRoomRateKey(string roomId, string window) =>
         $"room:{{{roomId}}}:chat:rate:{window}";
+    private static string FileEntryCreateConnectionRateKey(
+        string roomId,
+        string connectionId,
+        string window) =>
+        $"room:{{{roomId}}}:files:create:rate:connection:{connectionId}:{window}";
+    private static string FileEntryCreateRoomRateKey(string roomId, string window) =>
+        $"room:{{{roomId}}}:files:create:rate:{window}";
 }

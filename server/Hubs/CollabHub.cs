@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.SignalR;
 using System.Text;
 using server.Models;
 using server.Services;
+using Microsoft.Extensions.Options;
 
 namespace server.Hubs;
 
@@ -10,11 +11,20 @@ public class CollabHub : Hub
     private readonly RedisRoomStore _store;
     private readonly ExecutionServiceClient _executionService;
     private readonly TerminalSessionRegistry _terminalSessions;
-    public CollabHub(RedisRoomStore store, ExecutionServiceClient executionService, TerminalSessionRegistry terminalSessions)
+    private readonly RoomCapacityOptions _roomLimits;
+    private readonly string _instanceId;
+    public CollabHub(
+        RedisRoomStore store,
+        ExecutionServiceClient executionService,
+        TerminalSessionRegistry terminalSessions,
+        IOptions<RoomCapacityOptions> roomLimits,
+        ServerInstanceIdentity instanceIdentity)
     {
         _store = store;
         _executionService = executionService;
         _terminalSessions = terminalSessions;
+        _roomLimits = roomLimits.Value;
+        _instanceId = instanceIdentity.Id;
     }
 
     public async Task<TerminalSessionStartResult> StartTerminal()
@@ -116,6 +126,19 @@ public class CollabHub : Hub
         await _executionService.WriteExecutionInputAsync(jobId, input, Context.ConnectionAborted);
     }
 
+    public override async Task OnConnectedAsync()
+    {
+        if (!await _store.TryRegisterConnectionAsync(
+                Context.ConnectionId,
+                _instanceId,
+                _roomLimits.MaxConnectionsPerInstance))
+        {
+            Context.Abort();
+            return;
+        }
+        await base.OnConnectedAsync();
+    }
+
     public async Task JoinRoom(
         string roomId,
         string accessKey,
@@ -143,7 +166,6 @@ public class CollabHub : Hub
             System.Text.RegularExpressions.Regex.IsMatch(color, "^#[0-9a-fA-F]{6}$")
                 ? color
                 : "#38bdf8";
-
         if (!string.IsNullOrEmpty(userId))
         {
             var previousRoomId = await _store.GetUserRoomAsync(userId);
@@ -157,11 +179,11 @@ public class CollabHub : Hub
                         await Clients.Client(previousParticipant.ConnectionId)
                             .SendAsync("PeerLeftByUser", userId, roomId);
                         await Groups.RemoveFromGroupAsync(previousParticipant.ConnectionId, previousRoomId);
-                        await _store.ClearConnectionRoomAsync(previousParticipant.ConnectionId);
+                        await _store.RemoveParticipantAsync(previousRoomId, previousParticipant.ConnectionId, previousParticipant.InstanceId);
                     }
                 }
 
-                await _store.RemoveUserFromRoomAsync(previousRoomId, userId);
+                await _store.ClearUserRoomAsync(userId);
             }
             await _store.SetUserRoomAsync(userId, roomId);
         }
@@ -175,9 +197,27 @@ public class CollabHub : Hub
                 catch (HubException) { }
             }
             await Groups.RemoveFromGroupAsync(Context.ConnectionId, oldRoomId);
-            await _store.RemoveParticipantAsync(oldRoomId, Context.ConnectionId);
-            await _store.ClearConnectionRoomAsync(Context.ConnectionId);
+            await _store.RemoveParticipantAsync(oldRoomId, Context.ConnectionId, _instanceId);
             await Clients.OthersInGroup(oldRoomId).SendAsync("PeerLeft", Context.ConnectionId);
+        }
+
+        await _store.GetParticipantsAsync(roomId);
+        var admission = await _store.TryAdmitParticipantAsync(
+            roomId,
+            new Participant(Context.ConnectionId, displayName, participantColor, userId, false, false, _instanceId),
+            _instanceId,
+            _roomLimits.MaxParticipantsPerRoom,
+            _roomLimits.MaxActiveRooms,
+            _roomLimits.MaxConnectionsPerInstance);
+        if (admission != 1)
+        {
+            throw new HubException(admission switch
+            {
+                0 => $"This room is full. Rooms can have up to {_roomLimits.MaxParticipantsPerRoom} participants.",
+                -2 => "Syncode is at its active room limit. Please try again later.",
+                -3 => "Syncode is at its connection limit. Please try again later.",
+                _ => "This room is no longer available.",
+            });
         }
 
         await Groups.AddToGroupAsync(Context.ConnectionId, roomId);
@@ -198,21 +238,18 @@ public class CollabHub : Hub
                 await Clients.Caller.SendAsync("LoadFileSnapshot", file.Id, fileSnapshot);
         }
 
-        var existingParticipants = await _store.GetParticipantsAsync(roomId);
-        await _store.AddParticipantAsync(
-            roomId,
-            new Participant(Context.ConnectionId, displayName, participantColor, userId));
-        await _store.SetConnectionRoomAsync(Context.ConnectionId, roomId);
-        await Clients.Caller.SendAsync("RoomParticipants", existingParticipants);
+        var roomParticipants = await _store.GetParticipantsAsync(roomId);
+        await Clients.Caller.SendAsync("RoomParticipants", roomParticipants);
         await Clients.Caller.SendAsync("ChatHistory", await _store.GetChatMessagesAsync(roomId));
 
-        var peer = existingParticipants.FirstOrDefault(p => p.ConnectionId != Context.ConnectionId);
+        var peer = roomParticipants.FirstOrDefault(p => p.ConnectionId != Context.ConnectionId);
         if (peer != null)
             foreach (var file in files)
                 await Clients.Client(peer.ConnectionId).SendAsync("RequestFileSnapshot", file.Id, Context.ConnectionId);
 
         await Clients.OthersInGroup(roomId)
-            .SendAsync("PeerJoined", Context.ConnectionId, displayName, participantColor, userId);
+            .SendAsync("PeerJoined", Context.ConnectionId, displayName, participantColor, userId,
+                roomParticipants.First(p => p.ConnectionId == Context.ConnectionId).IsAdmin, false);
     }
 
     public async Task SaveFileSnapshot(string roomId, string fileId, string snapshotJson)
@@ -247,7 +284,15 @@ public class CollabHub : Hub
 
     public async Task<string> CreateEntry(string roomId, string name, string? parentId, bool isFolder)
     {
-        await EnsureParticipantAsync(roomId);
+        await EnsureCanEditAsync(roomId);
+        if (!await _store.TryConsumeFileEntryCreateRateLimitAsync(
+                roomId,
+                Context.ConnectionId,
+                Guid.NewGuid().ToString("N")))
+        {
+            throw new HubException("File creation rate limit reached. Please wait before creating more files or folders.");
+        }
+
         name = ValidateFileName(name);
         var entries = await _store.GetEntriesAsync(roomId);
         if (entries.Count >= 500) throw new HubException("A room can contain up to 500 files and folders.");
@@ -277,16 +322,46 @@ public class CollabHub : Hub
         await Clients.Group(roomId).SendAsync("FileDeleted", result.DeletedIds);
     }
 
-    private async Task EnsureFileParticipantAsync(string roomId, string fileId)
+    public async Task ToggleParticipantEditLock(string roomId, string targetConnectionId)
     {
         await EnsureParticipantAsync(roomId);
+        if (string.IsNullOrWhiteSpace(targetConnectionId) || targetConnectionId == Context.ConnectionId)
+            throw new HubException("You cannot change your own edit access.");
+
+        var result = await _store.ToggleParticipantLockedAsync(
+            roomId, Context.ConnectionId, targetConnectionId);
+        if (result.Status == 0) throw new HubException("That participant is no longer in the room.");
+        if (result.Status == -1) throw new HubException("Admins cannot be locked.");
+        if (result.Status == -2) throw new HubException("Only a room admin can change edit access.");
+        await Clients.Group(roomId).SendAsync("ParticipantUpdated", result.Participant);
+    }
+
+    public async Task SetParticipantAdmin(string roomId, string targetConnectionId, bool isAdmin)
+    {
+        await EnsureParticipantAsync(roomId);
+        if (string.IsNullOrWhiteSpace(targetConnectionId))
+            throw new HubException("Select a participant in this room.");
+
+        var result = await _store.SetParticipantAdminAsync(
+            roomId, Context.ConnectionId, targetConnectionId, isAdmin);
+        if (result.Status == -1)
+            throw new HubException("Only a room admin can manage admin access.");
+        if (result.Status == 0)
+            throw new HubException("That participant is no longer in the room.");
+
+        await Clients.Group(roomId).SendAsync("ParticipantUpdated", result.Participant);
+    }
+
+    private async Task EnsureFileParticipantAsync(string roomId, string fileId)
+    {
+        await EnsureCanEditAsync(roomId);
         if (!(await _store.GetEntriesAsync(roomId)).Any(entry => entry.Id == fileId && !entry.IsFolder))
             throw new HubException("File no longer exists.");
     }
 
     private async Task EnsureEntryParticipantAsync(string roomId, string entryId)
     {
-        await EnsureParticipantAsync(roomId);
+        await EnsureCanEditAsync(roomId);
         if (!(await _store.GetEntriesAsync(roomId)).Any(entry => entry.Id == entryId))
             throw new HubException("File or folder no longer exists.");
     }
@@ -320,6 +395,25 @@ public class CollabHub : Hub
         await EnsureParticipantAsync(roomId);
         await Clients.OthersInGroup(roomId)
             .SendAsync("AwarenessUpdate", Context.ConnectionId, awarenessState);
+    }
+
+    public async Task UpdateParticipantColor(string roomId, string color)
+    {
+        await EnsureParticipantAsync(roomId);
+        if (color is not { Length: 7 } ||
+            !System.Text.RegularExpressions.Regex.IsMatch(color, "^#[0-9a-fA-F]{6}$"))
+        {
+            throw new HubException("Choose an avatar color.");
+        }
+
+        var participant = await _store.UpdateParticipantColorAsync(
+            roomId,
+            Context.ConnectionId,
+            color);
+        if (participant is null)
+            throw new HubException("Join this room before changing your avatar color.");
+
+        await Clients.Group(roomId).SendAsync("ParticipantUpdated", participant);
     }
 
     public async Task SendChatMessage(string roomId, string content)
@@ -365,6 +459,14 @@ public class CollabHub : Hub
         }
     }
 
+    private async Task EnsureCanEditAsync(string roomId)
+    {
+        await EnsureParticipantAsync(roomId);
+        var participant = await _store.GetParticipantAsync(roomId, Context.ConnectionId);
+        if (participant?.IsLocked == true)
+            throw new HubException("The room admin has locked your editing access.");
+    }
+
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
         foreach (var sessionId in _terminalSessions.RemoveAll(Context.ConnectionId))
@@ -377,8 +479,7 @@ public class CollabHub : Hub
         if (!string.IsNullOrEmpty(roomId))
         {
             var participant = await _store.GetParticipantAsync(roomId, Context.ConnectionId);
-            await _store.RemoveParticipantAsync(roomId, Context.ConnectionId);
-            await _store.ClearConnectionRoomAsync(Context.ConnectionId);
+            await _store.RemoveParticipantAsync(roomId, Context.ConnectionId, _instanceId);
             await Clients.OthersInGroup(roomId).SendAsync("PeerLeft", Context.ConnectionId);
 
             if (!string.IsNullOrEmpty(participant?.UserId))
@@ -391,6 +492,8 @@ public class CollabHub : Hub
                 }
             }
         }
+
+        await _store.UnregisterConnectionAsync(Context.ConnectionId, _instanceId);
 
         await base.OnDisconnectedAsync(exception);
     }

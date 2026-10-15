@@ -23,6 +23,13 @@ builder.Services.AddOpenApi();
 builder.Services.AddControllers();
 
 builder.Services.AddSingleton<RedisRoomStore>();
+builder.Services.AddOptions<RoomCapacityOptions>()
+    .Bind(builder.Configuration.GetSection(RoomCapacityOptions.SectionName))
+    .Validate(options => options.MaxParticipantsPerRoom > 0 &&
+        options.MaxConnectionsPerInstance > 0 && options.MaxActiveRooms > 0,
+        "Room capacity limits must all be positive numbers.");
+builder.Services.AddSingleton<ServerInstanceIdentity>();
+builder.Services.AddHostedService<RoomConnectionLeaseService>();
 builder.Services.AddSingleton<TerminalSessionRegistry>();
 builder.Services.AddHostedService<RoomLifecycleService>();
 builder.Services.AddHttpClient<ExecutionServiceClient>(client =>
