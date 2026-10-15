@@ -1,6 +1,6 @@
 # Syncode execution service
 
-The execution service is an internal .NET host. It accepts authenticated execution requests, stores them in a bounded Redis list, and runs up to three jobs concurrently in isolated Docker containers. By default, the HTTP host binds only to `127.0.0.1:5112`.
+The execution service is an internal .NET host. It accepts authenticated execution requests, stores them in a bounded Redis list, and runs up to three jobs concurrently in isolated Docker containers. Repeated requests with the same room and request ID resolve to the original job, preventing client retries from enqueuing duplicate work. By default, the HTTP host binds only to `127.0.0.1:5112`.
 
 ## Build runner images
 
@@ -55,7 +55,7 @@ The stack builds all supported runner images into the sibling daemon before star
 
 The same builder creates the Bash image used by interactive terminal tabs. Each tab runs its own Bash process in a no-network container with 256 MiB memory, half a CPU, 32 processes, a 64 MiB temporary workspace, and a 256 KiB output cap. Sessions are limited to three per SignalR connection, close when their tab or room connection closes, and expire after inactivity. The shell workspace is temporary and isolated from the room's collaborative files and the host filesystem.
 
-The browser terminal accepts and runs complete Bash commands, with command history and cursor editing. It is line-oriented rather than a full pseudo-terminal, so full-screen terminal programs and Bash tab completion are not supported.
+The browser terminal runs interactive Bash through a pseudo-terminal, including command history, cursor editing, and job control. Terminal resizing and full-screen programs are not supported yet.
 
 The sibling daemon has a separate persistent Docker data volume and its TLS-authenticated API is available only on an internal Compose network. Source files use a shared, size-limited temporary volume so the execution service and sibling daemon can both access them; normal job cleanup removes each job directory. `docker compose down` stops the stack while preserving Redis data and runner image cache.
 
@@ -97,30 +97,41 @@ Submit a job with `POST /api/executions` and JSON fields `roomId`, `requestedBy`
 
 ## Monitoring
 
-At Information level, each completed execution logs its room ID, language, duration, exit code, timeout status, and whether the output limit was reached. Failed and cancelled jobs log the same fields where available. `ContainerLifecycle` logs the total and running count of labeled execution containers at startup and every five minutes, so container counts can be compared over time to spot cleanup problems. Orphaned containers and cleanup sweep failures are logged separately.
+At Information level, each completed execution logs its room ID, language, duration, exit code, timeout status, and whether the output limit was reached. Failed and cancelled jobs log the same fields where available. `ContainerLifecycle` logs the total and running count of labeled execution and terminal containers at startup and every five minutes, so container counts can be compared over time to spot cleanup problems. Orphaned containers and cleanup sweep failures are logged separately.
+
+## Build
+
+From the repository root, build the .NET services and client with:
+
+```powershell
+dotnet build server/Syncode.Server.csproj
+dotnet build execution-service/Syncode.ExecutionService.csproj
+cd client
+npm run build
+```
+
+The queue prefix can be changed with `ExecutionService__QueuePrefix` when the service shares a Redis database with another deployment.
 
 ## Validate
 
-Run unit tests:
+Run the unit tests:
 
 ```powershell
 dotnet test execution-service.tests/Syncode.ExecutionService.Tests.csproj
 ```
 
-With Docker available and all runner images built, enable container integration checks:
+With Docker available and all runner images built, run the container integration checks:
 
 ```powershell
 $env:SYNCODE_RUN_DOCKER_INTEGRATION = "1"
 dotnet test execution-service.tests/Syncode.ExecutionService.Tests.csproj
 ```
 
-Those checks execute Node and Python jobs and verify timeout, network isolation, and the `/tmp` size cap.
+The Docker checks run all supported languages and verify timeout, network isolation, and the `/tmp` size limit.
 
-With Redis available, test the queue's FIFO order, live pending position, and capacity limit:
+With Redis available, run the queue and rate-limiter integration checks:
 
 ```powershell
 $env:SYNCODE_REDIS_CONNECTION = "localhost:6380"
 dotnet test execution-service.tests/Syncode.ExecutionService.Tests.csproj --filter "Category=RedisIntegration"
 ```
-
-The queue prefix can be changed with `ExecutionService__QueuePrefix` when the service shares a Redis database with another deployment.
