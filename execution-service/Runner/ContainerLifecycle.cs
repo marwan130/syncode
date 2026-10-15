@@ -7,14 +7,14 @@ namespace Syncode.ExecutionService.Runner;
 
 public sealed class ContainerLifecycle : BackgroundService
 {
-    private const string ExecutionContainerLabel = "label=syncode.execution=true";
-    private const string TerminalContainerLabel = "label=syncode.terminal=true";
+    private static readonly TimeSpan ContainerCountLogInterval = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan TerminalMaxOrphanAge = TimeSpan.FromMinutes(15);
 
     private readonly IDockerCli _docker;
     private readonly ActiveContainerRegistry _activeContainers;
     private readonly ResourceLimits _limits;
     private readonly ILogger<ContainerLifecycle> _logger;
+    private DateTimeOffset _lastCountLog = DateTimeOffset.MinValue;
 
     public ContainerLifecycle(
         IDockerCli docker,
@@ -60,23 +60,36 @@ public sealed class ContainerLifecycle : BackgroundService
     private async Task SweepAsync(CancellationToken cancellationToken)
     {
         var containers = await _docker.RunTextAsync(
-            ["ps", "--all", "--filter", ExecutionContainerLabel, "--filter", TerminalContainerLabel, "--format", "{{.ID}}|{{.Names}}"],
+            ["ps", "--all", "--format", "{{.ID}}|{{.Names}}|{{.State}}|{{.Labels}}"],
             cancellationToken);
 
-        foreach (var row in containers.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        var managed = containers.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(row => row.Split('|', 4))
+            .Where(parts => parts.Length == 4 && IsManagedContainer(parts[1], parts[3]))
+            .ToArray();
+        var now = DateTimeOffset.UtcNow;
+        if (_lastCountLog == DateTimeOffset.MinValue || now - _lastCountLog >= ContainerCountLogInterval)
         {
-            var parts = row.Split('|', 2);
-            if (parts.Length != 2 || _activeContainers.Contains(parts[1]))
+            _logger.LogInformation("Runner container count: {TotalContainers} total, {RunningContainers} running",
+                managed.Length, managed.Count(parts => parts[2] == "running"));
+            _lastCountLog = now;
+        }
+
+        foreach (var parts in managed)
+        {
+            var containerId = parts[0];
+            var containerName = parts[1];
+            if (_activeContainers.Contains(containerName))
                 continue;
 
             var details = await _docker.RunTextAsync(
-                ["inspect", "--format", "{{.State.Status}}|{{.State.StartedAt}}|{{.Created}}", parts[0]],
+                ["inspect", "--format", "{{.State.Status}}|{{.State.StartedAt}}|{{.Created}}", containerId],
                 cancellationToken);
             var detailParts = details.Trim().Split('|', 3);
             if (detailParts.Length != 3)
                 continue;
 
-            var isTerminal = parts[1].StartsWith("syncode-terminal-", StringComparison.Ordinal);
+            var isTerminal = containerName.StartsWith("syncode-terminal-", StringComparison.Ordinal);
             var maxAge = isTerminal ? TerminalMaxOrphanAge : _limits.Timeout + _limits.OrphanGracePeriod;
 
             var isStale = detailParts[0] != "running";
@@ -88,11 +101,20 @@ public sealed class ContainerLifecycle : BackgroundService
             if (!isStale)
                 continue;
 
-            _logger.LogWarning("Removing orphaned {ContainerType} container {ContainerName}", isTerminal ? "terminal" : "execution", parts[1]);
+            _logger.LogWarning("Removing orphaned {ContainerType} container {ContainerName}", isTerminal ? "terminal" : "execution", containerName);
             if (detailParts[0] == "running")
-                await _docker.TryRunAsync(["kill", parts[0]], cancellationToken);
-            await _docker.TryRunAsync(["rm", "-f", parts[0]], cancellationToken);
+                await _docker.TryRunAsync(["kill", containerId], cancellationToken);
+            await _docker.TryRunAsync(["rm", "-f", containerId], cancellationToken);
         }
+    }
+
+    private static bool IsManagedContainer(string name, string labels)
+    {
+        var isExecution = name.StartsWith("syncode-exec-", StringComparison.Ordinal) &&
+            labels.Split(',', StringSplitOptions.TrimEntries).Contains("syncode.execution=true", StringComparer.Ordinal);
+        var isTerminal = name.StartsWith("syncode-terminal-", StringComparison.Ordinal) &&
+            labels.Split(',', StringSplitOptions.TrimEntries).Contains("syncode.terminal=true", StringComparer.Ordinal);
+        return isExecution || isTerminal;
     }
 
 }

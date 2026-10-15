@@ -19,7 +19,7 @@ public sealed class InteractiveTerminalSessions : IHostedService, IAsyncDisposab
     private readonly ConcurrentDictionary<string, Session> _sessions = new(StringComparer.Ordinal);
     private readonly string _docker;
     private readonly ILogger<InteractiveTerminalSessions> _logger;
-    private readonly ActiveContainerRegistry? _activeContainers;
+    private readonly ActiveContainerRegistry _activeContainers;
     private readonly SemaphoreSlim _sessionSlots = new(MaxSessions, MaxSessions);
     private readonly CancellationTokenSource _shutdown = new();
     private Task? _cleanupTask;
@@ -27,7 +27,7 @@ public sealed class InteractiveTerminalSessions : IHostedService, IAsyncDisposab
     public InteractiveTerminalSessions(
         IConfiguration configuration,
         ILogger<InteractiveTerminalSessions> logger,
-        ActiveContainerRegistry? activeContainers = null)
+        ActiveContainerRegistry activeContainers)
     {
         _docker = configuration["ExecutionService:DockerCli"] ?? "docker";
         _logger = logger;
@@ -59,14 +59,14 @@ public sealed class InteractiveTerminalSessions : IHostedService, IAsyncDisposab
         foreach (var argument in BuildArguments(containerName)) startInfo.ArgumentList.Add(argument);
 
         var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
+        _activeContainers.Add(containerName);
         try
         {
             if (!process.Start()) throw new InvalidOperationException("Could not start the isolated Bash terminal.");
-            _activeContainers?.Add(containerName);
             var session = new Session(id, containerName, process);
             if (!_sessions.TryAdd(id, session))
             {
-                _activeContainers?.Remove(containerName);
+                _activeContainers.Remove(containerName);
                 throw new InvalidOperationException("Could not allocate a terminal session.");
             }
             session.OutputTask = Task.WhenAll(
@@ -77,7 +77,7 @@ public sealed class InteractiveTerminalSessions : IHostedService, IAsyncDisposab
         }
         catch
         {
-            _activeContainers?.Remove(containerName);
+            _activeContainers.Remove(containerName);
             KillProcess(process);
             process.Dispose();
             _sessionSlots.Release();
@@ -176,6 +176,7 @@ public sealed class InteractiveTerminalSessions : IHostedService, IAsyncDisposab
         var now = DateTimeOffset.UtcNow;
         session.ExitedAt = now;
         session.LastActivity = now;
+        _activeContainers.Remove(session.ContainerName);
         ReleaseSlot(session);
         try { if (session.OutputTask is not null) await session.OutputTask; }
         catch (Exception exception) when (exception is IOException or ObjectDisposedException or OperationCanceledException)
@@ -215,7 +216,7 @@ public sealed class InteractiveTerminalSessions : IHostedService, IAsyncDisposab
         }
         finally
         {
-            _activeContainers?.Remove(session.ContainerName);
+            _activeContainers.Remove(session.ContainerName);
             ReleaseSlot(session);
         }
     }
