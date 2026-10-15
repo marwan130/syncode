@@ -13,16 +13,26 @@ public sealed class ContainerRunnerTests
     {
         var docker = new DockerCli();
         var registry = new ActiveContainerRegistry();
-        var nodeRunner = new ContainerRunner(docker, registry, NullLogger<ContainerRunner>.Instance);
-        var pythonRunner = new ContainerRunner(docker, registry, NullLogger<ContainerRunner>.Instance);
+        var runner = new ContainerRunner(docker, registry, NullLogger<ContainerRunner>.Instance);
+        var programs = new (ExecutionLanguage Language, string Source, string ExpectedOutput)[]
+        {
+            (ExecutionLanguage.JavaScript, "console.log('javascript-ready')", "javascript-ready"),
+            (ExecutionLanguage.TypeScript, "console.log('typescript-ready')", "typescript-ready"),
+            (ExecutionLanguage.Python, "print('python-ready')", "python-ready"),
+            (ExecutionLanguage.CSharp, "Console.WriteLine(\"csharp-ready\");", "csharp-ready"),
+            (ExecutionLanguage.C, "#include <stdio.h>\nint main(void) { puts(\"c-ready\"); return 0; }", "c-ready"),
+            (ExecutionLanguage.Cpp, "#include <iostream>\nint main() { std::cout << \"cpp-ready\" << std::endl; }", "cpp-ready"),
+            (ExecutionLanguage.Rust, "fn main() { println!(\"rust-ready\"); }", "rust-ready"),
+            (ExecutionLanguage.Java, "public class Main { public static void main(String[] args) { System.out.println(\"java-ready\"); } }", "java-ready")
+        };
 
-        var nodeOutput = await RunAndCaptureAsync(nodeRunner, ExecutionLanguage.JavaScript, "console.log('node-ready')");
-        Assert.True(nodeOutput.Result.ExitCode == 0, $"Node container returned {nodeOutput.Result.ExitCode}: {nodeOutput.Text}");
-        Assert.Contains("node-ready", nodeOutput.Text);
-
-        var pythonOutput = await RunAndCaptureAsync(pythonRunner, ExecutionLanguage.Python, "print('python-ready')");
-        Assert.Equal(0, pythonOutput.Result.ExitCode);
-        Assert.Contains("python-ready", pythonOutput.Text);
+        foreach (var (language, source, expectedOutput) in programs)
+        {
+            var output = await RunAndCaptureAsync(runner, language, source);
+            Assert.True(output.Result.ExitCode == 0,
+                $"{language} container returned {output.Result.ExitCode}: {output.Text}");
+            Assert.Contains(expectedOutput, output.Text);
+        }
 
         var timeoutRunner = new ContainerRunner(
             docker, registry, NullLogger<ContainerRunner>.Instance,
@@ -32,11 +42,11 @@ public sealed class ContainerRunnerTests
         Assert.True(timedResult.TimedOut);
 
         var networkScript = "const net=require('net'); const s=net.connect(80,'1.1.1.1'); s.setTimeout(2000,()=>{console.log('network-blocked');s.destroy()}); s.on('error',()=>console.log('network-blocked'));";
-        var networkOutput = await RunAndCaptureAsync(nodeRunner, ExecutionLanguage.JavaScript, networkScript);
+        var networkOutput = await RunAndCaptureAsync(runner, ExecutionLanguage.JavaScript, networkScript);
         Assert.Contains("network-blocked", networkOutput.Text);
 
         var tmpfsScript = "try { require('fs').writeFileSync('/tmp/large', Buffer.alloc(11 * 1024 * 1024)); console.log('write-succeeded'); } catch (error) { console.log(error.code); }";
-        var tmpfsOutput = await RunAndCaptureAsync(nodeRunner, ExecutionLanguage.JavaScript, tmpfsScript);
+        var tmpfsOutput = await RunAndCaptureAsync(runner, ExecutionLanguage.JavaScript, tmpfsScript);
         Assert.Contains("ENOSPC", tmpfsOutput.Text);
     }
 

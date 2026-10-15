@@ -9,6 +9,41 @@ public sealed class ExecutionJobQueueTests
 {
     [RedisQueueIntegrationFact]
     [Trait("Category", "RedisIntegration")]
+    public async Task Queue_DeduplicatesRepeatedRequestIdsWithinRoom()
+    {
+        var connectionString = Environment.GetEnvironmentVariable("SYNCODE_REDIS_CONNECTION")!;
+        using var redis = await ConnectionMultiplexer.ConnectAsync(connectionString);
+        var database = redis.GetDatabase();
+        var prefix = $"syncode:test:{Guid.NewGuid():N}";
+        var queue = new ExecutionJobQueue(redis, maxPendingJobs: 2, keyPrefix: prefix);
+        var first = CreateJob();
+        var retry = first with { Id = Guid.NewGuid().ToString("N"), Source = "console.log('duplicate')" };
+
+        try
+        {
+            var original = await queue.EnqueueOrGetAsync(first);
+            var repeated = await queue.EnqueueOrGetAsync(retry);
+
+            Assert.False(original.IsDuplicate);
+            Assert.True(repeated.IsDuplicate);
+            Assert.Equal(first.Id, repeated.JobId);
+            Assert.Equal(first, await queue.DequeueAsync(CancellationToken.None));
+            Assert.Null(await queue.DequeueAsync(CancellationToken.None));
+        }
+        finally
+        {
+            await database.KeyDeleteAsync($"{prefix}:queue");
+            foreach (var id in new[] { first.Id, retry.Id })
+            {
+                await database.KeyDeleteAsync($"{prefix}:status:{id}");
+                await database.KeyDeleteAsync($"{prefix}:job:{id}");
+                await database.KeyDeleteAsync($"{prefix}:output:{id}");
+            }
+        }
+    }
+
+    [RedisQueueIntegrationFact]
+    [Trait("Category", "RedisIntegration")]
     public async Task Queue_EnforcesCapacityAndReportsLivePendingPosition()
     {
         var connectionString = Environment.GetEnvironmentVariable("SYNCODE_REDIS_CONNECTION")!;
@@ -22,9 +57,12 @@ public sealed class ExecutionJobQueueTests
 
         try
         {
-            Assert.Equal(1, await queue.EnqueueAsync(first));
-            Assert.Equal(2, await queue.EnqueueAsync(second));
-            Assert.Null(await queue.EnqueueAsync(rejected));
+            var firstResult = await queue.EnqueueOrGetAsync(first);
+            var secondResult = await queue.EnqueueOrGetAsync(second);
+            var rejectedResult = await queue.EnqueueOrGetAsync(rejected);
+            Assert.Equal(1, firstResult.QueuePosition);
+            Assert.Equal(2, secondResult.QueuePosition);
+            Assert.True(rejectedResult.IsFull);
 
             var secondStatus = await queue.GetStatusAsync(second.Id, CancellationToken.None);
             Assert.Equal("2", secondStatus!["queuePosition"]);
@@ -58,7 +96,8 @@ public sealed class ExecutionJobQueueTests
         "queue-test-user",
         ExecutionLanguage.JavaScript,
         "console.log('queued')",
-        DateTimeOffset.UtcNow);
+        DateTimeOffset.UtcNow,
+        Guid.NewGuid().ToString("D"));
 }
 
 public sealed class RedisQueueIntegrationFactAttribute : FactAttribute
