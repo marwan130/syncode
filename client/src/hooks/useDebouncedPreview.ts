@@ -13,7 +13,7 @@ interface UseDebouncedPreviewProps {
   activeFileId: string;
 }
 
-export interface PreviewFile {
+interface PreviewFile {
   path: string;
   content: string;
 }

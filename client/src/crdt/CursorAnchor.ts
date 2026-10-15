@@ -14,13 +14,13 @@ export interface CursorAnchor {
   beforeId?: CrdtId | null;
 }
 
-export interface CursorPosition {
+interface CursorPosition {
   offset: number;
   lineNumber: number;
   column: number;
 }
 
-export interface SelectionAnchor {
+interface SelectionAnchor {
   anchor: CursorAnchor;
   head: CursorAnchor;
 }

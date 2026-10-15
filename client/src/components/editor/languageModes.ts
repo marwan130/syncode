@@ -1,4 +1,4 @@
-export const LANGUAGE_MODES = [
+const LANGUAGE_MODES = [
   { id: 'cpp', label: 'C++' },
   { id: 'html', label: 'HTML' },
   { id: 'css', label: 'CSS' },

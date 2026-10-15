@@ -4,14 +4,14 @@ import type * as monaco from 'monaco-editor';
 import type { RoomEntry } from '../providers/SignalRCrdtProvider';
 import { getEntryPath } from '../components/editor/editorLayoutStorage';
 
-export type DiagnosticSeverity = 'error' | 'warning';
-export type FileDiagnosticsMap = Record<string, DiagnosticSeverity>;
+type DiagnosticSeverity = 'error' | 'warning';
+type FileDiagnosticsMap = Record<string, DiagnosticSeverity>;
 
 /**
  * Computes diagnostic severities for each room file
  * by querying Monaco's native marker service.
  */
-export function computeFileDiagnostics(
+function computeFileDiagnostics(
   monacoApi: Monaco,
   entries: RoomEntry[]
 ): FileDiagnosticsMap {

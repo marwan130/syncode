@@ -1,9 +1,9 @@
 import type { RoomEntry } from '../../providers/SignalRCrdtProvider';
 
-export const PREVIEW_WIDTH_KEY = 'syncode_live_preview_width';
+const PREVIEW_WIDTH_KEY = 'syncode_live_preview_width';
 export const PREVIEW_CLOSE_THRESHOLD = 24;
-export const TERMINAL_HEIGHT_KEY = 'syncode_terminal_height';
-export const EXPLORER_WIDTH_KEY = 'syncode_explorer_width';
+const TERMINAL_HEIGHT_KEY = 'syncode_terminal_height';
+const EXPLORER_WIDTH_KEY = 'syncode_explorer_width';
 
 export const DEFAULT_PREVIEW_WIDTH = 420;
 export const DEFAULT_TERMINAL_HEIGHT = 240;

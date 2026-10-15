@@ -15,7 +15,7 @@ export interface DeleteOp {
 
 export type CrdtOp = InsertOp | DeleteOp;
 
-export interface CrdtSnapshot {
+interface CrdtSnapshot {
   clock: number;
   chars: CrdtChar[];
 }

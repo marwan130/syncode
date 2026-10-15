@@ -16,7 +16,7 @@ export const CURSOR_COLORS = [
   '#fb7185',
 ];
 
-export function getRandomColor(): string {
+function getRandomColor(): string {
   const index = Math.floor(Math.random() * CURSOR_COLORS.length);
   return CURSOR_COLORS[index];
 }
@@ -35,8 +35,7 @@ export function setStoredDisplayName(roomId: string, name: string): boolean {
     if (sessionStorage.getItem(key)) return false;
     sessionStorage.setItem(key, name.trim());
     return true;
-  } catch (err) {
-    void err;
+  } catch {
     return false;
   }
 }
@@ -47,8 +46,7 @@ export function getStoredColor(): string {
     if (color && CURSOR_COLORS.includes(color)) {
       return color;
     }
-  } catch (err) {
-    void err;
+  } catch {
   }
   const fallback = getRandomColor();
   setStoredColor(fallback);
@@ -58,8 +56,7 @@ export function getStoredColor(): string {
 export function setStoredColor(color: string): void {
   try {
     localStorage.setItem(STORAGE_KEYS.USER_COLOR, color);
-  } catch (err) {
-    void err;
+  } catch {
   }
 }
 

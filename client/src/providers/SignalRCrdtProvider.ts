@@ -26,7 +26,7 @@ export interface AwarenessState {
   userId?: string;
 }
 
-export interface ParticipantInfo {
+interface ParticipantInfo {
   connectionId: string;
   displayName: string;
   color: string;
@@ -63,16 +63,16 @@ export interface ExecutionEvent {
   outputLimitExceeded?: boolean;
 }
 
-export interface ExecutionSubmission {
+interface ExecutionSubmission {
   jobId: string;
   queuePosition: number;
 }
 
-export interface TerminalSessionStart {
+interface TerminalSessionStart {
   sessionId: string;
 }
 
-export interface TerminalOutput {
+interface TerminalOutput {
   text: string;
   offset: number;
   exited: boolean;
