@@ -40,7 +40,7 @@ export const ChatPanelContainer: FC<ChatPanelContainerProps> = ({
         label="Resize chat panel"
         onResize={(delta) => {
           const next = width + delta;
-          if (next <= 32) {
+          if (next < MIN_CHAT_WIDTH) {
             onClose();
             onWidthChange(DEFAULT_CHAT_WIDTH);
             return;

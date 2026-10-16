@@ -5,7 +5,7 @@ import { LivePreview } from './LivePreview';
 import { ResizeHandle } from './ResizeHandle';
 import {
   DEFAULT_PREVIEW_WIDTH,
-  PREVIEW_CLOSE_THRESHOLD,
+  MIN_PREVIEW_WIDTH,
   storePreviewWidth,
 } from './editorLayoutStorage';
 import { isPreviewLanguage, type LanguageMode } from './languageModes';
@@ -44,7 +44,7 @@ export const PreviewPanel: FC<PreviewPanelProps> = ({
         reverse
         onResize={(delta) => {
           const nextWidth = Math.min(1000, width + delta);
-          if (nextWidth <= PREVIEW_CLOSE_THRESHOLD) {
+          if (nextWidth < MIN_PREVIEW_WIDTH) {
             onClose();
             onWidthChange(DEFAULT_PREVIEW_WIDTH);
             storePreviewWidth(DEFAULT_PREVIEW_WIDTH);
