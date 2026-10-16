@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import type { CSSProperties } from 'react';
 import type { ChatMessage as ChatMessageData } from '../../providers/SignalRCrdtProvider';
+import { ScrollbarPanel } from '../shared/ScrollbarPanel';
 import { ChatMessage } from './ChatMessage';
 
 interface ChatPanelProps {
@@ -47,7 +48,7 @@ export function ChatPanel({
   return (
     <aside className="chat-panel" style={style} aria-label="Room chat">
       <h2>Chat</h2>
-      <div className="chat-messages" aria-live="polite">
+      <ScrollbarPanel className="chat-messages" aria-live="polite">
         {messages.length === 0 ? (
           <p className="chat-empty">No messages yet.</p>
         ) : (
@@ -56,7 +57,7 @@ export function ChatPanel({
           ))
         )}
         <div ref={messagesEndRef} />
-      </div>
+      </ScrollbarPanel>
       <form className="chat-form" onSubmit={handleSubmit}>
         {sendError && (
           <p className="chat-error" role="alert">
