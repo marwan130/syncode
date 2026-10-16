@@ -24,13 +24,17 @@ export interface AwarenessState {
   name: string;
   color: string;
   userId?: string;
+  isAdmin?: boolean;
+  isLocked?: boolean;
 }
 
-interface ParticipantInfo {
+export interface ParticipantInfo {
   connectionId: string;
   displayName: string;
   color: string;
   userId?: string;
+  isAdmin?: boolean;
+  isLocked?: boolean;
 }
 
 export interface ChatMessage {
@@ -93,6 +97,8 @@ export class SignalRCrdtProvider {
   private files: RoomEntry[] = [
     { id: 'main.cpp', name: 'main.cpp', parentId: null, isFolder: false },
   ];
+  private roomParticipants: ParticipantInfo[] = [];
+  private localEditLocked = false;
   private fileListeners = new Set<(files: RoomEntry[]) => void>();
   private activeFileListeners = new Set<(file: RoomEntry) => void>();
   public get doc(): CrdtDocument {
@@ -104,9 +110,17 @@ export class SignalRCrdtProvider {
   public get activeFileId(): string {
     return this.activeFile;
   }
+  public get isEditLocked(): boolean {
+    return this.localEditLocked;
+  }
   public setLocalColor(color: string): void {
     if (this.color === color) return;
     this.color = color;
+    if (this.connection.state === HubConnectionState.Connected) {
+      this.connection
+        .invoke('UpdateParticipantColor', this.roomId, color)
+        .catch(() => {});
+    }
     this.sendAwareness({
       cursor: null,
       name: this.displayName,
@@ -120,6 +134,7 @@ export class SignalRCrdtProvider {
     return this.documentFor(fileId);
   }
   public readonly siteId: string;
+  private userId: string;
   private connection: HubConnection;
   private roomId: string;
   private accessKey: string;
@@ -130,20 +145,8 @@ export class SignalRCrdtProvider {
   private awarenessListeners: Set<
     (peerId: string, state: AwarenessState) => void
   > = new Set();
-  private peerLeftListeners: Set<(peerId: string) => void> = new Set();
-  private peerLeftByUserListeners: Set<
-    (userId: string, newRoomId?: string) => void
-  > = new Set();
   private evictedListeners: Set<(newRoomId?: string) => void> = new Set();
   private snapshotSaveTimers = new Map<string, ReturnType<typeof setTimeout>>();
-  private peerJoinedListeners: Set<
-    (
-      peerId: string,
-      displayName: string,
-      color: string,
-      userId?: string
-    ) => void
-  > = new Set();
   private roomParticipantsListeners: Set<
     (participants: ParticipantInfo[]) => void
   > = new Set();
@@ -153,6 +156,7 @@ export class SignalRCrdtProvider {
 
   constructor(
     siteId: string,
+    userId: string,
     roomId: string,
     accessKey: string,
     serverUrl: string,
@@ -160,6 +164,7 @@ export class SignalRCrdtProvider {
     color: string = '#38bdf8'
   ) {
     this.siteId = siteId;
+    this.userId = userId;
     this.roomId = roomId;
     this.accessKey = accessKey;
     this.displayName = displayName;
@@ -282,6 +287,24 @@ export class SignalRCrdtProvider {
   }
   public async deleteEntry(entryId: string): Promise<void> {
     await this.connection.invoke('DeleteEntry', this.roomId, entryId);
+  }
+  public async toggleParticipantEditLock(connectionId: string): Promise<void> {
+    await this.connection.invoke(
+      'ToggleParticipantEditLock',
+      this.roomId,
+      connectionId
+    );
+  }
+  public async setParticipantAdmin(
+    connectionId: string,
+    isAdmin: boolean
+  ): Promise<void> {
+    await this.connection.invoke(
+      'SetParticipantAdmin',
+      this.roomId,
+      connectionId,
+      isAdmin
+    );
   }
 
   private updateFiles(files: RoomEntry[]): void {
@@ -433,39 +456,16 @@ export class SignalRCrdtProvider {
     return () => this.awarenessListeners.delete(listener);
   }
 
-  public onPeerLeft(listener: (peerId: string) => void): () => void {
-    this.peerLeftListeners.add(listener);
-    return () => this.peerLeftListeners.delete(listener);
-  }
-
-  public onPeerLeftByUser(
-    listener: (userId: string, newRoomId?: string) => void
-  ): () => void {
-    this.peerLeftByUserListeners.add(listener);
-    return () => this.peerLeftByUserListeners.delete(listener);
-  }
-
   public onEvicted(listener: (newRoomId?: string) => void): () => void {
     this.evictedListeners.add(listener);
     return () => this.evictedListeners.delete(listener);
-  }
-
-  public onPeerJoined(
-    listener: (
-      peerId: string,
-      displayName: string,
-      color: string,
-      userId?: string
-    ) => void
-  ): () => void {
-    this.peerJoinedListeners.add(listener);
-    return () => this.peerJoinedListeners.delete(listener);
   }
 
   public onRoomParticipants(
     listener: (participants: ParticipantInfo[]) => void
   ): () => void {
     this.roomParticipantsListeners.add(listener);
+    listener([...this.roomParticipants]);
     return () => this.roomParticipantsListeners.delete(listener);
   }
 
@@ -565,43 +565,53 @@ export class SignalRCrdtProvider {
     this.connection.on(
       'RoomParticipants',
       (rawParticipants: Array<Record<string, unknown>>) => {
-        const participants: ParticipantInfo[] = (rawParticipants || []).map(
-          (p) => ({
-            connectionId: String(p.connectionId ?? p.ConnectionId ?? ''),
-            displayName: String(p.displayName ?? p.DisplayName ?? 'Anonymous'),
-            color: String(p.color ?? p.Color ?? '#38bdf8'),
-            userId: p.userId
-              ? String(p.userId)
-              : p.UserId
-                ? String(p.UserId)
-                : undefined,
-          })
+        const participants = (rawParticipants || []).map((p) =>
+          this.normalizeParticipant(p)
         );
-        this.roomParticipantsListeners.forEach((l) => l(participants));
+        this.setRoomParticipants(participants);
       }
     );
 
+    this.connection.on('ParticipantUpdated', (raw: Record<string, unknown>) => {
+      this.upsertRoomParticipant(this.normalizeParticipant(raw));
+    });
+
     this.connection.on(
       'PeerJoined',
-      (peerId: string, displayName: string, color: string, userId?: string) => {
-        this.peerJoinedListeners.forEach((l) =>
-          l(peerId, displayName, color, userId)
-        );
+      (
+        peerId: string,
+        displayName: string,
+        color: string,
+        userId?: string,
+        isAdmin = false,
+        isLocked = false
+      ) => {
+        this.upsertRoomParticipant({
+          connectionId: peerId,
+          displayName,
+          color,
+          userId,
+          isAdmin,
+          isLocked,
+        });
       }
     );
 
     this.connection.on('PeerLeft', (peerId: string) => {
-      this.peerLeftListeners.forEach((l) => l(peerId));
+      this.removeRoomParticipants(
+        (participant) => participant.connectionId === peerId
+      );
     });
 
     this.connection.on(
       'PeerLeftByUser',
       (userId: string, newRoomId?: string) => {
-        if (userId === this.siteId) {
+        this.removeRoomParticipants(
+          (participant) => participant.userId === userId
+        );
+        if (userId === this.userId) {
           this.evictedListeners.forEach((l) => l(newRoomId));
           this.disconnect().catch(() => {});
-        } else {
-          this.peerLeftByUserListeners.forEach((l) => l(userId, newRoomId));
         }
       }
     );
@@ -629,6 +639,62 @@ export class SignalRCrdtProvider {
     });
   }
 
+  private setRoomParticipants(participants: ParticipantInfo[]): void {
+    this.roomParticipants = participants;
+    this.syncLocalEditLock();
+    this.publishRoomParticipants();
+  }
+
+  private upsertRoomParticipant(participant: ParticipantInfo): void {
+    this.roomParticipants = this.roomParticipants
+      .filter((current) => current.connectionId !== participant.connectionId)
+      .concat(participant);
+    this.syncLocalEditLock(participant);
+    this.publishRoomParticipants();
+  }
+
+  private removeRoomParticipants(
+    shouldRemove: (participant: ParticipantInfo) => boolean
+  ): void {
+    this.roomParticipants = this.roomParticipants.filter(
+      (participant) => !shouldRemove(participant)
+    );
+    this.syncLocalEditLock();
+    this.publishRoomParticipants();
+  }
+
+  private syncLocalEditLock(participant?: ParticipantInfo): void {
+    const localParticipant =
+      participant?.connectionId === this.connection.connectionId
+        ? participant
+        : this.roomParticipants.find(
+            (current) => current.connectionId === this.connection.connectionId
+          );
+    this.localEditLocked = Boolean(localParticipant?.isLocked);
+  }
+
+  private publishRoomParticipants(): void {
+    const participants = [...this.roomParticipants];
+    this.roomParticipantsListeners.forEach((listener) =>
+      listener(participants)
+    );
+  }
+
+  private normalizeParticipant(raw: Record<string, unknown>): ParticipantInfo {
+    return {
+      connectionId: String(raw.connectionId ?? raw.ConnectionId ?? ''),
+      displayName: String(raw.displayName ?? raw.DisplayName ?? 'Anonymous'),
+      color: String(raw.color ?? raw.Color ?? '#38bdf8'),
+      userId: raw.userId
+        ? String(raw.userId)
+        : raw.UserId
+          ? String(raw.UserId)
+          : undefined,
+      isAdmin: Boolean(raw.isAdmin ?? raw.IsAdmin),
+      isLocked: Boolean(raw.isLocked ?? raw.IsLocked),
+    };
+  }
+
   private normalizeChatMessage(raw: Record<string, unknown>): ChatMessage {
     return {
       id: String(raw.id ?? raw.Id ?? ''),
@@ -644,7 +710,7 @@ export class SignalRCrdtProvider {
       'JoinRoom',
       this.roomId,
       this.accessKey,
-      this.siteId,
+      this.userId,
       this.displayName,
       this.color
     );

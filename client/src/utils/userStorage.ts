@@ -5,6 +5,8 @@ const STORAGE_KEYS = {
   USER_COLOR: 'syncode_user_color',
 } as const;
 
+const participantKey = (roomId: string) => `syncode_participant_id:${roomId}`;
+
 export const CURSOR_COLORS = [
   '#f97316',
   '#22d3ee',
@@ -40,23 +42,37 @@ export function setStoredDisplayName(roomId: string, name: string): boolean {
   }
 }
 
-export function getStoredColor(): string {
+export function getStoredColor(participantId?: string): string {
   try {
-    const color = localStorage.getItem(STORAGE_KEYS.USER_COLOR);
+    const scopedKey = participantId
+      ? `${STORAGE_KEYS.USER_COLOR}:${participantId}`
+      : STORAGE_KEYS.USER_COLOR;
+    const scopedColor = localStorage.getItem(scopedKey);
+    if (scopedColor && CURSOR_COLORS.includes(scopedColor)) return scopedColor;
+
+    const color = participantId
+      ? localStorage.getItem(STORAGE_KEYS.USER_COLOR)
+      : scopedColor;
     if (color && CURSOR_COLORS.includes(color)) {
+      if (participantId) localStorage.setItem(scopedKey, color);
       return color;
     }
   } catch {
+    // Use an in-memory color if browser storage is unavailable.
   }
   const fallback = getRandomColor();
-  setStoredColor(fallback);
+  setStoredColor(fallback, participantId);
   return fallback;
 }
 
-export function setStoredColor(color: string): void {
+export function setStoredColor(color: string, participantId?: string): void {
   try {
-    localStorage.setItem(STORAGE_KEYS.USER_COLOR, color);
+    const key = participantId
+      ? `${STORAGE_KEYS.USER_COLOR}:${participantId}`
+      : STORAGE_KEYS.USER_COLOR;
+    localStorage.setItem(key, color);
   } catch {
+    // The current avatar color remains available for this session.
   }
 }
 
@@ -64,4 +80,25 @@ export function createSiteId(): string {
   // A CRDT site ID must be unique per editor tab. sessionStorage can be copied
   // when a tab is duplicated, causing two editors to generate colliding IDs.
   return uuidv4();
+}
+
+export function getOrCreateParticipantId(roomId: string): string {
+  try {
+    const key = participantKey(roomId);
+    const existing = sessionStorage.getItem(key);
+    if (existing) return existing;
+    const id = uuidv4();
+    sessionStorage.setItem(key, id);
+    return id;
+  } catch {
+    return uuidv4();
+  }
+}
+
+export function setParticipantId(roomId: string, id: string): void {
+  try {
+    sessionStorage.setItem(participantKey(roomId), id);
+  } catch {
+    // A new participant ID is generated on the next room entry.
+  }
 }

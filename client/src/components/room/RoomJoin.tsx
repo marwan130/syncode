@@ -18,6 +18,7 @@ interface RoomJoinProps {
   defaultName?: string;
   mode?: 'profile' | 'create' | 'join';
   presentation?: 'popover' | 'dialog';
+  colorStorageId?: string;
   currentRoomId?: string;
   onJoin?: (info: { displayName: string; color: string }) => void;
   onColorChange?: (color: string) => void;
@@ -30,6 +31,7 @@ export function RoomJoin({
   defaultName = '',
   mode = 'profile',
   presentation = 'popover',
+  colorStorageId,
   currentRoomId,
   onJoin,
   onColorChange,
@@ -37,7 +39,9 @@ export function RoomJoin({
   onClose,
 }: RoomJoinProps) {
   const [name, setName] = useState(defaultName);
-  const [selectedColor, setSelectedColor] = useState(getStoredColor);
+  const [selectedColor, setSelectedColor] = useState(() =>
+    getStoredColor(colorStorageId)
+  );
   const [inviteLink, setInviteLink] = useState('');
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -70,7 +74,7 @@ export function RoomJoin({
 
   const chooseColor = (color: string) => {
     setSelectedColor(color);
-    setStoredColor(color);
+    setStoredColor(color, colorStorageId);
     onColorChange?.(color);
   };
 

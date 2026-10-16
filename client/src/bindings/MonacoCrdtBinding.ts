@@ -7,10 +7,10 @@ import { createCursorAnchor, resolveCursorAnchor } from '../crdt/CursorAnchor';
 /**
  * bridges a monaco editor instance and a signalr crdt provider.
  *
- * local changes: intercepts monaco's onDidChangeContent events and maps each
+ * local changes intercept monaco's onDidChangeContent events and map each
  * change range into individual crdt insert/delete operations.
  *
- * remote changes: when the provider fires onDocumentChange, the new visible
+ * remote changes are handled when the provider fires onDocumentChange. The new visible
  * text is pushed back into monaco using executeEdits. cursor position is
  * restored using a crdt cursor anchor so it stays attached to the same text.
  *
@@ -55,6 +55,15 @@ export class MonacoCrdtBinding {
     const disposable = model.onDidChangeContent(
       (event: monaco.editor.IModelContentChangedEvent) => {
         if (this.isApplyingRemote) return;
+        if (this.provider.isEditLocked) {
+          this.isApplyingRemote = true;
+          try {
+            model.setValue(this.provider.getFileContent(this.fileId));
+          } finally {
+            this.isApplyingRemote = false;
+          }
+          return;
+        }
 
         const changes = [...event.changes].sort(
           (a, b) => b.rangeOffset - a.rangeOffset

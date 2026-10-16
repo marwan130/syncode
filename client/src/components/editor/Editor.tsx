@@ -9,10 +9,13 @@ import { useChat } from '../../hooks/useChat';
 import { useDebouncedPreview } from '../../hooks/useDebouncedPreview';
 import { useExecutionStream } from '../../hooks/useExecutionStream';
 import { useFileDiagnostics } from '../../hooks/useFileDiagnostics';
+import { useAutocompletePreference } from '../../hooks/useAutocompletePreference';
+import { userFacingError } from '../../utils/userFacingError';
 import {
   createSiteId,
   getStoredColor,
   getStoredDisplayName,
+  getOrCreateParticipantId,
 } from '../../utils/userStorage';
 import { RoomHeader } from '../room/RoomHeader';
 import {
@@ -39,7 +42,7 @@ import {
   validateCodeForExecution,
   type CodeValidationResult,
 } from '../../utils/codeValidation';
-import { configureMonacoDiagnostics } from '../../utils/monacoDiagnostics';
+import { configureMonacoEditor } from '../../utils/configureMonacoEditor';
 import type {
   ExecutionLanguage,
   RoomEntry,
@@ -74,7 +77,10 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
     profile.roomId === roomId
       ? profile.displayName
       : (getStoredDisplayName(roomId) ?? '');
-  const [localColor, setLocalColor] = useState(getStoredColor);
+  const [participantId] = useState(() => getOrCreateParticipantId(roomId));
+  const [localColor, setLocalColor] = useState(() =>
+    getStoredColor(participantId)
+  );
   const [entries, setEntries] = useState<RoomEntry[]>([]);
   const [activeFileId, setActiveFileId] = useState('main.cpp');
   const activeFileIdRef = useRef(activeFileId);
@@ -90,6 +96,8 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
   const [explorerWidth, setExplorerWidth] = useState(getStoredExplorerWidth);
   const [siteId] = useState(createSiteId);
   const [monacoApi, setMonacoApi] = useState<Monaco | null>(null);
+  const [autocompleteEnabled, setAutocompleteEnabled] =
+    useAutocompletePreference();
   const [monacoEditor, setMonacoEditor] =
     useState<monaco.editor.IStandaloneCodeEditor | null>(null);
   const [splitMonacoEditor, setSplitMonacoEditor] =
@@ -105,14 +113,16 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
   const splitFilePath = splitFile ? getEntryPath(splitFile, entries) : '';
   const language: LanguageMode = languageForFileName(activeFilePath);
 
-  const { status, providerRef, evictedNewRoomId } = useCrdtSync({
-    siteId,
-    roomId,
-    accessKey,
-    displayName: displayName || undefined,
-    color: localColor,
-    enabled: Boolean(roomId && accessKey && displayName),
-  });
+  const { status, connectionError, providerRef, evictedNewRoomId } =
+    useCrdtSync({
+      siteId,
+      userId: participantId,
+      roomId,
+      accessKey,
+      displayName: displayName || undefined,
+      color: localColor,
+      enabled: Boolean(roomId && accessKey && displayName),
+    });
 
   useEffect(() => {
     const provider = providerRef.current;
@@ -372,12 +382,13 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
       navigate(`/room/${evictedNewRoomId}`, { replace: true });
   }, [evictedNewRoomId, navigate]);
 
-  const { peers, broadcastCursor } = useAwareness({
+  const { peers, localParticipant, broadcastCursor } = useAwareness({
     providerRef,
     status,
     localName: displayName || 'Anonymous',
     localColor,
   });
+  const isEditLocked = localParticipant?.isLocked === true;
 
   const previewSource = useDebouncedPreview({
     providerRef,
@@ -437,7 +448,7 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
   }, [splitMonacoEditor, providerRef, status, splitFileId]);
 
   const handleEditorMount: OnMount = (editor, monacoInstance) => {
-    configureMonacoDiagnostics(monacoInstance);
+    configureMonacoEditor(monacoInstance);
     setMonacoEditor(editor);
     setMonacoApi(monacoInstance);
   };
@@ -521,6 +532,7 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
     <div className="room-workspace">
       <RoomHeader
         roomId={roomId}
+        participantId={participantId}
         status={status}
         localName={displayName}
         localColor={localColor}
@@ -530,8 +542,39 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
         }}
         onColorChange={setLocalColor}
         peers={peers}
+        isAdmin={Boolean(localParticipant?.isAdmin)}
+        onToggleParticipantLock={(connectionId) => {
+          return (
+            providerRef.current
+              ?.toggleParticipantEditLock(connectionId)
+              .catch((error: unknown) => {
+                window.alert(
+                  userFacingError(
+                    error,
+                    'Could not update editing access. Try again.'
+                  )
+                );
+              }) ?? Promise.resolve()
+          );
+        }}
+        onSetParticipantAdmin={(connectionId, nextIsAdmin) => {
+          return (
+            providerRef.current
+              ?.setParticipantAdmin(connectionId, nextIsAdmin)
+              .catch((error: unknown) => {
+                window.alert(
+                  userFacingError(
+                    error,
+                    'Could not update the admin role. Try again.'
+                  )
+                );
+              }) ?? Promise.resolve()
+          );
+        }}
         editor={monacoEditor}
         monaco={monacoApi}
+        autocompleteEnabled={autocompleteEnabled}
+        onAutocompleteChange={setAutocompleteEnabled}
         explorerOpen={isExplorerOpen}
         onToggleExplorer={() => setExplorerOpen((open) => !open)}
         isChatOpen={isChatOpen}
@@ -555,6 +598,7 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
           width={explorerWidth}
           entries={entries}
           activeFileId={activeFileId}
+          canEdit={!isEditLocked}
           fileDiagnostics={fileDiagnostics}
           onWidthChange={setExplorerWidth}
           onClose={() => setExplorerOpen(false)}
@@ -612,6 +656,8 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
               isSplitWorkspaceOpen={isSplitWorkspaceOpen}
               splitWidth={splitWidth}
               status={status}
+              isLocked={isEditLocked}
+              autocompleteEnabled={autocompleteEnabled}
               language={language}
               peers={peers}
               providerRef={providerRef}

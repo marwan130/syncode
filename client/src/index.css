@@ -54,25 +54,30 @@
 
 *::-webkit-scrollbar {
   width: 14px;
-  height: 12px;
+  height: 14px;
 }
+
 *::-webkit-scrollbar-track {
   background: var(--scrollbar-track);
 }
+
 *::-webkit-scrollbar-thumb {
   background: var(--scrollbar-thumb);
   border-radius: 0;
 }
+
 *::-webkit-scrollbar-thumb:hover {
   background: var(--scrollbar-thumb-hover);
 }
+
 *::-webkit-scrollbar-thumb:active {
   background: var(--scrollbar-thumb-active);
 }
+
 *::-webkit-scrollbar-button {
-  display: none;
-  width: 0;
-  height: 0;
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
 }
 
 #root {
@@ -164,6 +169,8 @@ code {
 }
 
 .room-header {
+  position: relative;
+  z-index: 200;
   box-sizing: border-box;
   border-bottom: 1px solid #363636;
 }
@@ -195,8 +202,8 @@ code {
 
 .explorer-panel-sized {
   display: flex;
-  flex: 0 0 220px;
-  min-width: 0;
+  flex: 0 0 auto;
+  min-width: 130px;
   overflow: hidden;
 }
 
@@ -209,14 +216,25 @@ code {
   overflow: hidden;
 }
 
+.editor-lock-notice {
+  flex: 0 0 auto;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+  background: var(--surface-bg);
+  font: 12px/1.4 var(--sans);
+}
+
 .editor-file-tabs {
+  box-sizing: border-box;
   display: flex;
-  flex: 0 0 34px;
+  flex: 0 0 38px;
+  height: 38px;
   min-width: 0;
   overflow-x: auto;
   overflow-y: hidden;
   background: var(--app-bg);
-  border-bottom: 1px solid #303030;
+  border-bottom: 1px solid var(--border);
 }
 
 .editor-file-tab {
@@ -237,12 +255,14 @@ code {
   color: var(--text-h);
   background: var(--bg);
 }
+
 .editor-file-tab button {
   border: 0;
   color: inherit;
   background: transparent;
   cursor: pointer;
 }
+
 .editor-file-tab button[role='tab'] {
   flex: 1;
   min-width: 0;
@@ -252,11 +272,13 @@ code {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
 .editor-file-tab-close {
   width: 27px;
   height: 27px;
   opacity: 0.72;
 }
+
 .editor-file-tab-close:hover {
   opacity: 1;
 }
@@ -285,6 +307,22 @@ code {
   color: #fbbf24 !important;
 }
 
+.file-explorer-diagnostic {
+  flex: 0 0 7px;
+  width: 7px;
+  height: 7px;
+  margin-left: 8px;
+  border-radius: 50%;
+}
+
+.file-explorer-diagnostic.is-error {
+  background: #f87171;
+}
+
+.file-explorer-diagnostic.is-warning {
+  background: #fbbf24;
+}
+
 .editor-workspace {
   display: flex;
   flex: 1 1 auto;
@@ -309,6 +347,7 @@ code {
   margin-left: auto;
   padding: 0 6px;
 }
+
 .editor-group-actions button {
   display: grid;
   width: 28px;
@@ -320,25 +359,128 @@ code {
   border: 0;
   cursor: pointer;
 }
+
 .editor-group-actions svg {
   width: 14px;
   height: 14px;
 }
+
 .editor-group-actions button:hover {
   color: var(--text-h);
 }
+
 .editor-drop-placeholder {
   display: grid;
   flex: 1;
   place-items: center;
+  width: 100%;
+  min-height: 0;
+  padding: 12px;
+  border: 0;
+  background: transparent;
   color: var(--text-muted);
   font-size: 13px;
+  cursor: pointer;
 }
+
+.editor-empty-pane {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+.editor-drop-placeholder:hover,
+.editor-drop-placeholder:focus-visible {
+  color: var(--text-h);
+  background: var(--surface-bg);
+  outline: none;
+}
+
+.editor-file-picker-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 12px;
+  background: color-mix(in srgb, var(--app-bg) 78%, transparent);
+}
+
+.editor-file-picker {
+  display: flex;
+  flex-direction: column;
+  width: min(360px, calc(100% - 24px));
+  max-height: min(420px, calc(100% - 24px));
+  min-height: 0;
+  border: 1px solid var(--border);
+  color: var(--text);
+  background: var(--surface-bg);
+}
+
+.editor-file-picker-heading {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-h);
+  font: 12px var(--sans);
+}
+
+.editor-file-picker-heading button,
+.editor-file-picker-list button {
+  border: 0;
+  color: inherit;
+  background: transparent;
+  font: 12px var(--sans);
+  cursor: pointer;
+}
+
+.editor-file-picker-heading button {
+  padding: 4px 6px;
+  color: var(--text-muted);
+}
+
+.editor-file-picker-list {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 4px;
+  overflow: auto;
+}
+
+.editor-file-picker-list button {
+  padding: 7px 8px;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.editor-file-picker-heading button:hover,
+.editor-file-picker-heading button:focus-visible,
+.editor-file-picker-list button:hover,
+.editor-file-picker-list button:focus-visible {
+  color: var(--text-h);
+  background: var(--accent-bg);
+  outline: none;
+}
+
+.editor-file-picker-empty {
+  padding: 8px;
+  color: var(--text-muted);
+  font: 12px var(--sans);
+}
+
 .run-icon {
   display: block;
   width: 16px;
   height: 16px;
 }
+
 .visually-hidden {
   position: absolute;
   width: 1px;
@@ -387,8 +529,7 @@ code {
 
 .terminal-panel-sized {
   display: flex;
-  flex: 0 0 240px;
-  flex-shrink: 1;
+  flex: 0 1 auto;
   min-height: 0;
   overflow: hidden;
 }
@@ -492,27 +633,33 @@ code {
   padding: 0 !important;
   opacity: 0.7;
 }
+
 .terminal-tab-close svg {
   display: block;
   width: 14px;
   height: 14px;
 }
+
 .terminal-tab-close:hover {
   opacity: 1;
 }
+
 .execution-terminal-tabs button:hover:not(:disabled),
 .execution-terminal-actions button:hover {
   color: var(--text-h);
   background: transparent;
 }
+
 .execution-terminal-actions .terminal-panel-close {
   color: var(--text-muted);
 }
+
 .execution-terminal-actions .terminal-panel-close:hover,
 .execution-terminal-actions .terminal-panel-close:focus-visible {
   color: var(--text-h);
   background: transparent;
 }
+
 .terminal-new-tab {
   font-size: 16px !important;
 }
@@ -527,13 +674,6 @@ code {
   padding: 12px;
   color: var(--text-muted);
   font: 12px var(--mono);
-}
-
-.terminal-short-hint {
-  flex: 0 0 20px;
-  padding: 2px 12px;
-  color: #777;
-  font: 10px/16px var(--mono);
 }
 
 .execution-terminal-actions button:focus-visible,
@@ -566,6 +706,11 @@ code {
   height: 100%;
 }
 
+.execution-terminal-output .xterm .xterm-viewport {
+  overflow-x: hidden !important;
+  background-color: var(--bg) !important;
+}
+
 .execution-terminal-output .xterm .xterm-scrollable-element > .scrollbar {
   background: var(--scrollbar-track);
 }
@@ -573,8 +718,27 @@ code {
 .execution-terminal-output
   .xterm
   .xterm-scrollable-element
+  > .scrollbar.vertical {
+  width: 14px !important;
+}
+
+.execution-terminal-output
+  .xterm
+  .xterm-scrollable-element
+  > .scrollbar.horizontal {
+  display: none !important;
+}
+
+.execution-terminal-output
+  .xterm
+  .xterm-scrollable-element
   > .scrollbar
   > .slider {
+  background: var(--scrollbar-thumb);
+  border-radius: 0;
+}
+
+.syncode-scrollbar-panel .xterm-scrollable-element > .scrollbar > .slider {
   background: var(--scrollbar-thumb);
   border-radius: 0;
 }
@@ -587,8 +751,22 @@ code {
   background: var(--scrollbar-thumb-hover);
 }
 
+.syncode-scrollbar-panel
+  .xterm-scrollable-element
+  > .scrollbar
+  > .slider:hover {
+  background: var(--scrollbar-thumb-hover);
+}
+
 .execution-terminal-output
   .xterm
+  .xterm-scrollable-element
+  > .scrollbar
+  > .slider.active {
+  background: var(--scrollbar-thumb-active);
+}
+
+.syncode-scrollbar-panel
   .xterm-scrollable-element
   > .scrollbar
   > .slider.active {
@@ -668,10 +846,12 @@ code {
   padding: 12px 16px;
   border-bottom: 1px solid var(--border);
 }
+
 .shortcut-dialog > header h2 {
   margin: 0;
   font-size: 16px;
 }
+
 .shortcut-dialog > header button,
 .shortcut-dialog > footer button {
   padding: 5px 9px;
@@ -680,24 +860,30 @@ code {
   border: 0;
   cursor: pointer;
 }
+
 .shortcut-dialog > p {
   padding: 12px 16px 0;
   color: var(--text-muted);
 }
+
 .shortcut-dialog dl {
   margin: 8px 16px 16px;
 }
+
 .shortcut-dialog dl > div {
   min-height: 34px;
 }
+
 .shortcut-dialog dt {
   color: var(--text);
 }
+
 .shortcut-dialog dd {
   display: flex;
   gap: 4px;
   margin: 0;
 }
+
 .shortcut-dialog > footer {
   padding: 10px 16px;
   color: var(--text-muted);
@@ -727,9 +913,12 @@ code {
 }
 
 .file-explorer {
+  display: flex;
   flex: 1 1 auto;
+  flex-direction: column;
   min-width: 0;
-  overflow: auto;
+  min-height: 0;
+  overflow: hidden;
   background: var(--surface-bg);
   border-right: 0;
   color: var(--text);
@@ -740,12 +929,21 @@ code {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 11px 12px 8px;
+}
+
+.file-explorer-heading,
+.chat-panel h2 {
+  box-sizing: border-box;
+  height: 38px;
+  flex: 0 0 38px;
+  padding: 9px 12px;
   color: var(--text);
   font-size: 11px;
   font-weight: 600;
+  line-height: 18px;
   letter-spacing: 0.5px;
-  border-bottom: 1px solid #303030;
+  text-transform: uppercase;
+  border-bottom: 1px solid var(--border);
 }
 
 .file-explorer-heading button,
@@ -771,6 +969,11 @@ code {
   line-height: 18px;
 }
 
+.file-explorer-scroll-area {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
 .file-explorer ul {
   list-style: none;
   padding: 4px 0;
@@ -789,6 +992,64 @@ code {
 
 .file-explorer-row.is-active {
   background: var(--accent-bg);
+}
+
+.file-explorer-row.is-editing {
+  gap: 7px;
+  padding: 3px 8px 3px 14px;
+}
+
+.file-explorer-editing-content {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 1;
+  min-width: 0;
+  padding-top: 3px;
+  padding-bottom: 3px;
+}
+
+.file-explorer-inline-input {
+  box-sizing: border-box;
+  flex: 1;
+  min-width: 0;
+  height: 22px;
+  padding: 1px 4px;
+  border: 1px solid var(--accent);
+  border-radius: 0;
+  outline: none;
+  color: var(--text);
+  background: var(--surface-bg);
+  font: inherit;
+}
+
+.file-explorer-edit-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+}
+
+.file-explorer-edit-actions button {
+  padding: 2px 4px;
+  border: 0;
+  color: var(--text-muted);
+  background: transparent;
+  font: 10px var(--sans);
+  cursor: pointer;
+}
+
+.file-explorer-edit-actions button:hover,
+.file-explorer-edit-actions button:focus-visible {
+  color: var(--text);
+  background: var(--accent-bg);
+  outline: 0;
+}
+
+.file-explorer-edit-error {
+  padding: 2px 8px 4px 14px;
+  color: var(--error, #f48771);
+  font-size: 11px;
 }
 
 .file-explorer-select {
@@ -872,6 +1133,7 @@ code {
   outline: none;
   box-shadow: none;
 }
+
 .theme-picker select option {
   color: var(--text);
   background: var(--surface-bg);
@@ -1172,6 +1434,141 @@ code {
   position: relative;
 }
 
+.participant-list {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.participant-list.is-stacked {
+  gap: 0;
+}
+
+.participant-list.is-stacked .profile-anchor {
+  z-index: 20;
+}
+
+.participant-manage-anchor {
+  position: relative;
+  z-index: 1;
+  flex: 0 0 auto;
+}
+
+.participant-manage-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 150;
+  display: flex;
+  flex-direction: column;
+  width: max-content;
+  min-width: 150px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  overflow: auto;
+  padding: 4px 0;
+  border: 1px solid var(--border);
+  color: var(--text);
+  background: var(--surface-bg);
+}
+
+.participant-manage-menu button {
+  padding: 7px 10px;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.participant-manage-menu button:hover:not(:disabled),
+.participant-manage-menu button:focus-visible {
+  color: var(--text-h);
+  background: var(--accent-bg);
+  outline: none;
+}
+
+.participant-manage-menu button:disabled {
+  color: var(--text-muted);
+  cursor: default;
+}
+
+.participant-avatar-wrap {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.participant-avatar-action {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  transition: transform 0.12s ease;
+  cursor: pointer;
+}
+
+.participant-avatar-action::after {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 140;
+  max-width: min(240px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  overflow: auto;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  color: var(--text);
+  background: var(--surface-bg);
+  content: attr(data-hint);
+  font: 12px/1.3 var(--sans);
+  white-space: normal;
+  pointer-events: none;
+  opacity: 0;
+}
+
+.participant-avatar-action:hover::after,
+.participant-avatar-action:focus-visible::after {
+  opacity: 1;
+}
+
+.participant-avatar-action:hover,
+.participant-avatar-action:focus-visible {
+  z-index: 30;
+  transform: scale(1.1);
+}
+
+.participant-avatar-action:focus-visible {
+  outline: none;
+}
+
+.participant-lock-mark {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  display: grid;
+  width: 11px;
+  height: 11px;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--text);
+  background: var(--surface-bg);
+  font-size: 9px;
+  line-height: 1;
+}
+
+.room-connection-error {
+  padding: 6px 16px;
+  color: var(--danger);
+  background: var(--app-bg);
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+}
+
 .profile-avatar-button {
   display: flex;
   align-items: center;
@@ -1328,28 +1725,102 @@ code {
 
 .chat-panel {
   display: flex;
-  flex: 0 0 300px;
+  flex: 0 0 auto;
   flex-direction: column;
-  min-width: 220px;
-  border-right: 1px solid var(--border);
+  min-width: 180px;
   background: var(--app-bg);
 }
 
 .chat-panel h2 {
-  flex: 0 0 auto;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--border);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.5px;
-  text-transform: uppercase;
+  margin: 0;
 }
 
 .chat-messages {
   flex: 1;
   min-height: 0;
+  overflow: hidden;
+}
+
+.syncode-scrollbar-panel {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+}
+
+.syncode-scrollable-element {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.syncode-scrollbar-viewport {
+  width: 100%;
+  height: 100%;
+  overflow-x: hidden;
   overflow-y: auto;
-  padding: 8px 12px;
+  scrollbar-width: none;
+  overscroll-behavior: contain;
+}
+
+.syncode-scrollbar-viewport::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+.syncode-scrollbar-content {
+  min-height: 100%;
+  /* Keep panel content clear of the unchanged overlay scrollbar. */
+  padding: 8px 26px 8px 12px;
+}
+
+.file-explorer-scroll-area .syncode-scrollbar-content {
+  padding: 0 18px 0 0;
+}
+
+.syncode-scrollbar-panel .scrollbar.vertical {
+  position: absolute;
+  z-index: 11;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 14px;
+  cursor: default;
+  touch-action: none;
+  user-select: none;
+}
+
+.syncode-scrollbar-panel .scrollbar.vertical.visible {
+  opacity: 1;
+  background: transparent;
+  transition: opacity 100ms linear;
+}
+
+.syncode-scrollbar-panel .scrollbar.vertical.invisible {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.syncode-scrollbar-panel .scrollbar.vertical.invisible.fade {
+  transition: opacity 800ms linear;
+}
+
+.syncode-scrollbar-panel .scrollbar.vertical .slider {
+  position: absolute;
+  right: 0;
+  width: 14px;
+  min-height: 20px;
+  background: var(--scrollbar-thumb);
+  cursor: default;
+}
+
+.syncode-scrollbar-panel .scrollbar.vertical .slider:hover {
+  background: var(--scrollbar-thumb-hover);
+}
+
+.syncode-scrollbar-panel .scrollbar.vertical .slider.active {
+  background: var(--scrollbar-thumb-active);
 }
 
 .chat-empty {
@@ -1457,14 +1928,6 @@ code {
 }
 
 @media (max-width: 720px) {
-  .file-explorer {
-    flex-basis: 155px;
-  }
-
-  .chat-panel {
-    flex-basis: 240px;
-  }
-
   .room-editor.has-live-preview {
     flex-direction: column;
   }

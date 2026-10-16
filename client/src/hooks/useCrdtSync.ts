@@ -1,16 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 import { SignalRCrdtProvider } from '../providers/SignalRCrdtProvider';
 import type { ConnectionStatus } from '../providers/SignalRCrdtProvider';
-
-function errorMessage(err: unknown): string {
-  if (err instanceof Error) return err.message;
-  if (typeof err === 'string') return err;
-  return 'Unknown error';
-}
+import { userFacingError } from '../utils/userFacingError';
 
 interface UseCrdtSyncProps {
   siteId: string;
+  userId: string;
   roomId: string;
   accessKey: string;
   serverUrl?: string;
@@ -21,6 +17,7 @@ interface UseCrdtSyncProps {
 
 interface UseCrdtSyncReturn {
   status: ConnectionStatus;
+  connectionError: string | null;
   providerRef: RefObject<SignalRCrdtProvider | null>;
   evictedNewRoomId: string | null;
 }
@@ -29,6 +26,7 @@ const DEFAULT_SERVER_URL = import.meta.env.VITE_BACKEND_URL || '';
 
 export function useCrdtSync({
   siteId,
+  userId,
   roomId,
   accessKey,
   serverUrl = DEFAULT_SERVER_URL,
@@ -37,16 +35,21 @@ export function useCrdtSync({
   enabled = true,
 }: UseCrdtSyncProps): UseCrdtSyncReturn {
   const [status, setStatus] = useState<ConnectionStatus>('disconnected');
+  const [connectionError, setConnectionError] = useState<string | null>(null);
   const [evictedNewRoomId, setEvictedNewRoomId] = useState<string | null>(null);
   const providerRef = useRef<SignalRCrdtProvider | null>(null);
   const profileRef = useRef({ displayName, color });
-  profileRef.current = { displayName, color };
+
+  useLayoutEffect(() => {
+    profileRef.current = { displayName, color };
+  }, [displayName, color]);
 
   useEffect(() => {
     if (!roomId || !siteId || !displayName || !enabled) return;
 
     const p = new SignalRCrdtProvider(
       siteId,
+      userId,
       roomId,
       accessKey,
       serverUrl,
@@ -57,6 +60,7 @@ export function useCrdtSync({
 
     const unsubStatus = p.onStatusChange((s) => {
       setStatus(s);
+      if (s === 'connected') setConnectionError(null);
       if (s === 'connecting' || s === 'connected') {
         setEvictedNewRoomId(null);
       }
@@ -73,7 +77,12 @@ export function useCrdtSync({
       if (cancelled) return;
       p.connect().catch((err) => {
         if (!cancelled) {
-          console.error('[useCrdtSync] Failed to connect:', errorMessage(err));
+          setConnectionError(
+            userFacingError(
+              err,
+              'Could not connect to the room. Check your connection and try again.'
+            )
+          );
         }
       });
     });
@@ -85,7 +94,7 @@ export function useCrdtSync({
       p.disconnect().catch(() => {});
       providerRef.current = null;
     };
-  }, [siteId, roomId, accessKey, serverUrl, Boolean(displayName), enabled]);
+  }, [siteId, userId, roomId, accessKey, serverUrl, displayName, enabled]);
 
   useEffect(() => {
     providerRef.current?.setLocalColor(color ?? '#38bdf8');
@@ -93,6 +102,7 @@ export function useCrdtSync({
 
   return {
     status,
+    connectionError,
     providerRef,
     evictedNewRoomId,
   };

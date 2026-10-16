@@ -12,9 +12,12 @@ import { RoomJoin } from './components/room/RoomJoin';
 import type { RoomProfileForm } from './components/room/RoomJoin';
 import { ThemeInitializer } from './components/editor/ThemePicker';
 import {
+  createSiteId,
   getStoredDisplayName,
+  getOrCreateParticipantId,
   setStoredColor,
   setStoredDisplayName,
+  setParticipantId,
 } from './utils/userStorage';
 
 function Home() {
@@ -32,6 +35,7 @@ function Home() {
     setError('');
     if (intent === 'create') {
       try {
+        const participantId = createSiteId();
         const response = await fetch('/api/rooms', { method: 'POST' });
         if (!response.ok)
           throw new Error(`Room creation failed (${response.status})`);
@@ -39,7 +43,8 @@ function Home() {
         if (!roomId || !accessKey)
           throw new Error('The server did not return a complete room invite.');
         setStoredDisplayName(roomId, displayName);
-        setStoredColor(color);
+        setParticipantId(roomId, participantId);
+        setStoredColor(color, participantId);
         navigate(`/room/${roomId}#key=${accessKey}`, { replace: true });
       } catch {
         setIntent(null);
@@ -71,8 +76,9 @@ function Home() {
       return;
     }
     const name = getStoredDisplayName(roomId) ?? displayName;
+    const participantId = getOrCreateParticipantId(roomId);
     setStoredDisplayName(roomId, name);
-    setStoredColor(color);
+    setStoredColor(color, participantId);
     navigate(`/room/${roomId}#key=${accessKey}`, { replace: true });
   }
 

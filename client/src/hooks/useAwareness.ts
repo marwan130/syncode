@@ -4,6 +4,7 @@ import type {
   SignalRCrdtProvider,
   AwarenessState,
   ConnectionStatus,
+  ParticipantInfo,
 } from '../providers/SignalRCrdtProvider';
 import type { CursorAnchor } from '../crdt/CursorAnchor';
 
@@ -14,6 +15,20 @@ interface UseAwarenessProps {
   localColor: string;
 }
 
+function toAwarenessState(
+  participant: ParticipantInfo,
+  cursor: CursorAnchor | null = null
+): AwarenessState {
+  return {
+    cursor,
+    name: participant.displayName,
+    color: participant.color,
+    userId: participant.userId,
+    isAdmin: participant.isAdmin,
+    isLocked: participant.isLocked,
+  };
+}
+
 export function useAwareness({
   providerRef,
   status,
@@ -21,15 +36,19 @@ export function useAwareness({
   localColor,
 }: UseAwarenessProps): {
   peers: Map<string, AwarenessState>;
+  localParticipant: AwarenessState | null;
   broadcastCursor: (anchor: CursorAnchor | null) => void;
 } {
   const [peers, setPeers] = useState<Map<string, AwarenessState>>(new Map());
+  const [localParticipant, setLocalParticipant] =
+    useState<AwarenessState | null>(null);
   const throttleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const provider = providerRef.current;
     if (!provider || status === 'disconnected') {
       setPeers(new Map());
+      setLocalParticipant(null);
       return;
     }
 
@@ -40,59 +59,27 @@ export function useAwareness({
         next.set(peerId, {
           ...state,
           userId: existing?.userId ?? state.userId,
+          isAdmin: existing?.isAdmin ?? state.isAdmin,
+          isLocked: existing?.isLocked ?? state.isLocked,
         });
         return next;
       });
     });
 
     const unsubParticipants = provider.onRoomParticipants((list) => {
-      setPeers(() => {
+      const current = list.find(
+        (participant) => participant.connectionId === provider.connectionId
+      );
+      setLocalParticipant(current ? toAwarenessState(current) : null);
+      setPeers((previous) => {
         const next = new Map<string, AwarenessState>();
         for (const p of list) {
-          if (p.connectionId && p.connectionId !== provider.connectionId) {
-            next.set(p.connectionId, {
-              cursor: null,
-              name: p.displayName,
-              color: p.color,
-              userId: p.userId,
-            });
-          }
-        }
-        return next;
-      });
-    });
-
-    const unsubPeerJoined = provider.onPeerJoined(
-      (peerId, name, color, userId) => {
-        setPeers((prev) => {
-          const next = new Map(prev);
-          const existing = next.get(peerId);
-          next.set(peerId, {
-            cursor: existing?.cursor ?? null,
-            name,
-            color,
-            userId,
-          });
-          return next;
-        });
-      }
-    );
-
-    const unsubPeerLeft = provider.onPeerLeft((peerId) => {
-      setPeers((prev) => {
-        const next = new Map(prev);
-        next.delete(peerId);
-        return next;
-      });
-    });
-
-    const unsubPeerLeftByUser = provider.onPeerLeftByUser((userId) => {
-      setPeers((prev) => {
-        const next = new Map(prev);
-        for (const [peerId, state] of next.entries()) {
-          if (state.userId === userId) {
-            next.delete(peerId);
-          }
+          if (!p.connectionId || p.connectionId === provider.connectionId)
+            continue;
+          next.set(
+            p.connectionId,
+            toAwarenessState(p, previous.get(p.connectionId)?.cursor ?? null)
+          );
         }
         return next;
       });
@@ -101,9 +88,6 @@ export function useAwareness({
     return () => {
       unsubAwareness();
       unsubParticipants();
-      unsubPeerJoined();
-      unsubPeerLeft();
-      unsubPeerLeftByUser();
       if (throttleRef.current) clearTimeout(throttleRef.current);
     };
   }, [status, providerRef]);
@@ -124,5 +108,5 @@ export function useAwareness({
     [providerRef, status, localName, localColor]
   );
 
-  return { peers, broadcastCursor };
+  return { peers, localParticipant, broadcastCursor };
 }

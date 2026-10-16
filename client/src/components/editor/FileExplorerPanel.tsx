@@ -3,6 +3,7 @@ import { FileExplorer } from './FileExplorer';
 import { ResizeHandle } from './ResizeHandle';
 import {
   DEFAULT_EXPLORER_WIDTH,
+  MIN_SIDE_PANEL_WIDTH,
   storeExplorerWidth,
 } from './editorLayoutStorage';
 import type { RoomEntry } from '../../providers/SignalRCrdtProvider';
@@ -12,12 +13,16 @@ interface FileExplorerPanelProps {
   width: number;
   entries: RoomEntry[];
   activeFileId: string;
+  canEdit: boolean;
   onWidthChange: (width: number) => void;
   onClose: () => void;
   onSelect: (fileId: string) => void;
-  onCreateFile: (parentId: string | null) => Promise<string | void>;
-  onCreateFolder: (parentId: string | null) => Promise<string | void>;
-  onRename: (entry: RoomEntry) => void;
+  onCreateEntry: (
+    parentId: string | null,
+    name: string,
+    isFolder: boolean
+  ) => Promise<string | void>;
+  onRename: (entry: RoomEntry, name: string) => Promise<void>;
   onDelete: (entry: RoomEntry) => void;
   fileDiagnostics?: Record<string, 'error' | 'warning'>;
 }
@@ -27,12 +32,12 @@ export const FileExplorerPanel: FC<FileExplorerPanelProps> = ({
   width,
   entries,
   activeFileId,
+  canEdit,
   fileDiagnostics,
   onWidthChange,
   onClose,
   onSelect,
-  onCreateFile,
-  onCreateFolder,
+  onCreateEntry,
   onRename,
   onDelete,
 }) => {
@@ -44,10 +49,10 @@ export const FileExplorerPanel: FC<FileExplorerPanelProps> = ({
         <FileExplorer
           entries={entries}
           activeFileId={activeFileId}
+          canEdit={canEdit}
           fileDiagnostics={fileDiagnostics}
           onSelect={onSelect}
-          onCreateFile={onCreateFile}
-          onCreateFolder={onCreateFolder}
+          onCreateEntry={onCreateEntry}
           onRename={onRename}
           onDelete={onDelete}
         />
@@ -56,13 +61,13 @@ export const FileExplorerPanel: FC<FileExplorerPanelProps> = ({
         label="Resize file explorer"
         onResize={(delta) => {
           const next = width + delta;
-          if (next <= 32) {
+          if (next < MIN_SIDE_PANEL_WIDTH) {
             onClose();
             onWidthChange(DEFAULT_EXPLORER_WIDTH);
             storeExplorerWidth(DEFAULT_EXPLORER_WIDTH);
             return;
           }
-          const nextWidth = Math.min(600, next);
+          const nextWidth = Math.max(MIN_SIDE_PANEL_WIDTH, Math.min(600, next));
           onWidthChange(nextWidth);
           storeExplorerWidth(nextWidth);
         }}

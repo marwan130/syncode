@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import type { RefObject } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useOutsidePointerDismiss } from '../../hooks/useOutsidePointerDismiss';
 import {
+  getOrCreateParticipantId,
   getStoredDisplayName,
   setStoredColor,
   setStoredDisplayName,
@@ -29,16 +31,17 @@ export function JoinRoomModal({
   const submittedRef = useRef(false);
   const navigate = useNavigate();
 
+  useOutsidePointerDismiss(
+    isOpen,
+    onClose,
+    (target) =>
+      target instanceof Node && Boolean(containerRef.current?.contains(target))
+  );
+
   useEffect(() => {
     if (!isOpen) return;
     submittedRef.current = false;
-    const dismissOnOutsidePress = (event: PointerEvent) => {
-      if (!containerRef.current?.contains(event.target as Node)) onClose();
-    };
-    document.addEventListener('pointerdown', dismissOnOutsidePress);
-    return () =>
-      document.removeEventListener('pointerdown', dismissOnOutsidePress);
-  }, [containerRef, isOpen, onClose]);
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -78,7 +81,7 @@ export function JoinRoomModal({
 
     submittedRef.current = true;
     setStoredDisplayName(roomId, getStoredDisplayName(roomId) ?? currentName);
-    setStoredColor(currentColor);
+    setStoredColor(currentColor, getOrCreateParticipantId(roomId));
     onClose();
     navigate(`/room/${roomId}#key=${accessKey}`);
   };

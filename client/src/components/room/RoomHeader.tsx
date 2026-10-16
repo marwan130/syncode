@@ -13,14 +13,23 @@ import type { Monaco } from '@monaco-editor/react';
 
 interface RoomHeaderProps {
   roomId: string;
+  participantId: string;
   status: ConnectionStatus;
   localName: string;
   localColor: string;
   onJoinProfile: (info: { displayName: string; color: string }) => void;
   onColorChange: (color: string) => void;
   peers: Map<string, AwarenessState>;
+  isAdmin: boolean;
+  onToggleParticipantLock: (connectionId: string) => Promise<void>;
+  onSetParticipantAdmin: (
+    connectionId: string,
+    isAdmin: boolean
+  ) => Promise<void>;
   editor: monaco.editor.IStandaloneCodeEditor | null;
   monaco: Monaco | null;
+  autocompleteEnabled: boolean;
+  onAutocompleteChange: (enabled: boolean) => void;
   explorerOpen: boolean;
   onToggleExplorer: () => void;
   isChatOpen: boolean;
@@ -36,14 +45,20 @@ interface RoomHeaderProps {
 
 export function RoomHeader({
   roomId,
+  participantId,
   status,
   localName,
   localColor,
   onJoinProfile,
   onColorChange,
   peers,
+  isAdmin,
+  onToggleParticipantLock,
+  onSetParticipantAdmin,
   editor,
   monaco,
+  autocompleteEnabled,
+  onAutocompleteChange,
   explorerOpen,
   onToggleExplorer,
   isChatOpen,
@@ -100,6 +115,18 @@ export function RoomHeader({
       </div>
 
       <div className="room-header-right">
+        <button
+          className={`chat-toggle${autocompleteEnabled ? ' is-active' : ''}`}
+          type="button"
+          role="switch"
+          aria-checked={autocompleteEnabled}
+          aria-label="Automatic code suggestions"
+          title={`Automatic code suggestions: ${autocompleteEnabled ? 'On' : 'Off'}`}
+          onClick={() => onAutocompleteChange(!autocompleteEnabled)}
+        >
+          Suggestions {autocompleteEnabled ? 'On' : 'Off'}
+        </button>
+
         <ThemePicker monaco={monaco} />
 
         <SearchReplace editor={editor} />
@@ -190,9 +217,13 @@ export function RoomHeader({
 
         <ParticipantList
           roomId={roomId}
+          participantId={participantId}
           localName={localName}
           localColor={localColor}
           peers={peers}
+          isAdmin={isAdmin}
+          onToggleLock={onToggleParticipantLock}
+          onSetAdmin={onSetParticipantAdmin}
           onJoinProfile={onJoinProfile}
           onColorChange={onColorChange}
         />

@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import type { DragEvent, FC, RefObject } from 'react';
 import Editor, { type OnMount } from '@monaco-editor/react';
 import type * as monaco from 'monaco-editor';
@@ -6,7 +6,8 @@ import { Cursors } from './Cursors';
 import { EditorTabs } from './EditorTabs';
 import { ResizeHandle } from './ResizeHandle';
 import { languageForFileName, type LanguageMode } from './languageModes';
-import { configureMonacoDiagnostics } from '../../utils/monacoDiagnostics';
+import { configureMonacoEditor } from '../../utils/configureMonacoEditor';
+import { getEntryPath } from './editorLayoutStorage';
 import type {
   AwarenessState,
   ConnectionStatus,
@@ -26,6 +27,8 @@ interface EditorWorkspaceProps {
   isSplitWorkspaceOpen: boolean;
   splitWidth: number;
   status: ConnectionStatus;
+  isLocked: boolean;
+  autocompleteEnabled: boolean;
   language: LanguageMode;
   peers: Map<string, AwarenessState>;
   providerRef: RefObject<SignalRCrdtProvider | null>;
@@ -54,6 +57,8 @@ export const EditorWorkspace: FC<EditorWorkspaceProps> = ({
   isSplitWorkspaceOpen,
   splitWidth,
   status,
+  isLocked,
+  autocompleteEnabled,
   language,
   peers,
   providerRef,
@@ -70,6 +75,17 @@ export const EditorWorkspace: FC<EditorWorkspaceProps> = ({
   fileDiagnostics,
 }) => {
   const editorGroupsRef = useRef<HTMLDivElement>(null);
+  const [filePickerGroup, setFilePickerGroup] = useState<
+    'primary' | 'secondary' | null
+  >(null);
+  const autocompleteOptions = {
+    quickSuggestions: autocompleteEnabled,
+    suggestOnTriggerCharacters: autocompleteEnabled,
+    wordBasedSuggestions: autocompleteEnabled
+      ? ('currentDocument' as const)
+      : ('off' as const),
+    parameterHints: { enabled: autocompleteEnabled },
+  };
 
   const handleDragOver = (event: DragEvent<HTMLDivElement>) => {
     if (event.dataTransfer.types.includes('application/x-syncode-file-id')) {
@@ -91,8 +107,72 @@ export const EditorWorkspace: FC<EditorWorkspaceProps> = ({
     onDropFile(fileId, group);
   };
 
+  const renderEmptyPane = (group: 'primary' | 'secondary') => (
+    <div className="editor-empty-pane">
+      <button
+        type="button"
+        className="editor-drop-placeholder"
+        onClick={() => setFilePickerGroup(group)}
+      >
+        Select a file to start editing.
+      </button>
+      {filePickerGroup === group && (
+        <div
+          className="editor-file-picker-backdrop"
+          onClick={() => setFilePickerGroup(null)}
+        >
+          <div
+            className="editor-file-picker"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Select a file to open"
+            onClick={(event) => event.stopPropagation()}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') setFilePickerGroup(null);
+            }}
+          >
+            <div className="editor-file-picker-heading">
+              <span>Select a file</span>
+              <button type="button" onClick={() => setFilePickerGroup(null)}>
+                Close
+              </button>
+            </div>
+            <div className="editor-file-picker-list">
+              {entries.filter((entry) => !entry.isFolder).length > 0 ? (
+                entries
+                  .filter((entry) => !entry.isFolder)
+                  .map((entry) => (
+                    <button
+                      key={entry.id}
+                      type="button"
+                      onClick={() => {
+                        onOpenFile(entry.id, group);
+                        setFilePickerGroup(null);
+                      }}
+                    >
+                      {getEntryPath(entry, entries)}
+                    </button>
+                  ))
+              ) : (
+                <span className="editor-file-picker-empty">
+                  No files are available.
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <div className="editor-region">
+      {isLocked && (
+        <div className="editor-lock-notice" role="status" aria-live="polite">
+          You can’t edit this room right now. Ask a room admin to restore your
+          access.
+        </div>
+      )}
       <div className="editor-workspace" ref={editorGroupsRef}>
         <div
           className="editor-pane"
@@ -123,18 +203,20 @@ export const EditorWorkspace: FC<EditorWorkspaceProps> = ({
                 path={activeFilePath}
                 defaultValue=""
                 theme="syncode-current-theme"
-                beforeMount={configureMonacoDiagnostics}
+                beforeMount={configureMonacoEditor}
                 onMount={onMountPrimary}
                 options={{
                   automaticLayout: true,
                   fontSize: 14,
                   minimap: { enabled: true },
-                  readOnly: status !== 'connected',
+                  readOnly: status !== 'connected' || isLocked,
                   renderValidationDecorations: 'on',
                   glyphMargin: true,
-                  lightbulb: { enabled: 'on' as any },
-                  quickSuggestions: true,
+                  lightbulb: {
+                    enabled: 'on' as monaco.editor.ShowLightbulbIconMode,
+                  },
                   fixedOverflowWidgets: true,
+                  ...autocompleteOptions,
                 }}
               />
               {monacoEditor && (
@@ -148,9 +230,7 @@ export const EditorWorkspace: FC<EditorWorkspaceProps> = ({
               )}
             </div>
           ) : (
-            <div className="editor-drop-placeholder">
-              Select a file to start editing.
-            </div>
+            renderEmptyPane('primary')
           )}
         </div>
 
@@ -193,25 +273,25 @@ export const EditorWorkspace: FC<EditorWorkspaceProps> = ({
                     path={splitFilePath}
                     defaultValue=""
                     theme="syncode-current-theme"
-                    beforeMount={configureMonacoDiagnostics}
+                    beforeMount={configureMonacoEditor}
                     onMount={onMountSecondary}
                     options={{
                       automaticLayout: true,
                       fontSize: 14,
                       minimap: { enabled: false },
-                      readOnly: status !== 'connected',
+                      readOnly: status !== 'connected' || isLocked,
                       renderValidationDecorations: 'on',
                       glyphMargin: true,
-                      lightbulb: { enabled: 'on' as any },
-                      quickSuggestions: true,
+                      lightbulb: {
+                        enabled: 'on' as monaco.editor.ShowLightbulbIconMode,
+                      },
                       fixedOverflowWidgets: true,
+                      ...autocompleteOptions,
                     }}
                   />
                 </div>
               ) : (
-                <div className="editor-drop-placeholder">
-                  Select a file to start editing.
-                </div>
+                renderEmptyPane('secondary')
               )}
             </div>
           </>
