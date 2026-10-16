@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 import type { Monaco, OnMount } from '@monaco-editor/react';
 import type * as monaco from 'monaco-editor';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -84,7 +90,9 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
   const [entries, setEntries] = useState<RoomEntry[]>([]);
   const [activeFileId, setActiveFileId] = useState('main.cpp');
   const activeFileIdRef = useRef(activeFileId);
-  activeFileIdRef.current = activeFileId;
+  useLayoutEffect(() => {
+    activeFileIdRef.current = activeFileId;
+  }, [activeFileId]);
   const [openFileIds, setOpenFileIds] = useState<string[]>(['main.cpp']);
   const [splitFileId, setSplitFileId] = useState<string | null>(null);
   const [isSplitWorkspaceOpen, setSplitWorkspaceOpen] = useState(false);
@@ -520,26 +528,21 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
   ): Promise<T | void> => {
     const pending = pendingFileActions.current.get(key);
     if (pending) return pending as Promise<T | void>;
-    const operation = action()
-      .catch((error: unknown) => {
-        window.alert(
-          error instanceof Error ? error.message : 'File operation failed.'
-        );
-      })
-      .finally(() => {
-        if (pendingFileActions.current.get(key) === operation)
-          pendingFileActions.current.delete(key);
-      });
+    const operation = action().finally(() => {
+      if (pendingFileActions.current.get(key) === operation)
+        pendingFileActions.current.delete(key);
+    });
     pendingFileActions.current.set(key, operation);
     return operation;
   };
 
-  const createEntry = (isFolder: boolean, parentId: string | null) => {
-    const name = window.prompt(
-      isFolder ? 'New folder name' : 'New file name',
-      isFolder ? 'New Folder' : 'untitled.ts'
-    );
-    if (!name?.trim() || !providerRef.current) return Promise.resolve();
+  const createEntry = (
+    parentId: string | null,
+    name: string,
+    isFolder: boolean
+  ) => {
+    if (!providerRef.current)
+      return Promise.reject(new Error('Not connected to a room.'));
     return runFileAction(
       `create:${isFolder ? 'folder' : 'file'}:${parentId ?? 'root'}`,
       () => providerRef.current!.createEntry(name, parentId, isFolder)
@@ -627,25 +630,28 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
           onWidthChange={setExplorerWidth}
           onClose={() => setExplorerOpen(false)}
           onSelect={openFile}
-          onCreateFile={(parentId) => createEntry(false, parentId)}
-          onCreateFolder={(parentId) => createEntry(true, parentId)}
-          onRename={(entry) => {
-            const name = window.prompt(
-              `Rename ${entry.isFolder ? 'folder' : 'file'}`,
-              entry.name
-            );
-            if (name?.trim())
-              runFileAction(`rename:${entry.id}`, () =>
-                providerRef.current!.renameEntry(entry.id, name)
-              );
-          }}
+          onCreateEntry={(parentId, name, isFolder) =>
+            createEntry(parentId, name, isFolder)
+          }
+          onRename={(entry, name) =>
+            runFileAction(`rename:${entry.id}`, () =>
+              providerRef.current!.renameEntry(entry.id, name)
+            )
+          }
           onDelete={(entry) => {
             const prompt = entry.isFolder
               ? `Delete folder "${entry.name}" and everything inside it?`
               : `Delete ${entry.name}?`;
             if (window.confirm(prompt))
-              runFileAction(`delete:${entry.id}`, () =>
+              void runFileAction(`delete:${entry.id}`, () =>
                 providerRef.current!.deleteEntry(entry.id)
+              ).catch((error: unknown) =>
+                window.alert(
+                  userFacingError(
+                    error,
+                    'Could not complete that file operation. Try again.'
+                  )
+                )
               );
           }}
         />
