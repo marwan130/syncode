@@ -188,6 +188,7 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
   const [isShortcutGuideOpen, setShortcutGuideOpen] = useState(false);
   const [newTerminalRequest, setNewTerminalRequest] = useState(0);
   const [startBashOnTerminalOpen, setStartBashOnTerminalOpen] = useState(false);
+  const [terminalPanelMounted, setTerminalPanelMounted] = useState(false);
   const pendingFileActions = useRef(new Map<string, Promise<unknown>>());
 
   const { messages, sendMessage } = useChat({ providerRef, status });
@@ -201,20 +202,26 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
   } = useExecutionStream({ providerRef, status });
 
   const [isTerminalOpen, setTerminalOpen] = useState(false);
+
+  const revealTerminalPanel = () => {
+    setTerminalPanelMounted(true);
+    setTerminalOpen(true);
+  };
   const sourceExtension = activeFilePath.split('.').pop()?.toLowerCase();
   const requiresProjectJsxTransform =
     sourceExtension === 'jsx' || sourceExtension === 'tsx';
   const executionLanguage = requiresProjectJsxTransform
     ? null
     : (EXECUTION_LANGUAGES[language] ?? null);
-  const [validationResult, setValidationResult] = useState<CodeValidationResult>(() =>
-    validateCodeForExecution({
-      code: '',
-      language,
-      filePath: activeFilePath,
-      isConnected: Boolean(activeFile && status === 'connected'),
-    })
-  );
+  const [validationResult, setValidationResult] =
+    useState<CodeValidationResult>(() =>
+      validateCodeForExecution({
+        code: '',
+        language,
+        filePath: activeFilePath,
+        isConnected: Boolean(activeFile && status === 'connected'),
+      })
+    );
 
   useEffect(() => {
     const checkValidation = () => {
@@ -257,13 +264,24 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
       : 'This file type cannot be executed'
     : validationResult.reason;
 
-  const handleRunCode = () => {
-    if (!canRunCode || isExecutionRunning || !executionLanguage || !monacoEditor)
+  const handleRunCode = useCallback(() => {
+    if (
+      !canRunCode ||
+      isExecutionRunning ||
+      !executionLanguage ||
+      !monacoEditor
+    )
       return;
     setStartBashOnTerminalOpen(false);
-    setTerminalOpen(true);
+    revealTerminalPanel();
     void runCode(executionLanguage, monacoEditor.getValue());
-  };
+  }, [
+    canRunCode,
+    isExecutionRunning,
+    executionLanguage,
+    monacoEditor,
+    runCode,
+  ]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -319,7 +337,7 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
           if (isTerminalOpen) setTerminalOpen(false);
           else {
             setStartBashOnTerminalOpen(true);
-            setTerminalOpen(true);
+            revealTerminalPanel();
           }
           break;
         case 'n':
@@ -327,7 +345,7 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
           if (isTerminalOpen) setNewTerminalRequest((value) => value + 1);
           else {
             setStartBashOnTerminalOpen(true);
-            setTerminalOpen(true);
+            revealTerminalPanel();
           }
           break;
         case 'q':
@@ -374,7 +392,7 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
     canRunCode,
     executionLanguage,
     monacoEditor,
-    runCode,
+    handleRunCode,
   ]);
 
   useEffect(() => {
@@ -587,10 +605,16 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
         onOpenTerminal={() => {
           if (isTerminalOpen) setNewTerminalRequest((value) => value + 1);
           else setStartBashOnTerminalOpen(true);
-          setTerminalOpen(true);
+          revealTerminalPanel();
         }}
         onRunCode={handleRunCode}
       />
+
+      {connectionError && (
+        <div className="room-connection-error" role="alert">
+          {connectionError}
+        </div>
+      )}
 
       <div className="room-main">
         <FileExplorerPanel
@@ -692,6 +716,7 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
 
           <TerminalPanel
             isOpen={isTerminalOpen}
+            hasOpened={terminalPanelMounted}
             height={terminalHeight}
             chunks={executionChunks}
             outputRevision={executionOutputRevision}

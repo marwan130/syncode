@@ -3,6 +3,7 @@ import type { FC, RefObject } from 'react';
 import { VerticalResizeHandle } from './VerticalResizeHandle';
 import {
   DEFAULT_TERMINAL_HEIGHT,
+  MIN_TERMINAL_HEIGHT,
   storeTerminalHeight,
 } from './editorLayoutStorage';
 import type { TerminalOutputChunk } from '../../hooks/useExecutionStream';
@@ -17,6 +18,7 @@ const Terminal = lazy(() =>
 
 interface TerminalPanelProps {
   isOpen: boolean;
+  hasOpened: boolean;
   height: number;
   chunks: TerminalOutputChunk[];
   outputRevision: number;
@@ -34,6 +36,7 @@ interface TerminalPanelProps {
 
 export const TerminalPanel: FC<TerminalPanelProps> = ({
   isOpen,
+  hasOpened,
   height,
   chunks,
   outputRevision,
@@ -48,26 +51,35 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
   onClose,
   onEmpty,
 }) => {
-  if (!isOpen) return null;
+  if (!isOpen && !hasOpened) return null;
 
   return (
     <>
-      <VerticalResizeHandle
-        label="Resize terminal panel"
-        onResize={(delta) => {
-          const next = height + delta;
-          if (next <= 32) {
-            onClose();
-            onHeightChange(DEFAULT_TERMINAL_HEIGHT);
-            storeTerminalHeight(DEFAULT_TERMINAL_HEIGHT);
-            return;
-          }
-          const nextHeight = Math.min(window.innerHeight - 100, next);
-          onHeightChange(nextHeight);
-          storeTerminalHeight(nextHeight);
-        }}
-      />
-      <div className="terminal-panel-sized" style={{ flexBasis: height }}>
+      {isOpen && (
+        <VerticalResizeHandle
+          label="Resize terminal panel"
+          onResize={(delta) => {
+            const next = height + delta;
+            if (next < MIN_TERMINAL_HEIGHT) {
+              onClose();
+              onHeightChange(DEFAULT_TERMINAL_HEIGHT);
+              storeTerminalHeight(DEFAULT_TERMINAL_HEIGHT);
+              return;
+            }
+            const nextHeight = Math.max(
+              MIN_TERMINAL_HEIGHT,
+              Math.min(window.innerHeight - 100, next)
+            );
+            onHeightChange(nextHeight);
+            storeTerminalHeight(nextHeight);
+          }}
+        />
+      )}
+      <div
+        className="terminal-panel-sized"
+        style={{ flexBasis: height, display: isOpen ? undefined : 'none' }}
+        aria-hidden={!isOpen}
+      >
         <Suspense
           fallback={
             <div className="execution-terminal-loading">Opening terminal…</div>

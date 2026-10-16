@@ -8,6 +8,7 @@ import type {
   ConnectionStatus,
   SignalRCrdtProvider,
 } from '../../providers/SignalRCrdtProvider';
+import { userFacingError } from '../../utils/userFacingError';
 
 interface TerminalProps {
   chunks: TerminalOutputChunk[];
@@ -36,10 +37,8 @@ export function Terminal(props: TerminalProps) {
     status,
     newTerminalRequest,
     startBashOnMount,
+    outputRevision,
     onEmpty,
-    isRunning,
-    chunks,
-    message,
   } = props;
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [activeId, setActiveId] = useState('');
@@ -89,9 +88,10 @@ export function Terminal(props: TerminalProps) {
       } catch (error) {
         if (mounted.current)
           setTerminalError(
-            error instanceof Error
-              ? error.message
-              : 'Could not start Bash terminal.'
+            userFacingError(
+              error,
+              'Could not start a Bash terminal. Try again.'
+            )
           );
       } finally {
         pendingStarts.current--;
@@ -122,10 +122,13 @@ export function Terminal(props: TerminalProps) {
 
   useEffect(() => {
     if (tabs.length > 0) hadTabsBefore.current = true;
-    else if (hadTabsBefore.current) onEmpty();
+    else {
+      startedInitialTerminal.current = false;
+      if (hadTabsBefore.current) onEmpty();
+    }
   }, [onEmpty, tabs.length]);
   useEffect(() => {
-    if (!isRunning && chunks.length === 0 && message === 'Ready') return;
+    if (outputRevision === 0) return;
     setTabs((current) =>
       current.some((tab) => tab.kind === 'output')
         ? current
@@ -140,7 +143,7 @@ export function Terminal(props: TerminalProps) {
           ]
     );
     setActiveId('run-output');
-  }, [isRunning, chunks.length, message]);
+  }, [outputRevision]);
 
   useEffect(
     () => () => {
@@ -286,9 +289,6 @@ export function Terminal(props: TerminalProps) {
           outputRevision={props.outputRevision}
         />
       ))}
-      <div className="terminal-short-hint">
-        Bash runs in an isolated container with no network access.
-      </div>
     </section>
   );
 }
@@ -415,6 +415,7 @@ function TerminalView({
           }
         }
       } catch {
+        // A failed poll is retried on the next interval.
       } finally {
         polling = false;
       }
@@ -435,7 +436,7 @@ function TerminalView({
           await providerRef.current?.writeTerminalInput(tab.sessionId, slice);
         } catch (error: unknown) {
           terminal.write(
-            `\r\n${error instanceof Error ? error.message : 'Input could not be sent.'}\r\n`
+            `\r\n${userFacingError(error, 'Terminal input could not be sent.')}\r\n`
           );
           break;
         }
@@ -482,7 +483,7 @@ function TerminalView({
         ?.writeExecutionInput(jobId, `${value}\n`)
         .catch((error: unknown) => {
           terminal.write(
-            `\r\n${error instanceof Error ? error.message : 'Input could not be sent.'}\r\n`
+            `\r\n${userFacingError(error, 'Input could not be sent.')}\r\n`
           );
         });
     const inputSubscription = terminal.onData((data) => {

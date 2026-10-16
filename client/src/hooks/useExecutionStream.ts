@@ -6,6 +6,7 @@ import type {
   ExecutionLanguage,
   SignalRCrdtProvider,
 } from '../providers/SignalRCrdtProvider';
+import { userFacingError } from '../utils/userFacingError';
 
 export interface TerminalOutputChunk {
   stream: 'stdout' | 'stderr';
@@ -100,9 +101,7 @@ export function useExecutionStream({
         runningRef.current = false;
         setIsRunning(false);
         setMessage(
-          error instanceof Error
-            ? error.message
-            : 'Could not start code execution.'
+          userFacingError(error, 'Could not start the code run. Try again.')
         );
       }
     },
