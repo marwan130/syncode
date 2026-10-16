@@ -16,7 +16,10 @@ public class RoomsController : ControllerBase
     public async Task<IActionResult> Create()
     {
         var roomId = GenerateRoomId();
-        var accessKey = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
+        var accessKey = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))
+            .TrimEnd('=')
+            .Replace('+', '-')
+            .Replace('/', '_');
         var accessKeyHash = Convert.ToHexString(
             SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(accessKey)));
         await _store.CreateRoomAsync(roomId, accessKeyHash);

@@ -11,6 +11,7 @@ import EditorComponent from './components/editor/Editor';
 import { RoomJoin } from './components/room/RoomJoin';
 import type { RoomProfileForm } from './components/room/RoomJoin';
 import { ThemeInitializer } from './components/editor/ThemePicker';
+import { isValidRoomAccessKey } from './utils/roomInvites';
 import {
   createSiteId,
   getStoredDisplayName,
@@ -71,7 +72,7 @@ function Home() {
     )?.[1];
     const accessKey =
       new URLSearchParams(inviteUrl.hash.slice(1)).get('key') ?? '';
-    if (!roomId || !/^[0-9a-f]{64}$/i.test(accessKey)) {
+    if (!roomId || !isValidRoomAccessKey(accessKey)) {
       setError('Use a complete room invite link with its access key.');
       return;
     }
@@ -113,7 +114,7 @@ function RoomRoute() {
   const accessKey =
     new URLSearchParams(location.hash.slice(1)).get('key') ?? '';
 
-  if (!/^[0-9a-f]{64}$/i.test(accessKey)) {
+  if (!isValidRoomAccessKey(accessKey)) {
     return (
       <main className="home-page">
         <p

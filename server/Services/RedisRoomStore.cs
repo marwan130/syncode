@@ -223,9 +223,7 @@ public class RedisRoomStore
             roomId.Length != 8 ||
             !roomId.All(character =>
                 character is >= 'a' and <= 'z' or >= '0' and <= '9') ||
-            string.IsNullOrEmpty(accessKey) ||
-            accessKey.Length != 64 ||
-            !accessKey.All(Uri.IsHexDigit))
+            !IsValidAccessKey(accessKey))
         {
             return false;
         }
@@ -236,6 +234,18 @@ public class RedisRoomStore
         var suppliedHash = SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(accessKey));
         var expectedHash = Convert.FromHexString(storedHash);
         return CryptographicOperations.FixedTimeEquals(suppliedHash, expectedHash);
+    }
+
+    private static bool IsValidAccessKey(string accessKey)
+    {
+        if (string.IsNullOrEmpty(accessKey)) return false;
+
+        var isLegacyHex = accessKey.Length == 64 && accessKey.All(Uri.IsHexDigit);
+        var isBase64Url = accessKey.Length == 43 && accessKey.All(character =>
+            character is >= 'A' and <= 'Z' or >= 'a' and <= 'z' or
+                >= '0' and <= '9' or '-' or '_');
+
+        return isLegacyHex || isBase64Url;
     }
 
     public async Task TouchRoomAsync(string roomId)

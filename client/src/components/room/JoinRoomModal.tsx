@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import type { RefObject } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useOutsidePointerDismiss } from '../../hooks/useOutsidePointerDismiss';
+import { isValidRoomAccessKey } from '../../utils/roomInvites';
 import {
   getOrCreateParticipantId,
   getStoredDisplayName,
@@ -70,7 +71,7 @@ export function JoinRoomModal({
     const roomId = invite.pathname.match(/\/room\/([a-zA-Z0-9_-]+)\/?$/)?.[1];
     const accessKey =
       new URLSearchParams(invite.hash.slice(1)).get('key') ?? '';
-    if (!roomId || !/^[0-9a-f]{64}$/i.test(accessKey)) {
+    if (!roomId || !isValidRoomAccessKey(accessKey)) {
       setError('Use a complete room invite link.');
       return;
     }

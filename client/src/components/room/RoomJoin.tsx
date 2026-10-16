@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { isValidRoomAccessKey } from '../../utils/roomInvites';
 import {
   CURSOR_COLORS,
   getStoredColor,
@@ -112,7 +113,7 @@ export function RoomJoin({
         )?.[1];
         const accessKey =
           new URLSearchParams(invite.hash.slice(1)).get('key') ?? '';
-        if (!linkedRoom || !/^[0-9a-f]{64}$/i.test(accessKey)) {
+        if (!linkedRoom || !isValidRoomAccessKey(accessKey)) {
           setError('Use a complete room invite link.');
           return;
         }
