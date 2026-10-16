@@ -20,7 +20,9 @@ function computeFileDiagnostics(
 
   for (const entry of entries) {
     if (entry.isFolder) continue;
-    const entryPath = getEntryPath(entry, entries).replace(/^\/+/, '').toLowerCase();
+    const entryPath = getEntryPath(entry, entries)
+      .replace(/^\/+/, '')
+      .toLowerCase();
 
     const fileMarkers = allMarkers.filter((m: monaco.editor.IMarker) => {
       const markerPath = m.resource.path.replace(/^\/+/, '').toLowerCase();

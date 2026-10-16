@@ -61,15 +61,15 @@ export class CrdtDocument {
   }
 
   /**
-   * rga integration rule: scans forward from the origin position,
+   * rga integration scans forward from the origin position,
    * skipping any sibling characters with a higher id, and inserts
    * the new character at the first position where it should come first.
    * every replica applying this rule to the same set of operations
    * in any order will produce the identical sequence.
    *
-   * two cases during the scan:
-   * 1. direct sibling (same originId): use compareCrdtIds to decide order
-   * 2. not a sibling: call findCharIndex to check whether we have walked past our origin's subtree
+   * the scan handles two cases
+   * 1. direct siblings share an originId and use compareCrdtIds to decide order
+   * 2. other characters use findCharIndex to check whether we passed the origin subtree
    */
   private insertChar(newChar: CrdtChar): void {
     const originPos =
@@ -82,7 +82,7 @@ export class CrdtDocument {
 
       if (crdtIdsEqual(next.originId, newChar.originId)) {
         // direct sibling, meaning both were inserted after the same character
-        // rga rule: higher id comes first
+        // the rga rule puts the higher id first
         if (compareCrdtIds(newChar.id, next.id) > 0) {
           break;
         }

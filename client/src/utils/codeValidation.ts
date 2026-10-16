@@ -28,7 +28,7 @@ const RUNNABLE_LANGUAGES: Set<LanguageMode> = new Set([
 ]);
 
 /**
- * Uses native Monaco editor diagnostics and environment checks 
+ * Uses native Monaco editor diagnostics and environment checks
  */
 export function validateCodeForExecution(
   options: CodeValidationOptions

@@ -4,7 +4,7 @@ let isConfigured = false;
 
 /**
  * Configures Monaco's built-in language services to enable full type checking,
- * syntax error detection, and error decorations 
+ * syntax error detection, and error decorations
  */
 export function configureMonacoDiagnostics(monaco: Monaco): void {
   if (isConfigured) return;
