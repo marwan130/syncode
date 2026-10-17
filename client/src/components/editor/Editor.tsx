@@ -1,10 +1,4 @@
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-} from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { Monaco, OnMount } from '@monaco-editor/react';
 import type * as monaco from 'monaco-editor';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -16,6 +10,9 @@ import { useDebouncedPreview } from '../../hooks/useDebouncedPreview';
 import { useExecutionStream } from '../../hooks/useExecutionStream';
 import { useFileDiagnostics } from '../../hooks/useFileDiagnostics';
 import { useAutocompletePreference } from '../../hooks/useAutocompletePreference';
+import { useEditorShortcuts } from '../../hooks/useEditorShortcuts';
+import { useExecutionEligibility } from '../../hooks/useExecutionEligibility';
+import { useEditorFileState } from '../../hooks/useEditorFileState';
 import { userFacingError } from '../../utils/userFacingError';
 import {
   createSiteId,
@@ -32,11 +29,9 @@ import {
 import {
   DEFAULT_CHAT_WIDTH,
   getEntryPath,
-  getStoredActiveFileId,
   getStoredExplorerWidth,
   getStoredPreviewWidth,
   getStoredTerminalHeight,
-  storeActiveFileId,
 } from './editorLayoutStorage';
 import { EditorWorkspace } from './EditorWorkspace';
 import { FileExplorerPanel } from './FileExplorerPanel';
@@ -44,26 +39,7 @@ import { ChatPanelContainer } from './ChatPanelContainer';
 import { PreviewPanel } from './PreviewPanel';
 import { TerminalPanel } from './TerminalPanel';
 import { ShortcutGuideDialog } from './ShortcutGuideDialog';
-import {
-  validateCodeForExecution,
-  type CodeValidationResult,
-} from '../../utils/codeValidation';
 import { configureMonacoEditor } from '../../utils/configureMonacoEditor';
-import type {
-  ExecutionLanguage,
-  RoomEntry,
-} from '../../providers/SignalRCrdtProvider';
-
-const EXECUTION_LANGUAGES: Partial<Record<LanguageMode, ExecutionLanguage>> = {
-  javascript: 'JavaScript',
-  typescript: 'TypeScript',
-  python: 'Python',
-  csharp: 'CSharp',
-  c: 'C',
-  cpp: 'Cpp',
-  rust: 'Rust',
-  java: 'Java',
-};
 
 interface EditorProps {
   roomId?: string;
@@ -87,19 +63,6 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
   const [localColor, setLocalColor] = useState(() =>
     getStoredColor(participantId)
   );
-  const [entries, setEntries] = useState<RoomEntry[]>([]);
-  const [activeFileId, setActiveFileId] = useState('main.cpp');
-  const activeFileIdRef = useRef(activeFileId);
-  useLayoutEffect(() => {
-    activeFileIdRef.current = activeFileId;
-  }, [activeFileId]);
-  const [openFileIds, setOpenFileIds] = useState<string[]>(['main.cpp']);
-  const [splitFileId, setSplitFileId] = useState<string | null>(null);
-  const [isSplitWorkspaceOpen, setSplitWorkspaceOpen] = useState(false);
-  const [activeEditorGroup, setActiveEditorGroup] = useState<
-    'primary' | 'secondary'
-  >('primary');
-  const [splitWidth, setSplitWidth] = useState(50);
   const [isExplorerOpen, setExplorerOpen] = useState(true);
   const [explorerWidth, setExplorerWidth] = useState(getStoredExplorerWidth);
   const [siteId] = useState(createSiteId);
@@ -110,16 +73,6 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
     useState<monaco.editor.IStandaloneCodeEditor | null>(null);
   const [splitMonacoEditor, setSplitMonacoEditor] =
     useState<monaco.editor.IStandaloneCodeEditor | null>(null);
-
-  const activeFile = entries.find(
-    (entry) => entry.id === activeFileId && !entry.isFolder
-  );
-  const splitFile = splitFileId
-    ? entries.find((entry) => entry.id === splitFileId && !entry.isFolder)
-    : undefined;
-  const activeFilePath = activeFile ? getEntryPath(activeFile, entries) : '';
-  const splitFilePath = splitFile ? getEntryPath(splitFile, entries) : '';
-  const language: LanguageMode = languageForFileName(activeFilePath);
 
   const { status, connectionError, providerRef, evictedNewRoomId } =
     useCrdtSync({
@@ -132,61 +85,43 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
       enabled: Boolean(roomId && accessKey && displayName),
     });
 
-  useEffect(() => {
-    const provider = providerRef.current;
-    if (!provider) return;
-    const offFiles = provider.onFilesChange((next) => {
-      setEntries(next);
-      setOpenFileIds((current) =>
-        current.filter((id) =>
-          next.some((entry) => entry.id === id && !entry.isFolder)
-        )
-      );
-      setSplitFileId((current) =>
-        current && next.some((entry) => entry.id === current && !entry.isFolder)
-          ? current
-          : null
-      );
-      const preferredFileId = getStoredActiveFileId(roomId);
-      if (
-        preferredFileId &&
-        next.some((entry) => entry.id === preferredFileId && !entry.isFolder)
-      ) {
-        provider.setActiveFile(preferredFileId);
-        setActiveFileId(preferredFileId);
-        setOpenFileIds((current) =>
-          current.includes(preferredFileId)
-            ? current
-            : [...current, preferredFileId]
-        );
-        return;
-      }
-      if (
-        next.length &&
-        !next.some(
-          (entry) => entry.id === activeFileIdRef.current && !entry.isFolder
-        )
-      ) {
-        const fallback =
-          next.find((entry) => !entry.isFolder)?.id ?? 'main.cpp';
-        setActiveFileId(fallback);
-        setOpenFileIds((current) =>
-          current.includes(fallback) ? current : [...current, fallback]
-        );
-      }
+  const {
+    entries,
+    activeFileId,
+    openFileIds,
+    splitFileId,
+    setSplitFileId,
+    isSplitWorkspaceOpen,
+    setSplitWorkspaceOpen,
+    setActiveEditorGroup,
+    splitWidth,
+    setSplitWidth,
+    openFile,
+    closeFileTab,
+    handleDropFile,
+    runFileAction,
+    createEntry,
+  } = useEditorFileState({ roomId, providerRef, status });
+
+  const activeFile = entries.find(
+    (entry) => entry.id === activeFileId && !entry.isFolder
+  );
+  const splitFile = splitFileId
+    ? entries.find((entry) => entry.id === splitFileId && !entry.isFolder)
+    : undefined;
+  const activeFilePath = activeFile ? getEntryPath(activeFile, entries) : '';
+  const splitFilePath = splitFile ? getEntryPath(splitFile, entries) : '';
+  const language: LanguageMode = languageForFileName(activeFilePath);
+
+  const { executionLanguage, canRunCode, runDisabledReason } =
+    useExecutionEligibility({
+      activeFile,
+      activeFilePath,
+      language,
+      status,
+      monacoEditor,
+      monacoApi,
     });
-    const offActive = provider.onActiveFileChange((file) => {
-      setActiveFileId(file.id);
-      setOpenFileIds((current) =>
-        current.includes(file.id) ? current : [...current, file.id]
-      );
-      storeActiveFileId(roomId, file.id);
-    });
-    return () => {
-      offFiles();
-      offActive();
-    };
-  }, [providerRef, roomId, status]);
 
   const [isChatOpen, setChatOpen] = useState(false);
   const [chatWidth, setChatWidth] = useState(DEFAULT_CHAT_WIDTH);
@@ -197,7 +132,6 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
   const [newTerminalRequest, setNewTerminalRequest] = useState(0);
   const [startBashOnTerminalOpen, setStartBashOnTerminalOpen] = useState(false);
   const [terminalPanelMounted, setTerminalPanelMounted] = useState(false);
-  const pendingFileActions = useRef(new Map<string, Promise<unknown>>());
 
   const { messages, sendMessage } = useChat({ providerRef, status });
   const {
@@ -211,67 +145,10 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
 
   const [isTerminalOpen, setTerminalOpen] = useState(false);
 
-  const revealTerminalPanel = () => {
+  const revealTerminalPanel = useCallback(() => {
     setTerminalPanelMounted(true);
     setTerminalOpen(true);
-  };
-  const sourceExtension = activeFilePath.split('.').pop()?.toLowerCase();
-  const requiresProjectJsxTransform =
-    sourceExtension === 'jsx' || sourceExtension === 'tsx';
-  const executionLanguage = requiresProjectJsxTransform
-    ? null
-    : (EXECUTION_LANGUAGES[language] ?? null);
-  const [validationResult, setValidationResult] =
-    useState<CodeValidationResult>(() =>
-      validateCodeForExecution({
-        code: '',
-        language,
-        filePath: activeFilePath,
-        isConnected: Boolean(activeFile && status === 'connected'),
-      })
-    );
-
-  useEffect(() => {
-    const checkValidation = () => {
-      const model = monacoEditor?.getModel();
-      const code = model ? model.getValue() : '';
-
-      const result = validateCodeForExecution({
-        code,
-        language,
-        filePath: activeFilePath,
-        isConnected: Boolean(activeFile && status === 'connected'),
-        monacoApi,
-        model,
-      });
-
-      setValidationResult(result);
-    };
-
-    checkValidation();
-
-    if (!monacoEditor) return;
-
-    const disposableContent =
-      monacoEditor.onDidChangeModelContent(checkValidation);
-    const disposableMarkers =
-      monacoApi?.editor.onDidChangeMarkers(checkValidation);
-
-    return () => {
-      disposableContent.dispose();
-      disposableMarkers?.dispose();
-    };
-  }, [monacoEditor, monacoApi, language, activeFilePath, activeFile, status]);
-
-  const canRunCode = Boolean(
-    validationResult.canRun && executionLanguage && monacoEditor
-  );
-  const runDisabledReason = !executionLanguage
-    ? requiresProjectJsxTransform
-      ? 'This file type requires a project build and cannot run as a single file'
-      : 'This file type cannot be executed'
-    : validationResult.reason;
-
+  }, [setTerminalPanelMounted, setTerminalOpen]);
   const handleRunCode = useCallback(() => {
     if (
       !canRunCode ||
@@ -286,122 +163,30 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
   }, [
     canRunCode,
     isExecutionRunning,
+    setStartBashOnTerminalOpen,
     executionLanguage,
     monacoEditor,
     runCode,
+    revealTerminalPanel,
   ]);
 
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && isShortcutGuideOpen) {
-        setShortcutGuideOpen(false);
-        return;
-      }
-      if (isShortcutGuideOpen) return;
-      if (event.key === 'F6') {
-        event.preventDefault();
-        const regions = [
-          '.file-explorer',
-          '.room-code-editor',
-          '.chat-panel',
-          '.live-preview',
-          '.execution-terminal',
-        ]
-          .map((selector) => document.querySelector<HTMLElement>(selector))
-          .filter((element): element is HTMLElement =>
-            Boolean(element && element.getClientRects().length)
-          );
-        if (!regions.length) return;
-        const active = document.activeElement;
-        const current = regions.findIndex(
-          (region) => region === active || region.contains(active)
-        );
-        const direction = event.shiftKey ? -1 : 1;
-        const nextIndex =
-          current < 0
-            ? direction > 0
-              ? 0
-              : regions.length - 1
-            : (current + direction + regions.length) % regions.length;
-        const next = regions[nextIndex];
-        if (next.matches('.room-code-editor')) monacoEditor?.focus();
-        else
-          (
-            next.querySelector<HTMLElement>('button, input, [tabindex="0"]') ??
-            next
-          ).focus();
-        return;
-      }
-      if (!(event.ctrlKey || event.metaKey) || !event.altKey || event.repeat)
-        return;
-      const target = event.target as HTMLElement | null;
-      switch (event.key.toLowerCase()) {
-        case 'k':
-          event.preventDefault();
-          setShortcutGuideOpen((open) => !open);
-          break;
-        case 't':
-          event.preventDefault();
-          if (isTerminalOpen) setTerminalOpen(false);
-          else {
-            setStartBashOnTerminalOpen(true);
-            revealTerminalPanel();
-          }
-          break;
-        case 'n':
-          event.preventDefault();
-          if (isTerminalOpen) setNewTerminalRequest((value) => value + 1);
-          else {
-            setStartBashOnTerminalOpen(true);
-            revealTerminalPanel();
-          }
-          break;
-        case 'q':
-          if (isTerminalOpen && target?.closest('.execution-terminal')) {
-            event.preventDefault();
-            window.dispatchEvent(new Event('syncode:terminal-close-active'));
-          }
-          break;
-        case 'e':
-          event.preventDefault();
-          setExplorerOpen((open) => !open);
-          break;
-        case 'c':
-          event.preventDefault();
-          setChatOpen((open) => !open);
-          break;
-        case 'p':
-          if (isPreviewLanguage(language)) {
-            event.preventDefault();
-            setPreviewOpen((open) => !open);
-          }
-          break;
-        case 'r':
-          if (canRunCode && executionLanguage && monacoEditor) {
-            event.preventDefault();
-            handleRunCode();
-          }
-          break;
-        case 'w':
-          if (isTerminalOpen) {
-            event.preventDefault();
-            setStartBashOnTerminalOpen(false);
-            setTerminalOpen(false);
-          }
-          break;
-      }
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [
+  useEditorShortcuts({
     isShortcutGuideOpen,
+    setShortcutGuideOpen,
     isTerminalOpen,
+    setTerminalOpen,
+    setPreviewOpen,
+    setExplorerOpen,
+    setChatOpen,
+    setNewTerminalRequest,
+    setStartBashOnTerminalOpen,
+    revealTerminalPanel,
     language,
     canRunCode,
     executionLanguage,
     monacoEditor,
     handleRunCode,
-  ]);
+  });
 
   useEffect(() => {
     if (evictedNewRoomId)
@@ -477,76 +262,6 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
     configureMonacoEditor(monacoInstance);
     setMonacoEditor(editor);
     setMonacoApi(monacoInstance);
-  };
-
-  const openFile = (fileId: string, group = activeEditorGroup) => {
-    setOpenFileIds((current) =>
-      current.includes(fileId) ? current : [...current, fileId]
-    );
-    setActiveEditorGroup(group);
-    if (group === 'secondary' && isSplitWorkspaceOpen) setSplitFileId(fileId);
-    else {
-      if (splitFileId === fileId) setSplitFileId(null);
-      setActiveFileId(fileId);
-      providerRef.current?.setActiveFile(fileId);
-    }
-  };
-
-  const closeFileTab = (fileId: string) => {
-    const index = openFileIds.indexOf(fileId);
-    const next = openFileIds.filter((id) => id !== fileId);
-    setOpenFileIds(next);
-    if (splitFileId === fileId) setSplitFileId(null);
-    if (activeFileId === fileId) {
-      const nextActive = next[Math.min(index, next.length - 1)];
-      if (nextActive) {
-        setActiveFileId(nextActive);
-        providerRef.current?.setActiveFile(nextActive);
-      } else {
-        setActiveFileId('');
-      }
-    }
-  };
-
-  const handleDropFile = (fileId: string, group: 'primary' | 'secondary') => {
-    setOpenFileIds((current) =>
-      current.includes(fileId) ? current : [...current, fileId]
-    );
-    if (group === 'primary') {
-      setSplitWorkspaceOpen(true);
-      setSplitFileId(fileId);
-      setActiveEditorGroup('secondary');
-    } else {
-      setSplitFileId(fileId);
-      setActiveEditorGroup('secondary');
-    }
-  };
-
-  const runFileAction = <T,>(
-    key: string,
-    action: () => Promise<T>
-  ): Promise<T | void> => {
-    const pending = pendingFileActions.current.get(key);
-    if (pending) return pending as Promise<T | void>;
-    const operation = action().finally(() => {
-      if (pendingFileActions.current.get(key) === operation)
-        pendingFileActions.current.delete(key);
-    });
-    pendingFileActions.current.set(key, operation);
-    return operation;
-  };
-
-  const createEntry = (
-    parentId: string | null,
-    name: string,
-    isFolder: boolean
-  ) => {
-    if (!providerRef.current)
-      return Promise.reject(new Error('Not connected to a room.'));
-    return runFileAction(
-      `create:${isFolder ? 'folder' : 'file'}:${parentId ?? 'root'}`,
-      () => providerRef.current!.createEntry(name, parentId, isFolder)
-    );
   };
 
   return (

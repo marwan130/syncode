@@ -223,10 +223,6 @@ export class MonacoCrdtBinding {
     return () => this.cursorListeners.delete(listener);
   }
 
-  public getLocalCursorAnchor(): CursorAnchor | null {
-    return this.localCursorAnchor;
-  }
-
   public dispose(): void {
     this.disposables.forEach((d) => d.dispose());
     this.disposables = [];
