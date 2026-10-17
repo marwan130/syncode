@@ -1,5 +1,4 @@
 using server.Hubs;
-using server.Config;
 using server.Models;
 using server.Services;
 using StackExchange.Redis;
@@ -24,20 +23,6 @@ builder.Services.AddOpenApi();
 builder.Services.AddControllers();
 
 builder.Services.AddSingleton<RedisRoomStore>();
-builder.Services.AddOptions<AiProviderOptions>()
-    .Bind(builder.Configuration.GetSection(AiProviderOptions.SectionName))
-    .Validate(options => !options.Enabled ||
-        (!string.IsNullOrWhiteSpace(options.Provider) &&
-         new[] { "openai-compatible", "anthropic" }.Contains(options.Provider, StringComparer.OrdinalIgnoreCase) &&
-         !string.IsNullOrWhiteSpace(options.Model) &&
-         !string.IsNullOrWhiteSpace(options.ApiKey) &&
-         options.MaxRequestCharacters > 0 &&
-         options.MaxResponseCharacters > 0 &&
-         options.RequestsPerMinutePerConnection > 0 &&
-         options.RequestsPerMinutePerRoom > 0 &&
-         options.DailyUsageBudget > 0),
-        "Enabled AI provider settings must be complete and have positive limits.");
-builder.Services.AddSingleton<AiProviderClient>();
 builder.Services.AddOptions<RoomCapacityOptions>()
     .Bind(builder.Configuration.GetSection(RoomCapacityOptions.SectionName))
     .Validate(options => options.MaxParticipantsPerRoom > 0 &&

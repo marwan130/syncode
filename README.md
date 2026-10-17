@@ -1,6 +1,6 @@
 # Syncode
 
-Syncode is a browser-based real-time collaborative code editor with an AI assistant.
+Syncode is a browser-based real-time collaborative code editor.
 
 ## System Architecture
 
