@@ -162,7 +162,7 @@ export function RoomHeader({
           type="button"
           onClick={onOpenTerminal}
           disabled={status !== 'connected'}
-          title="Open a Bash terminal without running code (Ctrl+Alt+T)"
+          title="Open a Bash terminal (Ctrl+Alt+T)"
           aria-keyshortcuts="Control+Alt+T"
         >
           Terminal

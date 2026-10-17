@@ -233,7 +233,7 @@ export function Terminal(props: TerminalProps) {
                 className="terminal-tab-close"
                 aria-label={`Close ${tab.label}`}
                 onClick={() => void closeTabRef.current(tab)}
-                title={`Close ${tab.label}`}
+                title="Kill (Delete)"
               >
                 <svg viewBox="0 0 16 16" aria-hidden="true">
                   <path
