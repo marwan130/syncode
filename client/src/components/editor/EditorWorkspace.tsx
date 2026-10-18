@@ -181,6 +181,7 @@ export const EditorWorkspace: FC<EditorWorkspaceProps> = ({
           <>
             <ResizeHandle
               label="Resize editor groups"
+              reverse
               onResize={(delta) => {
                 const width =
                   editorGroupsRef.current?.getBoundingClientRect().width ?? 0;

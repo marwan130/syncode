@@ -2,6 +2,40 @@ import { useRef, type KeyboardEvent, type PointerEvent } from 'react';
 
 type ResizeAxis = 'horizontal' | 'vertical';
 
+function getResizeDelta(
+  axis: ResizeAxis,
+  previousPosition: number,
+  position: number,
+  reverse: boolean
+): number {
+  const delta =
+    axis === 'horizontal'
+      ? position - previousPosition
+      : previousPosition - position;
+  return reverse ? -delta : delta;
+}
+
+function getResizeKeyboardDelta(
+  axis: ResizeAxis,
+  key: string,
+  reverse: boolean
+): number | null {
+  const direction =
+    axis === 'horizontal'
+      ? key === 'ArrowLeft'
+        ? -1
+        : key === 'ArrowRight'
+          ? 1
+          : 0
+      : key === 'ArrowUp'
+        ? 1
+        : key === 'ArrowDown'
+          ? -1
+          : 0;
+  if (!direction) return null;
+  return direction * (reverse ? -1 : 1) * 16;
+}
+
 export function useResizeHandle(
   axis: ResizeAxis,
   onResize: (delta: number) => void,
@@ -19,12 +53,14 @@ export function useResizeHandle(
   const onPointerMove = (event: PointerEvent<HTMLDivElement>) => {
     if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
     const position = axis === 'horizontal' ? event.clientX : event.clientY;
-    const delta =
-      axis === 'horizontal'
-        ? position - previousPosition.current
-        : previousPosition.current - position;
+    const delta = getResizeDelta(
+      axis,
+      previousPosition.current,
+      position,
+      reverse
+    );
     previousPosition.current = position;
-    onResize(reverse ? -delta : delta);
+    onResize(delta);
   };
 
   const onPointerUp = (event: PointerEvent<HTMLDivElement>) => {
@@ -35,21 +71,10 @@ export function useResizeHandle(
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    const direction =
-      axis === 'horizontal'
-        ? event.key === 'ArrowLeft'
-          ? -1
-          : event.key === 'ArrowRight'
-            ? 1
-            : 0
-        : event.key === 'ArrowUp'
-          ? 1
-          : event.key === 'ArrowDown'
-            ? -1
-            : 0;
-    if (!direction) return;
+    const delta = getResizeKeyboardDelta(axis, event.key, reverse);
+    if (delta === null) return;
     event.preventDefault();
-    onResize(direction * (reverse ? -1 : 1) * 16);
+    onResize(delta);
   };
 
   return { onPointerDown, onPointerMove, onPointerUp, onKeyDown };
