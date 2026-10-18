@@ -660,6 +660,12 @@ code {
   background: transparent;
 }
 
+.terminal-new-tab:hover:not(:disabled),
+.terminal-tab-close:hover:not(:disabled),
+.execution-terminal-actions .terminal-panel-close:hover {
+  background: var(--control-bg);
+}
+
 .terminal-new-tab {
   font-size: 16px !important;
 }
