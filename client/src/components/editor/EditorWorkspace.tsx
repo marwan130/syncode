@@ -7,7 +7,7 @@ import { EditorTabs } from './EditorTabs';
 import { ResizeHandle } from './ResizeHandle';
 import { languageForFileName, type LanguageMode } from './languageModes';
 import { configureMonacoEditor } from '../../utils/configureMonacoEditor';
-import { getEntryPath } from './editorLayoutStorage';
+import { EmptyEditorPane } from './EmptyEditorPane';
 import type {
   AwarenessState,
   ConnectionStatus,
@@ -75,9 +75,6 @@ export const EditorWorkspace: FC<EditorWorkspaceProps> = ({
   fileDiagnostics,
 }) => {
   const editorGroupsRef = useRef<HTMLDivElement>(null);
-  const [filePickerGroup, setFilePickerGroup] = useState<
-    'primary' | 'secondary' | null
-  >(null);
   const autocompleteOptions = {
     quickSuggestions: autocompleteEnabled,
     suggestOnTriggerCharacters: autocompleteEnabled,
@@ -106,64 +103,6 @@ export const EditorWorkspace: FC<EditorWorkspaceProps> = ({
     event.preventDefault();
     onDropFile(fileId, group);
   };
-
-  const renderEmptyPane = (group: 'primary' | 'secondary') => (
-    <div className="editor-empty-pane">
-      <button
-        type="button"
-        className="editor-drop-placeholder"
-        onClick={() => setFilePickerGroup(group)}
-      >
-        Select a file to start editing.
-      </button>
-      {filePickerGroup === group && (
-        <div
-          className="editor-file-picker-backdrop"
-          onClick={() => setFilePickerGroup(null)}
-        >
-          <div
-            className="editor-file-picker"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Select a file to open"
-            onClick={(event) => event.stopPropagation()}
-            onKeyDown={(event) => {
-              if (event.key === 'Escape') setFilePickerGroup(null);
-            }}
-          >
-            <div className="editor-file-picker-heading">
-              <span>Select a file</span>
-              <button type="button" onClick={() => setFilePickerGroup(null)}>
-                Close
-              </button>
-            </div>
-            <div className="editor-file-picker-list">
-              {entries.filter((entry) => !entry.isFolder).length > 0 ? (
-                entries
-                  .filter((entry) => !entry.isFolder)
-                  .map((entry) => (
-                    <button
-                      key={entry.id}
-                      type="button"
-                      onClick={() => {
-                        onOpenFile(entry.id, group);
-                        setFilePickerGroup(null);
-                      }}
-                    >
-                      {getEntryPath(entry, entries)}
-                    </button>
-                  ))
-              ) : (
-                <span className="editor-file-picker-empty">
-                  No files are available.
-                </span>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
 
   return (
     <div className="editor-region">
@@ -230,7 +169,11 @@ export const EditorWorkspace: FC<EditorWorkspaceProps> = ({
               )}
             </div>
           ) : (
-            renderEmptyPane('primary')
+            <EmptyEditorPane
+              entries={entries}
+              group="primary"
+              onOpenFile={onOpenFile}
+            />
           )}
         </div>
 
@@ -291,7 +234,11 @@ export const EditorWorkspace: FC<EditorWorkspaceProps> = ({
                   />
                 </div>
               ) : (
-                renderEmptyPane('secondary')
+                <EmptyEditorPane
+                  entries={entries}
+                  group="secondary"
+                  onOpenFile={onOpenFile}
+                />
               )}
             </div>
           </>
