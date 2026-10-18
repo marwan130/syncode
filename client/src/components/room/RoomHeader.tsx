@@ -7,8 +7,7 @@ import type {
 import { ParticipantList } from './ParticipantList';
 import { ShareLinkButton } from './ShareLinkButton';
 import { JoinRoomModal } from './JoinRoomModal';
-import { SearchReplace } from '../editor/SearchReplace';
-import { ThemePicker } from '../editor/ThemePicker';
+import { RoomHeaderToolbar } from './RoomHeaderToolbar';
 import type { Monaco } from '@monaco-editor/react';
 
 interface RoomHeaderProps {
@@ -115,69 +114,20 @@ export function RoomHeader({
       </div>
 
       <div className="room-header-right">
-        <button
-          className={`chat-toggle${autocompleteEnabled ? ' is-active' : ''}`}
-          type="button"
-          role="switch"
-          aria-checked={autocompleteEnabled}
-          aria-label="Automatic code suggestions"
-          title={`Automatic code suggestions: ${autocompleteEnabled ? 'On' : 'Off'}`}
-          onClick={() => onAutocompleteChange(!autocompleteEnabled)}
-        >
-          Suggestions {autocompleteEnabled ? 'On' : 'Off'}
-        </button>
-
-        <ThemePicker monaco={monaco} />
-
-        <SearchReplace editor={editor} />
-
-        <button
-          className="execution-run-button"
-          type="button"
-          onClick={onRunCode}
-          disabled={!canRunCode || isRunningCode}
-          aria-keyshortcuts="Control+Alt+R"
-          title={
-            isRunningCode
-              ? 'Execution in progress…'
-              : canRunCode
-                ? 'Compile and run the active file (Ctrl+Alt+R)'
-                : runDisabledReason || 'Cannot run code'
-          }
-        >
-          {isRunningCode ? (
-            'Running…'
-          ) : (
-            <>
-              <svg className="run-icon" viewBox="0 0 16 16" aria-hidden="true">
-                <path d="M4 2.8v10.4L13 8z" fill="currentColor" />
-              </svg>
-              <span className="visually-hidden">Run</span>
-            </>
-          )}
-        </button>
-
-        <button
-          className="execution-run-button"
-          type="button"
-          onClick={onOpenTerminal}
-          disabled={status !== 'connected'}
-          title="Open a Bash terminal (Ctrl+Alt+T)"
-          aria-keyshortcuts="Control+Alt+T"
-        >
-          Terminal
-        </button>
-
-        {showPreviewButton && (
-          <button
-            className="preview-view-button"
-            type="button"
-            onClick={onShowPreview}
-            aria-keyshortcuts="Control+Alt+P"
-          >
-            View
-          </button>
-        )}
+        <RoomHeaderToolbar
+          status={status}
+          editor={editor}
+          monaco={monaco}
+          autocompleteEnabled={autocompleteEnabled}
+          onAutocompleteChange={onAutocompleteChange}
+          showPreviewButton={showPreviewButton}
+          onShowPreview={onShowPreview}
+          canRunCode={canRunCode}
+          runDisabledReason={runDisabledReason}
+          isRunningCode={isRunningCode}
+          onRunCode={onRunCode}
+          onOpenTerminal={onOpenTerminal}
+        />
 
         <div className="room-join-anchor" ref={joinAnchorRef}>
           <button
