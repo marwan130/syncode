@@ -6,26 +6,7 @@ import {
   MIN_SIDE_PANEL_WIDTH,
   storeExplorerWidth,
 } from './editorLayoutStorage';
-import type { RoomEntry } from '../../providers/SignalRCrdtProvider';
-
-interface FileExplorerPanelProps {
-  isOpen: boolean;
-  width: number;
-  entries: RoomEntry[];
-  activeFileId: string;
-  canEdit: boolean;
-  onWidthChange: (width: number) => void;
-  onClose: () => void;
-  onSelect: (fileId: string) => void;
-  onCreateEntry: (
-    parentId: string | null,
-    name: string,
-    isFolder: boolean
-  ) => Promise<string | void>;
-  onRename: (entry: RoomEntry, name: string) => Promise<void>;
-  onDelete: (entry: RoomEntry) => void;
-  fileDiagnostics?: Record<string, 'error' | 'warning'>;
-}
+import type { FileExplorerPanelProps } from './fileExplorerTypes';
 
 export const FileExplorerPanel: FC<FileExplorerPanelProps> = ({
   isOpen,

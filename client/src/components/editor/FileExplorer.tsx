@@ -1,77 +1,21 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import type { ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Icon, addCollection } from '@iconify/react';
 import type { RoomEntry } from '../../providers/SignalRCrdtProvider';
 import { ScrollbarPanel } from '../shared/ScrollbarPanel';
 import { userFacingError } from '../../utils/userFacingError';
 import vscodeFileIcons from './vscodeFileIcons.json';
+import { ExplorerActionButton } from './ExplorerActionButton';
+import { FileExplorerTree } from './FileExplorerTree';
+import type {
+  FileExplorerEdit,
+  FileExplorerTreeProps,
+} from './fileExplorerTypes';
+import {
+  groupEntriesByParent,
+  resolveFileDiagnostics,
+} from './fileExplorerUtils';
 
 addCollection(vscodeFileIcons);
-
-const EXTENSION_ICONS: Record<string, string> = {
-  c: 'c',
-  h: 'c',
-  cc: 'cpp',
-  cpp: 'cpp',
-  cxx: 'cpp',
-  hpp: 'cpp',
-  cs: 'csharp',
-  css: 'css',
-  env: 'dotenv',
-  htm: 'html',
-  html: 'html',
-  java: 'java',
-  js: 'js',
-  cjs: 'js',
-  mjs: 'js',
-  json: 'json',
-  md: 'markdown',
-  py: 'python',
-  pyw: 'python',
-  rs: 'rust',
-  sh: 'shell',
-  bash: 'shell',
-  svg: 'svg',
-  ts: 'typescript',
-  mts: 'typescript',
-  cts: 'typescript',
-  tsx: 'reactjs',
-  jsx: 'reactjs',
-  xml: 'xml',
-  yaml: 'yaml',
-  yml: 'yaml',
-  toml: 'toml',
-  txt: 'text',
-};
-
-function getFileIcon(
-  entry: Pick<RoomEntry, 'name' | 'isFolder'>,
-  expanded: boolean
-): string {
-  if (entry.isFolder)
-    return `vscode-icons:default-folder${expanded ? '-opened' : ''}`;
-
-  const name = entry.name.toLowerCase();
-  if (name === 'dockerfile') return 'vscode-icons:file-type-docker';
-  if (name === 'package.json') return 'vscode-icons:file-type-npm';
-  const extension = name.split('.').pop() ?? '';
-  return `vscode-icons:file-type-${EXTENSION_ICONS[extension] ?? 'text'}`;
-}
-
-interface FileExplorerProps {
-  entries: RoomEntry[];
-  activeFileId: string;
-  canEdit: boolean;
-  onSelect: (id: string) => void;
-  onCreateEntry: (
-    parentId: string | null,
-    name: string,
-    isFolder: boolean
-  ) => Promise<string | void>;
-  onRename: (entry: RoomEntry, name: string) => Promise<void>;
-  onDelete: (entry: RoomEntry) => void;
-  fileDiagnostics?: Record<string, 'error' | 'warning'>;
-}
 
 export function FileExplorer({
   entries,
@@ -82,26 +26,25 @@ export function FileExplorer({
   onCreateEntry,
   onRename,
   onDelete,
-}: FileExplorerProps) {
+}: FileExplorerTreeProps) {
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(
     () => new Set()
   );
-  const [editing, setEditing] = useState<
-    | { kind: 'create'; parentId: string | null; isFolder: boolean }
-    | { kind: 'rename'; entry: RoomEntry }
-    | null
-  >(null);
+  const [isRootExpanded, setRootExpanded] = useState(true);
+  const [selection, setSelection] = useState(() => ({
+    id: activeFileId || null,
+    activeFileId,
+  }));
+  const selectedEntryId =
+    selection.activeFileId === activeFileId
+      ? selection.id
+      : activeFileId || null;
+  const [editing, setEditing] = useState<FileExplorerEdit>(null);
   const [draftName, setDraftName] = useState('');
   const [editError, setEditError] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
   const skipBlurCommit = useRef(false);
   const savingRef = useRef(false);
-
-  useEffect(() => {
-    if (!editing) return;
-    inputRef.current?.focus();
-    if (editing.kind === 'rename') inputRef.current?.select();
-  }, [editing]);
 
   const startCreate = (parentId: string | null, isFolder: boolean) => {
     skipBlurCommit.current = false;
@@ -121,13 +64,37 @@ export function FileExplorer({
     setEditing({ kind: 'rename', entry });
   };
 
-  const cancelEdit = () => {
+  const cancelEdit = useCallback(() => {
     if (savingRef.current) return;
     skipBlurCommit.current = true;
     setEditing(null);
     setDraftName('');
     setEditError('');
-  };
+  }, []);
+
+  useEffect(() => {
+    if (!editing) return;
+    inputRef.current?.focus();
+    if (editing.kind === 'rename') inputRef.current?.select();
+  }, [editing]);
+
+  useEffect(() => {
+    if (editing?.kind !== 'create') return;
+    const cancelWhenClickingOutside = (event: PointerEvent) => {
+      if (!(event.target instanceof Element)) return;
+      if (event.target.closest('.file-explorer-row.is-editing')) return;
+      cancelEdit();
+    };
+
+    document.addEventListener('pointerdown', cancelWhenClickingOutside, true);
+    return () => {
+      document.removeEventListener(
+        'pointerdown',
+        cancelWhenClickingOutside,
+        true
+      );
+    };
+  }, [cancelEdit, editing]);
 
   const renderNameInput = (ariaLabel: string) => (
     <>
@@ -228,68 +195,14 @@ export function FileExplorer({
     }
   };
 
-  const renderEditor = (key: string, depth: number, icon: string) => (
-    <li key={key} role="treeitem">
-      <div
-        className="file-explorer-row is-editing"
-        style={{ paddingLeft: 14 + depth * 14 }}
-      >
-        <Icon className="file-explorer-icon" icon={icon} aria-hidden="true" />
-        {renderNameInput(
-          `New ${editing?.kind === 'create' && editing.isFolder ? 'folder' : 'file'} name`
-        )}
-      </div>
-      {editError && (
-        <div className="file-explorer-edit-error" role="alert">
-          {editError}
-        </div>
-      )}
-    </li>
+  const childrenByParent = useMemo(
+    () => groupEntriesByParent(entries),
+    [entries]
   );
-  const childrenByParent = useMemo(() => {
-    const children = new Map<string | null, RoomEntry[]>();
-    for (const entry of entries) {
-      const siblings = children.get(entry.parentId) ?? [];
-      siblings.push(entry);
-      children.set(entry.parentId, siblings);
-    }
-    for (const siblings of children.values()) {
-      siblings.sort(
-        (a, b) =>
-          Number(b.isFolder) - Number(a.isFolder) ||
-          a.name.localeCompare(b.name)
-      );
-    }
-    return children;
-  }, [entries]);
-
-  // decorates folders with the highest-severity diagnostic found
-  // anywhere beneath them
-  const diagnosticsByEntry = useMemo(() => {
-    const resolveDiagnostic = (
-      entry: RoomEntry,
-      ancestors: ReadonlySet<string> = new Set()
-    ): 'error' | 'warning' | undefined => {
-      let severity = fileDiagnostics?.[entry.id];
-      if (!entry.isFolder || ancestors.has(entry.id)) return severity;
-
-      const nextAncestors = new Set(ancestors);
-      nextAncestors.add(entry.id);
-      for (const child of childrenByParent.get(entry.id) ?? []) {
-        const childSeverity = resolveDiagnostic(child, nextAncestors);
-        if (childSeverity === 'error') return 'error';
-        if (childSeverity === 'warning') severity = 'warning';
-      }
-      return severity;
-    };
-
-    return Object.fromEntries(
-      entries.flatMap((entry) => {
-        const severity = resolveDiagnostic(entry);
-        return severity ? [[entry.id, severity]] : [];
-      })
-    );
-  }, [childrenByParent, entries, fileDiagnostics]);
+  const diagnosticsByEntry = useMemo(
+    () => resolveFileDiagnostics(entries, childrenByParent, fileDiagnostics),
+    [childrenByParent, entries, fileDiagnostics]
+  );
 
   const toggleFolder = (id: string) => {
     setExpandedFolders((previous) => {
@@ -300,240 +213,85 @@ export function FileExplorer({
     });
   };
 
-  const renderChildren = (parentId: string | null, depth = 0): ReactNode => (
-    <>
-      {editing?.kind === 'create' &&
-        editing.parentId === parentId &&
-        renderEditor(
-          `new-${parentId ?? 'root'}`,
-          depth,
-          getFileIcon({ name: draftName, isFolder: editing.isFolder }, false)
-        )}
-      {(childrenByParent.get(parentId) ?? []).map((entry) => {
-        const isExpanded = expandedFolders.has(entry.id);
-        const diagnostic = diagnosticsByEntry[entry.id];
-        const diagnosticHint = diagnostic
-          ? entry.isFolder
-            ? diagnostic === 'error'
-              ? 'Contains an error that needs attention'
-              : 'Contains a warning that may need attention'
-            : diagnostic === 'error'
-              ? 'Has an error that needs attention'
-              : 'Has a warning that may need attention'
-          : undefined;
-        const isRenaming =
-          editing?.kind === 'rename' && editing.entry.id === entry.id;
-        return (
-          <li
-            key={entry.id}
-            role="treeitem"
-            aria-expanded={entry.isFolder ? isExpanded : undefined}
-          >
-            <div
-              className={`file-explorer-row${entry.id === activeFileId ? ' is-active' : ''}`}
-            >
-              {isRenaming ? (
-                <div
-                  className="file-explorer-editing-content"
-                  style={{ paddingLeft: 8 + depth * 14 }}
-                >
-                  <Icon
-                    className="file-explorer-icon"
-                    icon={getFileIcon(entry, isExpanded)}
-                    aria-hidden="true"
-                  />
-                  {renderNameInput(
-                    `Rename ${entry.isFolder ? 'folder' : 'file'}`
-                  )}
-                </div>
-              ) : (
-                <button
-                  className="file-explorer-select"
-                  type="button"
-                  style={{ paddingLeft: 8 + depth * 14 }}
-                  onClick={() =>
-                    entry.isFolder ? toggleFolder(entry.id) : onSelect(entry.id)
-                  }
-                  aria-expanded={entry.isFolder ? isExpanded : undefined}
-                  aria-label={`${entry.isFolder ? 'Folder' : 'File'} ${entry.name}${diagnosticHint ? `. ${diagnosticHint}` : ''}`}
-                  title={
-                    diagnosticHint
-                      ? `${entry.name}: ${diagnosticHint}`
-                      : entry.name
-                  }
-                  draggable={!entry.isFolder}
-                  onDragStart={(event) => {
-                    if (entry.isFolder) return;
-                    event.dataTransfer.setData(
-                      'application/x-syncode-file-id',
-                      entry.id
-                    );
-                    event.dataTransfer.effectAllowed = 'copy';
-                  }}
-                  onKeyDown={(event) => {
-                    const buttons = Array.from(
-                      event.currentTarget
-                        .closest('.file-explorer')
-                        ?.querySelectorAll<HTMLButtonElement>(
-                          '.file-explorer-select'
-                        ) ?? []
-                    );
-                    const index = buttons.indexOf(event.currentTarget);
-                    if (
-                      event.key === 'ArrowDown' ||
-                      event.key === 'ArrowUp' ||
-                      event.key === 'Home' ||
-                      event.key === 'End'
-                    ) {
-                      event.preventDefault();
-                      const next =
-                        event.key === 'Home'
-                          ? 0
-                          : event.key === 'End'
-                            ? buttons.length - 1
-                            : Math.max(
-                                0,
-                                Math.min(
-                                  buttons.length - 1,
-                                  index + (event.key === 'ArrowDown' ? 1 : -1)
-                                )
-                              );
-                      buttons[next]?.focus();
-                    } else if (event.key === 'ArrowRight' && entry.isFolder) {
-                      event.preventDefault();
-                      if (!isExpanded) toggleFolder(entry.id);
-                      else buttons[index + 1]?.focus();
-                    } else if (
-                      event.key === 'ArrowLeft' &&
-                      entry.isFolder &&
-                      isExpanded
-                    ) {
-                      event.preventDefault();
-                      toggleFolder(entry.id);
-                    } else if (event.key === 'ArrowLeft' && depth > 0) {
-                      event.preventDefault();
-                      const parent = event.currentTarget
-                        .closest('ul[role="group"]')
-                        ?.closest('li[role="treeitem"]');
-                      parent
-                        ?.querySelector<HTMLButtonElement>(
-                          ':scope > .file-explorer-row .file-explorer-select'
-                        )
-                        ?.focus();
-                    }
-                  }}
-                >
-                  <Icon
-                    className="file-explorer-icon"
-                    icon={getFileIcon(entry, isExpanded)}
-                    aria-hidden="true"
-                  />
-                  <span
-                    className={`file-explorer-name${diagnostic ? ` has-${diagnostic}` : ''}`}
-                  >
-                    {entry.name}
-                  </span>
-                  {diagnostic && (
-                    <span
-                      className={`file-explorer-diagnostic is-${diagnostic}`}
-                      aria-hidden="true"
-                    />
-                  )}
-                </button>
-              )}
-              {!isRenaming && (
-                <div className="file-explorer-actions">
-                  {entry.isFolder && (
-                    <>
-                      <button
-                        type="button"
-                        title="New file"
-                        aria-label="New file"
-                        disabled={!canEdit}
-                        onClick={() => {
-                          startCreate(entry.id, false);
-                        }}
-                      >
-                        ＋
-                      </button>
-                      <button
-                        type="button"
-                        title="New folder"
-                        aria-label="New folder"
-                        disabled={!canEdit}
-                        onClick={() => {
-                          startCreate(entry.id, true);
-                        }}
-                      >
-                        ▣
-                      </button>
-                    </>
-                  )}
-                  <button
-                    type="button"
-                    title={`Rename ${entry.name}`}
-                    aria-label={`Rename ${entry.name}`}
-                    disabled={!canEdit}
-                    onClick={() => startRename(entry)}
-                  >
-                    ✎
-                  </button>
-                  <button
-                    type="button"
-                    title={`Delete ${entry.name}`}
-                    aria-label={`Delete ${entry.name}`}
-                    disabled={!canEdit}
-                    onClick={() => onDelete(entry)}
-                  >
-                    ×
-                  </button>
-                </div>
-              )}
-            </div>
-            {isRenaming && editError && (
-              <div className="file-explorer-edit-error" role="alert">
-                {editError}
-              </div>
-            )}
-            {entry.isFolder && isExpanded && (
-              <ul role="group">{renderChildren(entry.id, depth + 1)}</ul>
-            )}
-          </li>
-        );
-      })}
-    </>
-  );
+  const selectEntry = (id: string | null) => {
+    setSelection({ id, activeFileId });
+  };
 
   return (
     <aside className="file-explorer" aria-label="File explorer">
       <div className="file-explorer-heading">
         <span>EXPLORER</span>
-        <div>
-          <button
-            type="button"
-            title="New file"
-            aria-label="New file"
-            disabled={!canEdit}
-            onClick={() => startCreate(null, false)}
-          >
-            ＋
-          </button>
-          <button
-            type="button"
-            title="New folder"
-            aria-label="New folder"
-            disabled={!canEdit}
-            onClick={() => {
-              startCreate(null, true);
-            }}
-          >
-            ▣
-          </button>
-        </div>
       </div>
       <ScrollbarPanel className="file-explorer-scroll-area">
         <ul role="tree" aria-label="Project files">
-          {renderChildren(null)}
+          <li
+            className="file-explorer-root"
+            role="treeitem"
+            aria-expanded={isRootExpanded}
+          >
+            <div
+              className={`file-explorer-row file-explorer-root-row${selectedEntryId === null ? ' is-active' : ''}`}
+            >
+              <button
+                type="button"
+                className="file-explorer-root-select"
+                aria-expanded={isRootExpanded}
+                onClick={() => {
+                  selectEntry(null);
+                  setRootExpanded((expanded) => !expanded);
+                }}
+              >
+                <Icon
+                  className="file-explorer-icon"
+                  icon={`vscode-icons:default-folder${isRootExpanded ? '-opened' : ''}`}
+                  aria-hidden="true"
+                />
+                <span>SYNCODE</span>
+              </button>
+              <div className="file-explorer-actions is-visible">
+                <ExplorerActionButton
+                  kind="new-file"
+                  label="New file"
+                  disabled={!canEdit}
+                  onClick={() => startCreate(null, false)}
+                />
+                <ExplorerActionButton
+                  kind="new-folder"
+                  label="New folder"
+                  disabled={!canEdit}
+                  onClick={() => startCreate(null, true)}
+                />
+              </div>
+            </div>
+            {isRootExpanded && (
+              <ul role="group">
+                <FileExplorerTree
+                  parentId={null}
+                  depth={0}
+                  childrenByParent={childrenByParent}
+                  selectedEntryId={selectedEntryId}
+                  canEdit={canEdit}
+                  expandedFolders={expandedFolders}
+                  diagnosticsByEntry={diagnosticsByEntry}
+                  editing={editing}
+                  draftName={draftName}
+                  editError={editError}
+                  renderNameInput={renderNameInput}
+                  onToggleFolder={(id) => {
+                    selectEntry(id);
+                    toggleFolder(id);
+                  }}
+                  onStartCreate={startCreate}
+                  onStartRename={startRename}
+                  onDelete={onDelete}
+                  onSelect={(id) => {
+                    selectEntry(id);
+                    onSelect(id);
+                  }}
+                />
+              </ul>
+            )}
+          </li>
         </ul>
       </ScrollbarPanel>
     </aside>
