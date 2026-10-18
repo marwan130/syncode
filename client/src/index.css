@@ -1431,7 +1431,7 @@ code {
   gap: 10px;
 }
 
-.room-header-right > *,
+.room-header-right>*,
 .room-header .theme-picker,
 .room-header .profile-anchor {
   display: inline-flex;
@@ -1806,14 +1806,14 @@ code {
   background: var(--app-bg);
 }
 
-.chat-panel h2 {
-  margin: 0;
-}
-
-.chat-messages {
-  flex: 1;
+.conversation-scroll-area {
+  flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
+}
+
+.chat-panel h2 {
+  margin: 0;
 }
 
 .syncode-scrollbar-panel {
@@ -1935,28 +1935,36 @@ code {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 10px;
+  box-sizing: border-box;
+  padding: 10px 8px;
   border-top: 1px solid var(--border);
 }
 
 .chat-composer {
   position: relative;
+  width: 100%;
+  box-sizing: border-box;
 }
 
-.chat-form textarea {
+.chat-message-input {
   width: 100%;
   box-sizing: border-box;
   resize: none;
-  min-height: 36px;
-  padding: 7px 40px 7px 9px;
+  overflow-y: auto;
+  scrollbar-width: none;
+  padding: 8px 40px 8px 12px;
   color: var(--text);
   background: var(--control-bg);
   border: 1px solid var(--border);
-  border-radius: 0;
-  font: 13px/1.4 var(--sans);
+  border-radius: 2px;
+  font: 13px/16px var(--sans);
 }
 
-.chat-form textarea:focus {
+.chat-message-input::-webkit-scrollbar {
+  display: none;
+}
+
+.chat-message-input:focus {
   outline: none;
   border-color: var(--border);
   box-shadow: none;
@@ -1964,14 +1972,15 @@ code {
 
 .chat-form button {
   position: absolute;
-  right: 5px;
+  right: 0;
   top: 50%;
   transform: translateY(-50%);
   display: grid;
-  width: 28px;
-  height: 28px;
+  width: auto;
+  height: 32px;
   place-items: center;
-  padding: 0;
+  padding: 0 12px;
+  font-size: 16px;
   color: var(--text-muted);
   background: transparent;
   border: 0;
@@ -1979,8 +1988,10 @@ code {
 }
 
 .chat-form button svg {
-  width: 17px;
-  height: 17px;
+  display: block;
+  width: 1em;
+  height: 1em;
+  transform: translateY(-1px);
 }
 
 .chat-form button:hover:not(:disabled),
