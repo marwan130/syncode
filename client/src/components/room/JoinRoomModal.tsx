@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import type { RefObject } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useOutsidePointerDismiss } from '../../hooks/useOutsidePointerDismiss';
-import { isValidRoomAccessKey } from '../../utils/roomInvites';
+import { parseRoomInvite } from '../../utils/roomInvites';
 import {
   getOrCreateParticipantId,
   getStoredDisplayName,
@@ -54,37 +54,24 @@ export function JoinRoomModal({
       return;
     }
 
-    let invite: URL;
-    try {
-      invite = new URL(
-        inviteLink.trim().startsWith('/') ||
-          inviteLink.trim().startsWith('http')
-          ? inviteLink.trim()
-          : `/room/${inviteLink.trim()}`,
-        window.location.origin
-      );
-    } catch {
-      setError('Enter a valid room invite link.');
-      return;
-    }
-
-    const roomId = invite.pathname.match(/\/room\/([a-zA-Z0-9_-]+)\/?$/)?.[1];
-    const accessKey =
-      new URLSearchParams(invite.hash.slice(1)).get('key') ?? '';
-    if (!roomId || !isValidRoomAccessKey(accessKey)) {
+    const invite = parseRoomInvite(inviteLink);
+    if (!invite) {
       setError('Use a complete room invite link.');
       return;
     }
-    if (roomId === currentRoomId) {
+    if (invite.roomId === currentRoomId) {
       setError('You are already in this room.');
       return;
     }
 
     submittedRef.current = true;
-    setStoredDisplayName(roomId, getStoredDisplayName(roomId) ?? currentName);
-    setStoredColor(currentColor, getOrCreateParticipantId(roomId));
+    setStoredDisplayName(
+      invite.roomId,
+      getStoredDisplayName(invite.roomId) ?? currentName
+    );
+    setStoredColor(currentColor, getOrCreateParticipantId(invite.roomId));
     onClose();
-    navigate(`/room/${roomId}#key=${accessKey}`);
+    navigate(`/room/${invite.roomId}#key=${invite.accessKey}`);
   };
 
   return (

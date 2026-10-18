@@ -11,7 +11,7 @@ import EditorComponent from './components/editor/Editor';
 import { RoomJoin } from './components/room/RoomJoin';
 import type { RoomProfileForm } from './components/room/RoomJoin';
 import { ThemeInitializer } from './components/editor/ThemePicker';
-import { isValidRoomAccessKey } from './utils/roomInvites';
+import { isValidRoomAccessKey, parseRoomInvite } from './utils/roomInvites';
 import {
   createSiteId,
   getStoredDisplayName,
@@ -55,32 +55,18 @@ function Home() {
       return;
     }
 
-    let inviteUrl: URL;
-    try {
-      inviteUrl = new URL(
-        inviteLink.startsWith('/') || inviteLink.startsWith('http')
-          ? inviteLink
-          : `/room/${inviteLink}`,
-        window.location.origin
-      );
-    } catch {
-      setError('Enter a valid room invite link.');
-      return;
-    }
-    const roomId = inviteUrl.pathname.match(
-      /\/room\/([a-zA-Z0-9_-]+)\/?$/
-    )?.[1];
-    const accessKey =
-      new URLSearchParams(inviteUrl.hash.slice(1)).get('key') ?? '';
-    if (!roomId || !isValidRoomAccessKey(accessKey)) {
+    const invite = parseRoomInvite(inviteLink);
+    if (!invite) {
       setError('Use a complete room invite link with its access key.');
       return;
     }
-    const name = getStoredDisplayName(roomId) ?? displayName;
-    const participantId = getOrCreateParticipantId(roomId);
-    setStoredDisplayName(roomId, name);
+    const name = getStoredDisplayName(invite.roomId) ?? displayName;
+    const participantId = getOrCreateParticipantId(invite.roomId);
+    setStoredDisplayName(invite.roomId, name);
     setStoredColor(color, participantId);
-    navigate(`/room/${roomId}#key=${accessKey}`, { replace: true });
+    navigate(`/room/${invite.roomId}#key=${invite.accessKey}`, {
+      replace: true,
+    });
   }
 
   return (
@@ -97,6 +83,7 @@ function Home() {
       {error && <p role="alert">{error}</p>}
       {intent && (
         <RoomJoin
+          key={intent}
           mode={intent}
           presentation="dialog"
           onClose={() => setIntent(null)}

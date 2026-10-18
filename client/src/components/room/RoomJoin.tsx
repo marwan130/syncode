@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import { isValidRoomAccessKey } from '../../utils/roomInvites';
+import { useRef, useState } from 'react';
+import { getRoomIdFromInvite, parseRoomInvite } from '../../utils/roomInvites';
 import {
   CURSOR_COLORS,
   getStoredColor,
@@ -47,31 +47,14 @@ export function RoomJoin({
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const submittingRef = useRef(false);
-  let linkedRoomId = '';
-  if (mode === 'join' && inviteLink) {
-    try {
-      linkedRoomId =
-        new URL(
-          inviteLink.startsWith('/') || inviteLink.startsWith('http')
-            ? inviteLink
-            : `/room/${inviteLink}`,
-          window.location.origin
-        ).pathname.match(/\/room\/([a-zA-Z0-9_-]+)\/?$/)?.[1] ?? '';
-    } catch {
-      linkedRoomId = '';
-    }
-  }
+  const linkedRoomId =
+    mode === 'join' ? (getRoomIdFromInvite(inviteLink) ?? '') : '';
   const lockedName =
     mode === 'profile'
       ? defaultName
       : linkedRoomId
         ? (getStoredDisplayName(linkedRoomId) ?? '')
         : '';
-
-  useEffect(() => {
-    setName(defaultName);
-    setError('');
-  }, [defaultName, roomId]);
 
   const chooseColor = (color: string) => {
     setSelectedColor(color);
@@ -101,28 +84,13 @@ export function RoomJoin({
       return;
     }
     if (mode === 'join') {
-      try {
-        const invite = new URL(
-          inviteLink.startsWith('/') || inviteLink.startsWith('http')
-            ? inviteLink
-            : `/room/${inviteLink}`,
-          window.location.origin
-        );
-        const linkedRoom = invite.pathname.match(
-          /\/room\/([a-zA-Z0-9_-]+)\/?$/
-        )?.[1];
-        const accessKey =
-          new URLSearchParams(invite.hash.slice(1)).get('key') ?? '';
-        if (!linkedRoom || !isValidRoomAccessKey(accessKey)) {
-          setError('Use a complete room invite link.');
-          return;
-        }
-        if (linkedRoom === currentRoomId) {
-          setError('You are already in this room.');
-          return;
-        }
-      } catch {
-        setError('Enter a valid room invite link.');
+      const invite = parseRoomInvite(inviteLink);
+      if (!invite) {
+        setError('Use a complete room invite link.');
+        return;
+      }
+      if (invite.roomId === currentRoomId) {
+        setError('You are already in this room.');
         return;
       }
     }

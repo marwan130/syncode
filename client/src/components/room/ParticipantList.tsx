@@ -102,6 +102,7 @@ export function ParticipantList({
         </button>
         {isProfileOpen && (
           <RoomJoin
+            key={`${roomId}:${localName}`}
             roomId={roomId}
             colorStorageId={participantId}
             defaultName={localName}
