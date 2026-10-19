@@ -47,7 +47,7 @@ export function Cursors({
     const activeProvider = provider;
     function recompute() {
       const next: RenderedCursor[] = [];
-      const doc = activeProvider.doc;
+      const doc = activeProvider.getDocument(fileId);
 
       for (const [peerId, state] of peers) {
         if (!state.cursor) continue;

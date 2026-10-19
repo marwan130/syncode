@@ -9,6 +9,8 @@ import type { CrdtId } from '../crdt/CrdtId';
 import type { InsertOp, DeleteOp, CrdtOp } from '../crdt/CrdtDocument';
 import { PendingBuffer } from '../crdt/PendingBuffer';
 import type { CursorAnchor } from '../crdt/CursorAnchor';
+import { ProjectTree } from '../crdt/ProjectTree';
+import type { ProjectTreeOperation } from '../crdt/ProjectTree';
 
 function errorMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
@@ -93,17 +95,15 @@ export interface RoomEntry {
 export class SignalRCrdtProvider {
   private documents = new Map<string, CrdtDocument>();
   private buffers = new Map<string, PendingBuffer>();
-  private activeFile = 'main.cpp';
-  private files: RoomEntry[] = [
-    { id: 'main.cpp', name: 'main.cpp', parentId: null, isFolder: false },
-  ];
+  private activeFile = '';
+  private files: RoomEntry[] = [];
+  private projectTree = new ProjectTree('pending');
+  private pendingTreeOperations: ProjectTreeOperation[] = [];
+  private treeFlushPromise: Promise<void> | null = null;
   private roomParticipants: ParticipantInfo[] = [];
   private localEditLocked = false;
   private fileListeners = new Set<(files: RoomEntry[]) => void>();
   private activeFileListeners = new Set<(file: RoomEntry) => void>();
-  public get doc(): CrdtDocument {
-    return this.documentFor(this.activeFile);
-  }
   public get fileList(): RoomEntry[] {
     return this.files;
   }
@@ -164,12 +164,22 @@ export class SignalRCrdtProvider {
     color: string = '#38bdf8'
   ) {
     this.siteId = siteId;
+    this.projectTree = new ProjectTree(siteId);
     this.userId = userId;
     this.roomId = roomId;
     this.accessKey = accessKey;
     this.displayName = displayName;
     this.color = color;
-    this.documentFor(this.activeFile);
+    this.projectTree = ProjectTree.fromEntries(siteId, this.files);
+    this.pendingTreeOperations = this.readPendingTreeOperations();
+    for (const operation of this.pendingTreeOperations) {
+      try {
+        this.projectTree.applyOperation(operation);
+      } catch {
+        /* Invalid local cache is discarded below. */
+      }
+    }
+    this.files = this.projectTree.getEntries();
 
     this.connection = new HubConnectionBuilder()
       .withUrl(`${serverUrl}/collabhub`)
@@ -236,6 +246,7 @@ export class SignalRCrdtProvider {
   }
 
   private documentFor(fileId: string): CrdtDocument {
+    if (!fileId) throw new Error('A file must be selected.');
     let doc = this.documents.get(fileId);
     if (!doc) {
       doc = new CrdtDocument(this.siteId);
@@ -272,21 +283,31 @@ export class SignalRCrdtProvider {
     parentId: string | null,
     isFolder: boolean
   ): Promise<string> {
-    const id = await this.connection.invoke<string>(
-      'CreateEntry',
-      this.roomId,
+    const id = crypto.randomUUID().replaceAll('-', '');
+    const operation = this.projectTree.createEntry({
+      id,
       name,
       parentId,
-      isFolder
-    );
+      isFolder,
+    });
+    await this.submitTreeOperation(operation);
     if (!isFolder) this.setActiveFile(id);
     return id;
   }
   public async renameEntry(entryId: string, name: string): Promise<void> {
-    await this.connection.invoke('RenameEntry', this.roomId, entryId, name);
+    const operation = this.projectTree.renameEntry(entryId, name);
+    await this.submitTreeOperation(operation);
+  }
+  public async moveEntry(
+    entryId: string,
+    parentId: string | null
+  ): Promise<void> {
+    const operation = this.projectTree.moveEntry(entryId, parentId);
+    await this.submitTreeOperation(operation);
   }
   public async deleteEntry(entryId: string): Promise<void> {
-    await this.connection.invoke('DeleteEntry', this.roomId, entryId);
+    const operation = this.projectTree.deleteEntry(entryId);
+    await this.submitTreeOperation(operation);
   }
   public async toggleParticipantEditLock(connectionId: string): Promise<void> {
     await this.connection.invoke(
@@ -322,12 +343,114 @@ export class SignalRCrdtProvider {
       if (!file.isFolder) this.documentFor(file.id);
     }
     if (!files.some((file) => file.id === this.activeFile && !file.isFolder))
-      this.activeFile = files.find((file) => !file.isFolder)?.id ?? 'main.cpp';
+      this.activeFile = files.find((file) => !file.isFolder)?.id ?? '';
     this.fileListeners.forEach((listener) => listener([...files]));
     const active = files.find((file) => file.id === this.activeFile);
     if (active)
       this.activeFileListeners.forEach((listener) => listener(active));
     this.emitChange();
+  }
+
+  private applyTreeOperation(operation: ProjectTreeOperation): void {
+    this.projectTree.applyOperation(operation);
+    this.updateFiles(this.projectTree.getEntries());
+  }
+
+  private async submitTreeOperation(
+    operation: ProjectTreeOperation
+  ): Promise<void> {
+    this.applyTreeOperation(operation);
+    if (
+      !this.pendingTreeOperations.some(
+        (pending) =>
+          pending.opId.siteId === operation.opId.siteId &&
+          pending.opId.counter === operation.opId.counter
+      )
+    ) {
+      this.pendingTreeOperations.push(operation);
+      this.savePendingTreeOperations();
+    }
+    await this.flushTreeOperations();
+  }
+
+  private flushTreeOperations(): Promise<void> {
+    if (this.connection.state !== HubConnectionState.Connected)
+      return Promise.resolve();
+    if (this.treeFlushPromise) return this.treeFlushPromise;
+    this.treeFlushPromise = this.syncPendingTreeOperations().finally(() => {
+      this.treeFlushPromise = null;
+    });
+    return this.treeFlushPromise;
+  }
+
+  private async syncPendingTreeOperations(): Promise<void> {
+    while (
+      this.pendingTreeOperations.length > 0 &&
+      this.connection.state === HubConnectionState.Connected
+    ) {
+      const operation = this.pendingTreeOperations[0];
+      try {
+        await this.connection.invoke(
+          'ApplyProjectTreeOperation',
+          this.roomId,
+          operation
+        );
+        this.pendingTreeOperations = this.pendingTreeOperations.filter(
+          (pending) =>
+            pending.opId.siteId !== operation.opId.siteId ||
+            pending.opId.counter !== operation.opId.counter
+        );
+        this.savePendingTreeOperations();
+      } catch (error) {
+        this.projectTree.removeOperation(operation.opId);
+        this.pendingTreeOperations = this.pendingTreeOperations.filter(
+          (pending) =>
+            pending.opId.siteId !== operation.opId.siteId ||
+            pending.opId.counter !== operation.opId.counter
+        );
+        this.updateFiles(this.projectTree.getEntries());
+        this.savePendingTreeOperations();
+        console.error(
+          '[SignalRCrdtProvider] Failed to sync project tree operation:',
+          errorMessage(error)
+        );
+        throw error;
+      }
+    }
+  }
+
+  private pendingTreeStorageKey(): string {
+    return `syncode:project-tree-pending:${this.roomId}`;
+  }
+
+  private readPendingTreeOperations(): ProjectTreeOperation[] {
+    try {
+      const value = localStorage.getItem(this.pendingTreeStorageKey());
+      if (!value) return [];
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? (parsed as ProjectTreeOperation[]) : [];
+    } catch {
+      try {
+        localStorage.removeItem(this.pendingTreeStorageKey());
+      } catch {
+        /* Browser storage can be disabled. */
+      }
+      return [];
+    }
+  }
+
+  private savePendingTreeOperations(): void {
+    try {
+      if (this.pendingTreeOperations.length === 0)
+        localStorage.removeItem(this.pendingTreeStorageKey());
+      else
+        localStorage.setItem(
+          this.pendingTreeStorageKey(),
+          JSON.stringify(this.pendingTreeOperations)
+        );
+    } catch {
+      // The in-memory queue remains active if browser storage is unavailable.
+    }
   }
 
   public localDelete(id: CrdtId, fileId = this.activeFile): DeleteOp {
@@ -493,24 +616,39 @@ export class SignalRCrdtProvider {
       }
     );
 
-    this.connection.on('RoomFiles', (files: RoomEntry[]) =>
-      this.updateFiles(files)
-    );
-    this.connection.on('FileAdded', (file: RoomEntry) =>
-      this.updateFiles([...this.files, file])
-    );
-    this.connection.on('FileRenamed', (id: string, name: string) =>
-      this.updateFiles(
-        this.files.map((file) => (file.id === id ? { ...file, name } : file))
-      )
-    );
-    this.connection.on('FileDeleted', (deletedIds: string[]) => {
-      const ids = new Set(
-        Array.isArray(deletedIds) ? deletedIds : [deletedIds]
-      );
-      this.updateFiles(this.files.filter((entry) => !ids.has(entry.id)));
+    this.connection.on('RoomFiles', (files: RoomEntry[]) => {
+      const localSnapshot = this.projectTree.toSnapshot();
+      this.projectTree = ProjectTree.fromEntries(this.siteId, files);
+      try {
+        this.projectTree.fromSnapshot(localSnapshot);
+      } catch {
+        /* Initial local state may be empty. */
+      }
+      this.updateFiles(this.projectTree.getEntries());
     });
-
+    this.connection.on(
+      'ProjectTreeHistory',
+      (operations: ProjectTreeOperation[]) => {
+        for (const operation of operations ?? [])
+          this.applyTreeOperation(operation);
+        void this.flushTreeOperations().catch(() => {});
+      }
+    );
+    this.connection.on('ProjectTreeSnapshot', (snapshot: string) => {
+      try {
+        this.projectTree.fromSnapshot(snapshot);
+        this.updateFiles(this.projectTree.getEntries());
+      } catch (err) {
+        console.error(
+          '[SignalRCrdtProvider] Failed to load project tree snapshot:',
+          errorMessage(err)
+        );
+      }
+    });
+    this.connection.on(
+      'ProjectTreeOperation',
+      (operation: ProjectTreeOperation) => this.applyTreeOperation(operation)
+    );
     this.connection.on(
       'LoadFileSnapshot',
       (fileId: string, snapshotJson: string) => {
@@ -623,6 +761,7 @@ export class SignalRCrdtProvider {
     this.connection.onreconnected(async () => {
       try {
         await this.joinCurrentRoom();
+        await this.flushTreeOperations();
         this.emitStatus('connected');
       } catch (err) {
         this.emitStatus('disconnected');
