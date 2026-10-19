@@ -38,6 +38,8 @@ public sealed class ExecutionServiceClient(HttpClient httpClient, IConfiguration
         string language,
         string source,
         string requestId,
+        string sourcePath,
+        IReadOnlyList<ExecutionProjectFile> projectFiles,
         CancellationToken cancellationToken)
     {
         using var request = CreateTerminalRequest(HttpMethod.Post, "api/executions");
@@ -47,6 +49,8 @@ public sealed class ExecutionServiceClient(HttpClient httpClient, IConfiguration
             requestedBy,
             language,
             source,
+            sourcePath,
+            projectFiles,
             requestId,
         });
 
@@ -154,6 +158,7 @@ public sealed class ExecutionServiceClient(HttpClient httpClient, IConfiguration
 }
 
 public sealed record ExecutionSubmissionResult(string JobId, int QueuePosition);
+public sealed record ExecutionProjectFile(string Path, string Content);
 public sealed record TerminalSessionStartResult(string SessionId);
 public sealed record TerminalOutputResult(string Text, int Offset, bool Exited, int? ExitCode);
 

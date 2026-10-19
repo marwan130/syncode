@@ -39,6 +39,8 @@ public sealed class ContainerRunner
         var sourceBytes = Encoding.UTF8.GetByteCount(job.Source);
         if (sourceBytes > _limits.MaxSourceBytes)
             throw new ArgumentException($"Source exceeds the {_limits.MaxSourceBytes}-byte limit.", nameof(job));
+        if (job.ProjectFiles is { } projectFiles)
+            ValidateProjectFiles(job, projectFiles, sourceBytes);
 
         var (image, sourceName) = job.Language switch
         {
@@ -55,12 +57,33 @@ public sealed class ContainerRunner
 
         var containerName = $"syncode-exec-{Guid.NewGuid():N}";
         var sourceDirectory = Path.Combine(Path.GetTempPath(), containerName);
-        var sourcePath = Path.Combine(sourceDirectory, sourceName);
         Directory.CreateDirectory(sourceDirectory);
 
         try
         {
-            await File.WriteAllTextAsync(sourcePath, job.Source, new UTF8Encoding(false), cancellationToken);
+            if (job.ProjectFiles is { Count: > 0 })
+            {
+                foreach (var file in job.ProjectFiles)
+                {
+                    if (file.Path == job.SourcePath) continue;
+                    var relativePath = ValidateProjectPath(file.Path);
+                    var projectPath = Path.GetFullPath(Path.Combine(sourceDirectory, relativePath));
+                    if (!projectPath.StartsWith(sourceDirectory + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+                        throw new ArgumentException("Project file path is outside the execution workspace.", nameof(job));
+                    Directory.CreateDirectory(Path.GetDirectoryName(projectPath)!);
+                    await File.WriteAllTextAsync(projectPath, file.Content, new UTF8Encoding(false), cancellationToken);
+                }
+                var selectedPath = Path.GetFullPath(Path.Combine(sourceDirectory, ValidateProjectPath(job.SourcePath)));
+                if (!selectedPath.StartsWith(sourceDirectory + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+                    throw new ArgumentException("Selected source path is outside the execution workspace.", nameof(job));
+                Directory.CreateDirectory(Path.GetDirectoryName(selectedPath)!);
+                await File.WriteAllTextAsync(selectedPath, job.Source, new UTF8Encoding(false), cancellationToken);
+            }
+            var sourcePath = job.ProjectFiles is { Count: > 0 }
+                ? Path.GetFullPath(Path.Combine(sourceDirectory, ValidateProjectPath(job.SourcePath)))
+                : Path.Combine(sourceDirectory, sourceName);
+            if (job.ProjectFiles is not { Count: > 0 })
+                await File.WriteAllTextAsync(sourcePath, job.Source, new UTF8Encoding(false), cancellationToken);
             _activeContainers.Add(containerName);
 
             var outputBytes = 0;
@@ -70,7 +93,8 @@ public sealed class ContainerRunner
             using var timeout = new CancellationTokenSource(_limits.Timeout);
             using var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
 
-            var arguments = BuildRunArguments(containerName, image, sourcePath, sourceName);
+            var arguments = BuildRunArguments(containerName, image, sourcePath, sourceName,
+                job.ProjectFiles is { Count: > 0 }, job.SourcePath, sourceDirectory);
             int exitCode;
             try
             {
@@ -118,8 +142,17 @@ public sealed class ContainerRunner
         }
     }
 
-    private IReadOnlyList<string> BuildRunArguments(string name, string image, string sourcePath, string sourceName) =>
-    [
+    private IReadOnlyList<string> BuildRunArguments(
+        string name,
+        string image,
+        string sourcePath,
+        string sourceName,
+        bool mountProjectDirectory,
+        string projectSourcePath,
+        string sourceDirectory)
+    {
+        var arguments = new List<string>
+        {
         "run", "--name", name,
         "--interactive",
         "--pull=never",
@@ -135,16 +168,46 @@ public sealed class ContainerRunner
         "--cap-drop=ALL",
         "--security-opt=no-new-privileges",
         "--user", $"{RunnerUserId}:{RunnerUserId}",
-        "--mount", BuildMountSpecification(sourcePath, sourceName),
+        "--env", $"SYNCODE_SOURCE_PATH={projectSourcePath}",
+        "--mount", BuildMountSpecification(mountProjectDirectory ? sourceDirectory : sourcePath,
+            mountProjectDirectory ? "/workspace" : $"/workspace/{sourceName}"),
         image
-    ];
+        };
+        return arguments;
+    }
 
-    private static string BuildMountSpecification(string sourcePath, string sourceName)
+    private static string BuildMountSpecification(string sourcePath, string target)
     {
         var sourceField = $"source={sourcePath}";
         if (sourcePath.Contains(','))
             sourceField = $"\"{sourceField}\"";
-        return $"type=bind,{sourceField},target=/workspace/{sourceName},readonly";
+        return $"type=bind,{sourceField},target={target},readonly";
+    }
+
+    private static string ValidateProjectPath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || path.Length > 512 || Path.IsPathRooted(path) ||
+            path.Contains('\\') || path.Any(char.IsControl))
+            throw new ArgumentException("Invalid project file path.", nameof(path));
+        var segments = path.Split('/');
+        if (segments.Any(segment => segment.Length == 0 || segment is "." or ".." ||
+                segment.IndexOfAny([ ':', '*', '?', '"', '<', '>', '|' ]) >= 0))
+            throw new ArgumentException("Invalid project file path.", nameof(path));
+        return Path.Combine(segments);
+    }
+
+    private void ValidateProjectFiles(ExecutionJob job, IReadOnlyList<ExecutionProjectFile> files, int sourceBytes)
+    {
+        if (files.Count is < 1 or > 500 || files.Any(file => file is null || file.Content is null || string.IsNullOrEmpty(file.Path)) ||
+            files.Select(file => file.Path).Distinct(StringComparer.Ordinal).Count() != files.Count ||
+            !files.Any(file => file.Path == job.SourcePath))
+            throw new ArgumentException("Project files exceed the execution limits or contain invalid paths.", nameof(job));
+
+        foreach (var file in files) ValidateProjectPath(file.Path);
+        var projectBytes = files.Sum(file => (long)Encoding.UTF8.GetByteCount(file.Content));
+        var selectedBytes = Encoding.UTF8.GetByteCount(files.First(file => file.Path == job.SourcePath).Content);
+        if (projectBytes - selectedBytes + sourceBytes > _limits.MaxSourceBytes)
+            throw new ArgumentException("Project files exceed the execution source limit.", nameof(job));
     }
 
     private async Task StopAndRemoveAsync(string containerName)

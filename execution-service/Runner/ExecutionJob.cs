@@ -19,7 +19,11 @@ public sealed record ExecutionJob(
     ExecutionLanguage Language,
     string Source,
     DateTimeOffset CreatedAt,
-    string RequestId = "");
+    string RequestId = "",
+    string SourcePath = "",
+    IReadOnlyList<ExecutionProjectFile>? ProjectFiles = null);
+
+public sealed record ExecutionProjectFile(string Path, string Content);
 
 public enum ExecutionOutputStream
 {

@@ -69,6 +69,11 @@ export interface ExecutionEvent {
   outputLimitExceeded?: boolean;
 }
 
+export interface ExecutionProjectFile {
+  path: string;
+  content: string;
+}
+
 interface ExecutionSubmission {
   jobId: string;
   queuePosition: number;
@@ -500,13 +505,17 @@ export class SignalRCrdtProvider {
   public async runExecution(
     language: ExecutionLanguage,
     source: string,
-    requestId: string
+    requestId: string,
+    sourcePath: string,
+    projectFiles: ExecutionProjectFile[]
   ): Promise<ExecutionSubmission> {
     return this.connection.invoke<ExecutionSubmission>(
       'RunExecution',
       language,
       source,
-      requestId
+      requestId,
+      sourcePath,
+      projectFiles
     );
   }
 

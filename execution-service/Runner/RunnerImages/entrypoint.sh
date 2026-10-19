@@ -8,36 +8,42 @@ fi
 
 case "${RUNNER_RUNTIME:-}" in
   node)
-    [ -f /workspace/main.js ] && [ -r /workspace/main.js ] || {
+    source_path="${SYNCODE_SOURCE_PATH:-main.js}"
+    [ -f "/workspace/$source_path" ] && [ -r "/workspace/$source_path" ] || {
       printf '%s\n' 'The mounted source file is missing or unreadable.' >&2
       exit 66
     }
-    exec node /workspace/main.js
+    exec node "/workspace/$source_path"
     ;;
   typescript)
-    [ -f /workspace/main.ts ] && [ -r /workspace/main.ts ] || {
+    source_path="${SYNCODE_SOURCE_PATH:-main.ts}"
+    [ -f "/workspace/$source_path" ] && [ -r "/workspace/$source_path" ] || {
       printf '%s\n' 'The mounted source file is missing or unreadable.' >&2
       exit 66
     }
     mkdir -p /runner/tmp /runner/out
     tsc --target ES2022 --module node16 --moduleResolution node16 --skipLibCheck \
-      --typeRoots /usr/local/lib/node_modules/@types --outDir /runner/out /workspace/main.ts
-    exec node /runner/out/main.js
+      --typeRoots /usr/local/lib/node_modules/@types --rootDir /workspace --outDir /runner/out "/workspace/$source_path"
+    output_path="${source_path%.ts}.js"
+    exec node "/runner/out/$output_path"
     ;;
   python)
-    [ -f /workspace/main.py ] && [ -r /workspace/main.py ] || {
+    source_path="${SYNCODE_SOURCE_PATH:-main.py}"
+    [ -f "/workspace/$source_path" ] && [ -r "/workspace/$source_path" ] || {
       printf '%s\n' 'The mounted source file is missing or unreadable.' >&2
       exit 66
     }
-    exec python3 /workspace/main.py
+    exec python3 "/workspace/$source_path"
     ;;
   csharp)
-    [ -f /workspace/Program.cs ] && [ -r /workspace/Program.cs ] || {
+    source_path="${SYNCODE_SOURCE_PATH:-Program.cs}"
+    [ -f "/workspace/$source_path" ] && [ -r "/workspace/$source_path" ] || {
       printf '%s\n' 'The mounted source file is missing or unreadable.' >&2
       exit 66
     }
     mkdir -p /runner/tmp /runner/dotnet
-    cp /workspace/Program.cs /runner/Program.cs
+    find /workspace -type f -name '*.cs' ! -path "/workspace/$source_path" ! -path /workspace/Program.cs -exec cp --parents {} /runner \;
+    cp "/workspace/$source_path" /runner/Program.cs
     cat > /runner/main.csproj <<'EOF'
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
@@ -57,39 +63,45 @@ EOF
     exec dotnet /runner/out/main.dll
     ;;
   c)
-    [ -f /workspace/main.c ] && [ -r /workspace/main.c ] || {
+    source_path="${SYNCODE_SOURCE_PATH:-main.c}"
+    [ -f "/workspace/$source_path" ] && [ -r "/workspace/$source_path" ] || {
       printf '%s\n' 'The mounted source file is missing or unreadable.' >&2
       exit 66
     }
     mkdir -p /runner/tmp
-    gcc -std=c17 -O0 -pipe /workspace/main.c -o /runner/main
+    find /workspace -type f -name '*.c' ! -path "/workspace/$source_path" -print0 |
+      xargs -0 gcc -std=c17 -O0 -pipe -o /runner/main "/workspace/$source_path"
     exec /runner/main
     ;;
   cpp)
-    [ -f /workspace/main.cpp ] && [ -r /workspace/main.cpp ] || {
+    source_path="${SYNCODE_SOURCE_PATH:-main.cpp}"
+    [ -f "/workspace/$source_path" ] && [ -r "/workspace/$source_path" ] || {
       printf '%s\n' 'The mounted source file is missing or unreadable.' >&2
       exit 66
     }
     mkdir -p /runner/tmp
-    g++ -std=c++20 -O0 -pipe /workspace/main.cpp -o /runner/main
+    find /workspace -type f \( -name '*.cpp' -o -name '*.cc' -o -name '*.cxx' \) ! -path "/workspace/$source_path" -print0 |
+      xargs -0 g++ -std=c++20 -O0 -pipe -o /runner/main "/workspace/$source_path"
     exec /runner/main
     ;;
   rust)
-    [ -f /workspace/main.rs ] && [ -r /workspace/main.rs ] || {
+    source_path="${SYNCODE_SOURCE_PATH:-main.rs}"
+    [ -f "/workspace/$source_path" ] && [ -r "/workspace/$source_path" ] || {
       printf '%s\n' 'The mounted source file is missing or unreadable.' >&2
       exit 66
     }
     mkdir -p /runner/tmp
-    rustc --edition=2024 /workspace/main.rs -o /runner/main
+    rustc --edition=2024 "/workspace/$source_path" -o /runner/main
     exec /runner/main
     ;;
   java)
-    [ -f /workspace/Main.java ] && [ -r /workspace/Main.java ] || {
+    source_path="${SYNCODE_SOURCE_PATH:-Main.java}"
+    [ -f "/workspace/$source_path" ] && [ -r "/workspace/$source_path" ] || {
       printf '%s\n' 'The mounted source file is missing or unreadable.' >&2
       exit 66
     }
     mkdir -p /runner/tmp /runner/classes
-    javac -d /runner/classes /workspace/Main.java
+    javac -sourcepath /workspace -d /runner/classes "/workspace/$source_path"
     exec java -Djava.io.tmpdir=/runner/tmp -cp /runner/classes Main
     ;;
   *)

@@ -76,7 +76,9 @@ public class CollabHub : Hub
     public async Task<ExecutionSubmissionResult> RunExecution(
         string language,
         string source,
-        string requestId)
+        string requestId,
+        string sourcePath,
+        IReadOnlyList<ExecutionProjectFile>? projectFiles = null)
     {
         var roomId = await _store.GetConnectionRoomAsync(Context.ConnectionId);
         if (string.IsNullOrEmpty(roomId))
@@ -87,6 +89,22 @@ public class CollabHub : Hub
             throw new HubException("Invalid execution request.");
         if (source is null || Encoding.UTF8.GetByteCount(source) > 64 * 1024)
             throw new HubException("Source must be 64 KB or less.");
+        if (projectFiles is null || projectFiles.Count is < 1 or > 500 ||
+            string.IsNullOrWhiteSpace(sourcePath) || !IsSafeProjectPath(sourcePath))
+            throw new HubException("Invalid project files for execution.");
+        if (!projectFiles.Any(file => file is not null && file.Path == sourcePath))
+            throw new HubException("The active file is missing from the project run.");
+        long projectBytes = 0;
+        var projectPaths = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var file in projectFiles)
+        {
+            if (file is null || !IsSafeProjectPath(file.Path) || file.Content is null || !projectPaths.Add(file.Path))
+                throw new HubException("Invalid project files for execution.");
+            projectBytes += Encoding.UTF8.GetByteCount(file.Content);
+        }
+        var activeProjectFile = projectFiles.First(file => file.Path == sourcePath);
+        if (projectBytes - Encoding.UTF8.GetByteCount(activeProjectFile.Content) + Encoding.UTF8.GetByteCount(source) > 64 * 1024)
+            throw new HubException("Project files must total 64 KB or less to run.");
 
         var executionLanguage = language?.Trim().ToLowerInvariant() switch
         {
@@ -109,6 +127,8 @@ public class CollabHub : Hub
             executionLanguage,
             source,
             requestGuid.ToString("N"),
+            sourcePath,
+            projectFiles,
             Context.ConnectionAborted);
         if (!_terminalSessions.TryAddExecution(Context.ConnectionId, roomId, submission.JobId))
             throw new HubException("Could not attach an interactive terminal to this run.");

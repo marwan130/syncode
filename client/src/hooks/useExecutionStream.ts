@@ -65,7 +65,12 @@ export function useExecutionStream({
   }, [providerRef, status]);
 
   const runCode = useCallback(
-    async (language: ExecutionLanguage, source: string) => {
+    async (
+      language: ExecutionLanguage,
+      source: string,
+      sourcePath: string,
+      projectFiles: { path: string; content: string }[]
+    ) => {
       if (runningRef.current) return;
       const provider = providerRef.current;
       if (!provider || status !== 'connected') {
@@ -86,7 +91,9 @@ export function useExecutionStream({
         const submission = await provider.runExecution(
           language,
           source,
-          requestId
+          requestId,
+          sourcePath,
+          projectFiles
         );
         if (activeRequestId.current !== requestId || !runningRef.current)
           return;

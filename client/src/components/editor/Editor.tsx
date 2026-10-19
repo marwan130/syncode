@@ -161,7 +161,21 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
       return;
     setStartBashOnTerminalOpen(false);
     revealTerminalPanel();
-    void runCode(executionLanguage, monacoEditor.getValue());
+    const projectFiles = entries
+      .filter((entry) => !entry.isFolder)
+      .map((entry) => ({
+        path: getEntryPath(entry, entries),
+        content:
+          entry.id === activeFile?.id
+            ? monacoEditor.getValue()
+            : (providerRef.current?.getFileContent(entry.id) ?? ''),
+      }));
+    void runCode(
+      executionLanguage,
+      monacoEditor.getValue(),
+      activeFilePath,
+      projectFiles
+    );
   }, [
     canRunCode,
     isExecutionRunning,
@@ -170,6 +184,10 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
     monacoEditor,
     runCode,
     revealTerminalPanel,
+    activeFile?.id,
+    activeFilePath,
+    entries,
+    providerRef,
   ]);
 
   useEditorShortcuts({

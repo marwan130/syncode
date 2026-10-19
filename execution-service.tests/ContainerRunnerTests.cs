@@ -126,6 +126,45 @@ public sealed class ContainerRunnerTests
         Assert.Empty(docker.StreamingArguments);
     }
 
+    [Fact]
+    public async Task RunAsync_MountsProjectFilesIntoTheIsolatedWorkspace()
+    {
+        var docker = new FakeDockerCli();
+        var runner = CreateRunner(docker);
+        var job = CreateJob() with
+        {
+            SourcePath = "src/main.js",
+            ProjectFiles =
+            [
+                new ExecutionProjectFile("src/main.js", "console.log(require('./helper'))"),
+                new ExecutionProjectFile("src/helper.js", "module.exports = 'ready'")
+            ]
+        };
+
+        await runner.RunAsync(job, _ => ValueTask.CompletedTask);
+
+        var args = Assert.Single(docker.StreamingArguments);
+        Assert.Contains("SYNCODE_SOURCE_PATH=src/main.js", args);
+        Assert.Contains(args, arg => arg.StartsWith("type=bind,source=", StringComparison.Ordinal) &&
+            arg.Contains(",target=/workspace,readonly", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task RunAsync_RejectsProjectPathTraversalBeforeStartingContainer()
+    {
+        var docker = new FakeDockerCli();
+        var runner = CreateRunner(docker);
+        var job = CreateJob() with
+        {
+            SourcePath = "../main.js",
+            ProjectFiles = [new ExecutionProjectFile("../main.js", "console.log('unsafe')")]
+        };
+
+        await Assert.ThrowsAsync<ArgumentException>(() => runner.RunAsync(job, _ => ValueTask.CompletedTask));
+
+        Assert.Empty(docker.StreamingArguments);
+    }
+
     private static ContainerRunner CreateRunner(FakeDockerCli docker, ResourceLimits? limits = null) =>
         new(docker, new ActiveContainerRegistry(), NullLogger<ContainerRunner>.Instance, limits);
 

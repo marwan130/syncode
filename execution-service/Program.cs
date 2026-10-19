@@ -103,6 +103,14 @@ app.MapPost("/api/executions", async (HttpContext context, QueueExecutionRequest
     if (string.IsNullOrWhiteSpace(request.RoomId) || request.RoomId.Length > 128 ||
         string.IsNullOrWhiteSpace(request.RequestedBy) || request.RequestedBy.Length > 128 ||
         request.Source is null || Encoding.UTF8.GetByteCount(request.Source) > ResourceLimits.Default.MaxSourceBytes ||
+        request.ProjectFiles is null || request.ProjectFiles.Count is < 1 or > 500 ||
+        !IsSafeProjectPath(request.SourcePath) ||
+        !request.ProjectFiles.Any(file => file is not null && file.Path == request.SourcePath) ||
+        request.ProjectFiles.Any(file => file is null || file.Content is null || !IsSafeProjectPath(file.Path)) ||
+        request.ProjectFiles.Select(file => file.Path).Distinct(StringComparer.Ordinal).Count() != request.ProjectFiles.Count ||
+        request.ProjectFiles.Sum(file => (long)Encoding.UTF8.GetByteCount(file.Content)) -
+            Encoding.UTF8.GetByteCount(request.ProjectFiles.First(file => file.Path == request.SourcePath).Content) +
+            Encoding.UTF8.GetByteCount(request.Source) > ResourceLimits.Default.MaxSourceBytes ||
         (request.RequestId is not null && !Guid.TryParse(request.RequestId, out _)) ||
         !Enum.IsDefined(request.Language))
         return Results.BadRequest(new { error = "Invalid execution request." });
@@ -121,7 +129,7 @@ app.MapPost("/api/executions", async (HttpContext context, QueueExecutionRequest
         Guid.NewGuid().ToString("N"), request.RoomId, request.RequestedBy, request.Language,
         request.Source, DateTimeOffset.UtcNow, request.RequestId is null
             ? Guid.NewGuid().ToString("N")
-            : Guid.Parse(request.RequestId).ToString("D"));
+            : Guid.Parse(request.RequestId).ToString("D"), request.SourcePath, request.ProjectFiles);
     var enqueue = await queue.EnqueueOrGetAsync(job, cancellationToken);
     return enqueue.IsFull
         ? Results.Problem("The execution queue is full. Try again shortly.", statusCode: StatusCodes.Status503ServiceUnavailable)
@@ -171,11 +179,21 @@ static bool HasValidApiKey(HttpContext context, string expected)
     return suppliedBytes.Length == expectedBytes.Length && CryptographicOperations.FixedTimeEquals(suppliedBytes, expectedBytes);
 }
 
+static bool IsSafeProjectPath(string path)
+{
+    if (string.IsNullOrWhiteSpace(path) || path.Length > 512 || path.StartsWith('/') ||
+        path.Contains('\\') || path.Any(char.IsControl)) return false;
+    return path.Split('/').All(segment => segment.Length > 0 && segment is not "." and not ".." &&
+        segment.IndexOfAny([ ':', '*', '?', '"', '<', '>', '|' ]) < 0);
+}
+
 public sealed record QueueExecutionRequest(
     string RoomId,
     string RequestedBy,
     ExecutionLanguage Language,
     string Source,
-    string? RequestId = null);
+    string? RequestId = null,
+    string SourcePath = "",
+    IReadOnlyList<ExecutionProjectFile>? ProjectFiles = null);
 
 public sealed record InputRequest(string Input);
