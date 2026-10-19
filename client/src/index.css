@@ -398,6 +398,10 @@ code {
   outline: none;
 }
 
+.editor-drop-placeholder.is-empty {
+  cursor: default;
+}
+
 .editor-file-picker-backdrop {
   position: absolute;
   inset: 0;

@@ -19,13 +19,19 @@ export const EmptyEditorPane: FC<EmptyEditorPaneProps> = ({
 
   return (
     <div className="editor-empty-pane">
-      <button
-        type="button"
-        className="editor-drop-placeholder"
-        onClick={() => setFilePickerOpen(true)}
-      >
-        Select a file to start editing.
-      </button>
+      {files.length ? (
+        <button
+          type="button"
+          className="editor-drop-placeholder"
+          onClick={() => setFilePickerOpen(true)}
+        >
+          Select a file to start editing.
+        </button>
+      ) : (
+        <div className="editor-drop-placeholder is-empty">
+          This workspace is empty. Create a file in the Explorer to start editing.
+        </div>
+      )}
       {isFilePickerOpen && (
         <div
           className="editor-file-picker-backdrop"

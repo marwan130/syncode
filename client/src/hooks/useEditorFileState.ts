@@ -28,9 +28,9 @@ export function useEditorFileState({
   status,
 }: EditorFileStateOptions) {
   const [entries, setEntries] = useState<RoomEntry[]>([]);
-  const [activeFileId, setActiveFileId] = useState('main.cpp');
+  const [activeFileId, setActiveFileId] = useState('');
   const activeFileIdRef = useRef(activeFileId);
-  const [openFileIds, setOpenFileIds] = useState<string[]>(['main.cpp']);
+  const [openFileIds, setOpenFileIds] = useState<string[]>([]);
   const [splitFileId, setSplitFileId] = useState<string | null>(null);
   const [isSplitWorkspaceOpen, setSplitWorkspaceOpen] = useState(false);
   const [activeEditorGroup, setActiveEditorGroup] = useState<
@@ -72,19 +72,17 @@ export function useEditorFileState({
         );
         return;
       }
-      if (
-        next.length &&
-        !next.some(
-          (entry) => entry.id === activeFileIdRef.current && !entry.isFolder
-        )
-      ) {
-        const fallback =
-          next.find((entry) => !entry.isFolder)?.id ?? 'main.cpp';
-        setActiveFileId(fallback);
+      const activeFileStillExists = next.some(
+        (entry) => entry.id === activeFileIdRef.current && !entry.isFolder
+      );
+      if (activeFileStillExists) return;
+
+      const fallback = next.find((entry) => !entry.isFolder);
+      setActiveFileId(fallback?.id ?? '');
+      if (fallback)
         setOpenFileIds((current) =>
-          current.includes(fallback) ? current : [...current, fallback]
+          current.includes(fallback.id) ? current : [...current, fallback.id]
         );
-      }
     });
     const offActive = provider.onActiveFileChange((file) => {
       setActiveFileId(file.id);

@@ -62,7 +62,7 @@ export function useDebouncedPreview({
   activeFileId,
 }: UseDebouncedPreviewProps): PreviewProject {
   const [project, setProject] = useState<PreviewProject>({
-    activeFilePath: 'main.cpp',
+    activeFilePath: '',
     source: '',
     files: [],
   });
@@ -70,7 +70,7 @@ export function useDebouncedPreview({
   useEffect(() => {
     const provider = providerRef.current;
     if (!provider || !enabled) {
-      setProject({ activeFilePath: 'main.cpp', source: '', files: [] });
+      setProject({ activeFilePath: '', source: '', files: [] });
       return;
     }
 
