@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useRef } from 'react';
 import type { DragEvent, FC, RefObject } from 'react';
 import Editor, { type OnMount } from '@monaco-editor/react';
 import type * as monaco from 'monaco-editor';

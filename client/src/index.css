@@ -132,8 +132,7 @@ p {
   margin: 0;
 }
 
-code,
-.counter {
+code {
   font-family: var(--mono);
   display: inline-flex;
   border-radius: 4px;
@@ -193,7 +192,8 @@ code {
   overflow: hidden;
 }
 
-.workbench-main-column {
+.workbench-main-column,
+.editor-region {
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
@@ -206,15 +206,6 @@ code {
   display: flex;
   flex: 0 0 auto;
   min-width: 130px;
-  overflow: hidden;
-}
-
-.editor-region {
-  display: flex;
-  flex: 1 1 auto;
-  flex-direction: column;
-  min-width: 0;
-  min-height: 0;
   overflow: hidden;
 }
 
@@ -499,7 +490,8 @@ code {
   border: 0;
 }
 
-.execution-run-button {
+.execution-run-button,
+.preview-view-button {
   box-sizing: border-box;
   display: inline-flex;
   align-items: center;
@@ -973,11 +965,11 @@ code {
   background: var(--control-bg);
 }
 
-.file-explorer-heading>div {
+.file-explorer-heading > div {
   display: flex;
 }
 
-.file-explorer-heading>span {
+.file-explorer-heading > span {
   color: var(--text-muted);
 }
 
@@ -997,7 +989,12 @@ code {
   margin: 0;
 }
 
-.file-explorer>.file-explorer-scroll-area>.syncode-scrollable-element>.syncode-scrollbar-viewport>.syncode-scrollbar-content>ul[role='tree'] {
+.file-explorer
+  > .file-explorer-scroll-area
+  > .syncode-scrollable-element
+  > .syncode-scrollbar-viewport
+  > .syncode-scrollbar-content
+  > ul[role='tree'] {
   padding-top: 4px;
 }
 
@@ -1415,20 +1412,6 @@ code {
   color: var(--text-h);
 }
 
-.preview-view-button {
-  box-sizing: border-box;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  height: 28px;
-  padding: 0 8px;
-  color: var(--text-muted);
-  background: transparent;
-  border: 0;
-  cursor: pointer;
-  font: 12px/1 var(--sans);
-}
-
 .room-header-left,
 .room-header-right {
   display: flex;
@@ -1443,7 +1426,7 @@ code {
   gap: 10px;
 }
 
-.room-header-right>*,
+.room-header-right > *,
 .room-header .theme-picker,
 .room-header .profile-anchor {
   display: inline-flex;
@@ -1690,17 +1673,6 @@ code {
 
 .profile-popover:not(.profile-dialog) {
   padding-top: 12px;
-}
-
-.profile-field-label {
-  display: block;
-  margin-bottom: 5px;
-  color: var(--text-muted);
-  font-size: 11px;
-}
-
-.profile-color-field-label {
-  margin-top: 12px;
 }
 
 .profile-dialog-backdrop {
