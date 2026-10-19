@@ -3,6 +3,7 @@ using System.Text;
 using server.Models;
 using server.Services;
 using Microsoft.Extensions.Options;
+using System.Text.Json;
 
 namespace server.Hubs;
 
@@ -225,17 +226,22 @@ public class CollabHub : Hub
 
         var files = await _store.GetEntriesAsync(roomId);
         await Clients.Caller.SendAsync("RoomFiles", files);
-        foreach (var file in files.Where(entry => !entry.IsFolder))
+        var projectTreeSnapshot = await _store.GetProjectTreeSnapshotAsync(roomId);
+        if (!string.IsNullOrEmpty(projectTreeSnapshot))
+            await Clients.Caller.SendAsync("ProjectTreeSnapshot", projectTreeSnapshot);
+        await Clients.Caller.SendAsync("ProjectTreeHistory", await _store.GetProjectTreeOperationsAsync(roomId));
+        var fileIds = await _store.GetProjectFileIdsAsync(roomId);
+        foreach (var fileId in fileIds)
         {
-            var fileSnapshot = await _store.GetFileSnapshotAsync(roomId, file.Id);
-            if (string.IsNullOrEmpty(fileSnapshot) && file.Id == "main.cpp")
+            var fileSnapshot = await _store.GetFileSnapshotAsync(roomId, fileId);
+            if (string.IsNullOrEmpty(fileSnapshot) && fileId == "main.cpp")
             {
                 fileSnapshot = await _store.GetSnapshotAsync(roomId);
                 if (!string.IsNullOrEmpty(fileSnapshot))
-                    await _store.SaveFileSnapshotAsync(roomId, file.Id, fileSnapshot);
+                    await _store.SaveFileSnapshotAsync(roomId, fileId, fileSnapshot);
             }
             if (!string.IsNullOrEmpty(fileSnapshot))
-                await Clients.Caller.SendAsync("LoadFileSnapshot", file.Id, fileSnapshot);
+                await Clients.Caller.SendAsync("LoadFileSnapshot", fileId, fileSnapshot);
         }
 
         var roomParticipants = await _store.GetParticipantsAsync(roomId);
@@ -244,8 +250,8 @@ public class CollabHub : Hub
 
         var peer = roomParticipants.FirstOrDefault(p => p.ConnectionId != Context.ConnectionId);
         if (peer != null)
-            foreach (var file in files)
-                await Clients.Client(peer.ConnectionId).SendAsync("RequestFileSnapshot", file.Id, Context.ConnectionId);
+            foreach (var fileId in fileIds)
+                await Clients.Client(peer.ConnectionId).SendAsync("RequestFileSnapshot", fileId, Context.ConnectionId);
 
         await Clients.OthersInGroup(roomId)
             .SendAsync("PeerJoined", Context.ConnectionId, displayName, participantColor, userId,
@@ -282,44 +288,108 @@ public class CollabHub : Hub
         await Clients.OthersInGroup(roomId).SendAsync("ReceiveFileOp", fileId, op);
     }
 
-    public async Task<string> CreateEntry(string roomId, string name, string? parentId, bool isFolder)
+    public async Task ApplyProjectTreeOperation(string roomId, JsonElement operation)
     {
         await EnsureCanEditAsync(roomId);
-        if (!await _store.TryConsumeFileEntryCreateRateLimitAsync(
-                roomId,
-                Context.ConnectionId,
-                Guid.NewGuid().ToString("N")))
+        var operationJson = JsonSerializer.Serialize(operation);
+        if (operationJson.Length > 16 * 1024)
+            throw new HubException("Project tree update is too large.");
+
+        if (operation.ValueKind != JsonValueKind.Object ||
+            !operation.TryGetProperty("type", out var typeValue) || typeValue.ValueKind != JsonValueKind.String ||
+            !operation.TryGetProperty("opId", out var idValue) || idValue.ValueKind != JsonValueKind.Object ||
+            !idValue.TryGetProperty("siteId", out var siteValue) || siteValue.ValueKind != JsonValueKind.String ||
+            !idValue.TryGetProperty("counter", out var counterValue) || !counterValue.TryGetInt64(out var counter))
+            throw new HubException("Invalid project tree update.");
+
+        var type = typeValue.GetString();
+        var siteId = siteValue.GetString();
+        if (string.IsNullOrWhiteSpace(siteId) || siteId.Length > 128 || siteId == "syncode-seed" ||
+            counter < 1 || counter > 9_007_199_254_740_991L)
+            throw new HubException("Invalid project tree update ID.");
+        var operationId = $"{siteId}:{counter}";
+        using var currentOperationDocument = JsonDocument.Parse(operationJson);
+        var currentOperationValue = GetProjectTreeOperationValue(currentOperationDocument.RootElement)
+            ?? throw new HubException("Invalid project tree update.");
+        var previousOperationJson = await _store.GetProjectTreeOperationAsync(roomId, operationId);
+        if (previousOperationJson is not null)
         {
-            throw new HubException("File creation rate limit reached. Please wait before creating more files or folders.");
+            using var previousOperation = JsonDocument.Parse(previousOperationJson);
+            if (GetProjectTreeOperationValue(previousOperation.RootElement) != currentOperationValue)
+                throw new HubException("Conflicting project tree operation ID.");
+            return;
         }
 
-        name = ValidateFileName(name);
-        var entries = await _store.GetEntriesAsync(roomId);
-        if (entries.Count >= 500) throw new HubException("A room can contain up to 500 files and folders.");
-        ValidateParent(entries, parentId);
-        var entry = new RedisRoomStore.RoomEntry(Guid.NewGuid().ToString("N"), name, parentId, isFolder);
-        if (!await _store.CreateEntryAsync(roomId, entry))
-            throw new HubException("An item with that name already exists in this folder.");
-        await Clients.Group(roomId).SendAsync("FileAdded", entry);
-        return entry.Id;
-    }
+        if (type == "create")
+        {
+            if (!operation.TryGetProperty("entry", out var entryValue))
+                throw new HubException("Invalid project tree entry.");
+            var entry = JsonSerializer.Deserialize<RedisRoomStore.RoomEntry>(entryValue.GetRawText(),
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            if (entry is null || !IsSafeProjectIdentifier(entry.Id) || entry.ParentId is { } parentId && !IsSafeProjectIdentifier(parentId))
+                throw new HubException("Invalid project tree entry.");
+            if (ValidateFileName(entry.Name) != entry.Name)
+                throw new HubException("Project entry names must be normalized.");
+            var currentEntryIds = await GetKnownEntryIdsAsync(roomId);
+            if (currentEntryIds.Contains(entry.Id))
+                throw new HubException("That project entry already exists.");
+            if (currentEntryIds.Count >= 500)
+                throw new HubException("A room can contain up to 500 files and folders.");
+            if (entry.ParentId is not null && !await IsKnownFolderAsync(roomId, entry.ParentId))
+                throw new HubException("Parent folder no longer exists.");
+        }
+        else if (type == "rename")
+        {
+            if (!operation.TryGetProperty("entryId", out var entryIdValue) || entryIdValue.ValueKind != JsonValueKind.String ||
+                !IsSafeProjectIdentifier(entryIdValue.GetString()!) ||
+                !operation.TryGetProperty("name", out var nameValue) || nameValue.ValueKind != JsonValueKind.String)
+                throw new HubException("Invalid project tree entry name.");
+            if (ValidateFileName(nameValue.GetString()!) != nameValue.GetString())
+                throw new HubException("Project entry names must be normalized.");
+            if (!await IsKnownEntryAsync(roomId, entryIdValue.GetString()!))
+                throw new HubException("File or folder no longer exists.");
+        }
+        else if (type == "move")
+        {
+            if (!operation.TryGetProperty("entryId", out var entryIdValue) || entryIdValue.ValueKind != JsonValueKind.String ||
+                !IsSafeProjectIdentifier(entryIdValue.GetString()!) ||
+                !operation.TryGetProperty("parentId", out var parentValue) ||
+                (parentValue.ValueKind != JsonValueKind.Null &&
+                 (parentValue.ValueKind != JsonValueKind.String || !IsSafeProjectIdentifier(parentValue.GetString()!))))
+                throw new HubException("Invalid project tree parent.");
+            if (parentValue.ValueKind == JsonValueKind.String && !await IsKnownFolderAsync(roomId, parentValue.GetString()!))
+                throw new HubException("Parent folder no longer exists.");
+            if (!await IsKnownEntryAsync(roomId, entryIdValue.GetString()!))
+                throw new HubException("File or folder no longer exists.");
+            if (parentValue.ValueKind == JsonValueKind.String &&
+                await WouldCreateParentCycleAsync(roomId, entryIdValue.GetString()!, parentValue.GetString()!))
+                throw new HubException("That move would create a folder cycle.");
+        }
+        else if (type == "delete")
+        {
+            if (!operation.TryGetProperty("entryId", out var entryIdValue) || entryIdValue.ValueKind != JsonValueKind.String ||
+                !IsSafeProjectIdentifier(entryIdValue.GetString()!))
+                throw new HubException("Invalid project tree entry.");
+            if (!await IsKnownEntryAsync(roomId, entryIdValue.GetString()!))
+                throw new HubException("File or folder no longer exists.");
+        }
+        else
+        {
+            throw new HubException("Unsupported project tree update.");
+        }
 
-    public async Task RenameEntry(string roomId, string entryId, string name)
-    {
-        await EnsureEntryParticipantAsync(roomId, entryId);
-        name = ValidateFileName(name);
-        if (!await _store.RenameEntryAsync(roomId, entryId, name))
-            throw new HubException("An item with that name already exists in this folder.");
-        await Clients.Group(roomId).SendAsync("FileRenamed", entryId, name);
-    }
+        if (!await _store.TryConsumeFileEntryCreateRateLimitAsync(
+                roomId, Context.ConnectionId, Guid.NewGuid().ToString("N")))
+            throw new HubException("File update rate limit reached. Please wait before trying again.");
 
-    public async Task DeleteEntry(string roomId, string entryId)
-    {
-        await EnsureEntryParticipantAsync(roomId, entryId);
-        var result = await _store.DeleteEntryAsync(roomId, entryId);
-        if (result.Status == -1) throw new HubException("A room must keep at least one file.");
-        if (result.Status == 0) throw new HubException("File or folder no longer exists.");
-        await Clients.Group(roomId).SendAsync("FileDeleted", result.DeletedIds);
+        var result = await _store.AppendProjectTreeOperationAsync(roomId, operationId, operationJson, siteId, counter);
+        if (result == -1) throw new HubException("Conflicting project tree update ID.");
+        if (result == -3) throw new HubException("That project entry already exists.");
+        if (result == -2) throw new HubException("Invalid project tree update.");
+        if (result == -5) throw new HubException("A room can contain up to 500 files and folders.");
+        await _store.TouchRoomAsync(roomId);
+        if (result == 1)
+            await Clients.OthersInGroup(roomId).SendAsync("ProjectTreeOperation", operation);
     }
 
     public async Task ToggleParticipantEditLock(string roomId, string targetConnectionId)
@@ -355,29 +425,8 @@ public class CollabHub : Hub
     private async Task EnsureFileParticipantAsync(string roomId, string fileId)
     {
         await EnsureCanEditAsync(roomId);
-        if (!(await _store.GetEntriesAsync(roomId)).Any(entry => entry.Id == fileId && !entry.IsFolder))
+        if (!(await _store.GetProjectFileIdsAsync(roomId)).Contains(fileId, StringComparer.Ordinal))
             throw new HubException("File no longer exists.");
-    }
-
-    private async Task EnsureEntryParticipantAsync(string roomId, string entryId)
-    {
-        await EnsureCanEditAsync(roomId);
-        if (!(await _store.GetEntriesAsync(roomId)).Any(entry => entry.Id == entryId))
-            throw new HubException("File or folder no longer exists.");
-    }
-
-    private static void ValidateParent(IReadOnlyList<RedisRoomStore.RoomEntry> entries, string? parentId)
-    {
-        if (parentId is null) return;
-        var parent = entries.FirstOrDefault(entry => entry.Id == parentId && entry.IsFolder)
-            ?? throw new HubException("Parent folder no longer exists.");
-        var depth = 1;
-        while (parent.ParentId is not null)
-        {
-            parent = entries.FirstOrDefault(entry => entry.Id == parent.ParentId && entry.IsFolder)
-                ?? throw new HubException("Invalid folder hierarchy.");
-            if (++depth >= 16) throw new HubException("Folders can be nested up to 16 levels.");
-        }
     }
 
     private static string ValidateFileName(string name)
@@ -388,6 +437,140 @@ public class CollabHub : Hub
             name.Any(char.IsControl))
             throw new HubException("Enter a valid file name (up to 128 characters).");
         return name;
+    }
+
+    private static bool IsSafeProjectPath(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || path.Length > 512 || path.StartsWith('/') ||
+            path.Contains('\\') || path.Any(char.IsControl)) return false;
+        return path.Split('/').All(segment => segment.Length > 0 && segment is not "." and not ".." &&
+            segment.IndexOfAny([ ':', '*', '?', '"', '<', '>', '|' ]) < 0);
+    }
+
+    private static bool IsSafeProjectIdentifier(string value) =>
+        value.Length is > 0 and <= 128 && value is not "." and not ".." &&
+        value.All(character =>
+            char.IsAsciiLetterOrDigit(character) || character is '-' or '_' or '.');
+
+    private async Task<bool> IsKnownEntryAsync(string roomId, string entryId)
+    {
+        return (await GetKnownEntryIdsAsync(roomId)).Contains(entryId);
+    }
+
+    private async Task<HashSet<string>> GetKnownEntryIdsAsync(string roomId)
+    {
+        return (await GetKnownProjectEntriesAsync(roomId)).Keys.ToHashSet(StringComparer.Ordinal);
+    }
+
+    private async Task<Dictionary<string, RedisRoomStore.RoomEntry>> GetKnownProjectEntriesAsync(string roomId)
+    {
+        var entries = (await _store.GetEntriesAsync(roomId))
+            .ToDictionary(entry => entry.Id, StringComparer.Ordinal);
+        var deletedIds = new HashSet<string>(StringComparer.Ordinal);
+        var snapshot = await _store.GetProjectTreeSnapshotAsync(roomId);
+        if (!string.IsNullOrEmpty(snapshot))
+        {
+            using var document = JsonDocument.Parse(snapshot);
+            if (document.RootElement.TryGetProperty("operations", out var operations) && operations.ValueKind == JsonValueKind.Array)
+                foreach (var operation in operations.EnumerateArray())
+                    ApplyProjectTreeOperation(operation, entries, deletedIds);
+        }
+        else
+        {
+            foreach (var operationJson in await _store.GetProjectTreeOperationsAsync(roomId))
+            {
+                using var document = JsonDocument.Parse(operationJson);
+                ApplyProjectTreeOperation(document.RootElement, entries, deletedIds);
+            }
+        }
+        foreach (var id in deletedIds) entries.Remove(id);
+
+        foreach (var entry in entries.Values.ToArray())
+        {
+            var visited = new HashSet<string>(StringComparer.Ordinal) { entry.Id };
+            var parentId = entry.ParentId;
+            while (parentId is not null)
+            {
+                if (deletedIds.Contains(parentId))
+                {
+                    entries.Remove(entry.Id);
+                    break;
+                }
+                if (!visited.Add(parentId) || !entries.TryGetValue(parentId, out var parent)) break;
+                parentId = parent.ParentId;
+            }
+        }
+
+        return entries;
+    }
+
+    private static void ApplyProjectTreeOperation(
+        JsonElement operation,
+        Dictionary<string, RedisRoomStore.RoomEntry> entries,
+        HashSet<string> deletedIds)
+    {
+        if (!operation.TryGetProperty("type", out var typeValue) || typeValue.ValueKind != JsonValueKind.String) return;
+        var type = typeValue.GetString();
+        if (type == "create" && operation.TryGetProperty("entry", out var entry) && entry.ValueKind == JsonValueKind.Object)
+        {
+            var created = JsonSerializer.Deserialize<RedisRoomStore.RoomEntry>(entry.GetRawText(),
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            if (created is not null) entries[created.Id] = created;
+        }
+        else if (type == "rename" && operation.TryGetProperty("entryId", out var renameId) && renameId.ValueKind == JsonValueKind.String &&
+            operation.TryGetProperty("name", out var name) && name.ValueKind == JsonValueKind.String &&
+            entries.TryGetValue(renameId.GetString()!, out var renamed))
+            entries[renamed.Id] = renamed with { Name = name.GetString()! };
+        else if (type == "move" && operation.TryGetProperty("entryId", out var moveId) && moveId.ValueKind == JsonValueKind.String &&
+            operation.TryGetProperty("parentId", out var parent) && (parent.ValueKind is JsonValueKind.Null or JsonValueKind.String) &&
+            entries.TryGetValue(moveId.GetString()!, out var moved))
+            entries[moved.Id] = moved with { ParentId = parent.ValueKind == JsonValueKind.Null ? null : parent.GetString() };
+        else if (type == "delete" && operation.TryGetProperty("entryId", out var deleted) && deleted.ValueKind == JsonValueKind.String)
+            deletedIds.Add(deleted.GetString()!);
+    }
+
+    private async Task<bool> IsKnownFolderAsync(string roomId, string folderId)
+    {
+        return (await GetKnownProjectEntriesAsync(roomId))
+            .TryGetValue(folderId, out var entry) && entry.IsFolder;
+    }
+
+    private async Task<bool> WouldCreateParentCycleAsync(string roomId, string entryId, string parentId)
+    {
+        var parents = (await GetKnownProjectEntriesAsync(roomId))
+            .Values
+            .ToDictionary(entry => entry.Id, entry => entry.ParentId, StringComparer.Ordinal);
+
+        var visited = new HashSet<string>(StringComparer.Ordinal);
+        string? current = parentId;
+        while (current is not null)
+        {
+            if (current == entryId || !visited.Add(current)) return true;
+            current = parents.GetValueOrDefault(current);
+        }
+        return false;
+    }
+
+    private static string? GetProjectTreeOperationValue(JsonElement operation)
+    {
+        if (!operation.TryGetProperty("type", out var typeValue) || typeValue.ValueKind != JsonValueKind.String)
+            return null;
+        var type = typeValue.GetString();
+        if (type == "create" && operation.TryGetProperty("entry", out var entry) && entry.ValueKind == JsonValueKind.Object &&
+            entry.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String &&
+            entry.TryGetProperty("name", out var name) && name.ValueKind == JsonValueKind.String &&
+            entry.TryGetProperty("parentId", out var parent) &&
+            entry.TryGetProperty("isFolder", out var folder) && (folder.ValueKind is JsonValueKind.True or JsonValueKind.False))
+            return JsonSerializer.Serialize(new object?[] { type, id.GetString(), name.GetString(), parent.ValueKind == JsonValueKind.Null ? null : parent.GetString(), folder.GetBoolean() });
+        if (type is "rename" or "move" or "delete" && operation.TryGetProperty("entryId", out var entryId) && entryId.ValueKind == JsonValueKind.String)
+        {
+            if (type == "rename" && operation.TryGetProperty("name", out var rename) && rename.ValueKind == JsonValueKind.String)
+                return JsonSerializer.Serialize(new object?[] { type, entryId.GetString(), rename.GetString() });
+            if (type == "move" && operation.TryGetProperty("parentId", out var moveParent))
+                return JsonSerializer.Serialize(new object?[] { type, entryId.GetString(), moveParent.ValueKind == JsonValueKind.Null ? null : moveParent.GetString() });
+            if (type == "delete") return JsonSerializer.Serialize(new object?[] { type, entryId.GetString() });
+        }
+        return null;
     }
 
     public async Task UpdateAwareness(string roomId, object awarenessState)
