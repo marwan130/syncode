@@ -9,6 +9,7 @@ export const FileExplorerTree: FC<FileExplorerTreeNodeProps> = (props) => {
   const { childrenByParent, editing, draftName, editError, renderNameInput } =
     props;
   const sharedProps = {
+    entries: props.entries,
     childrenByParent,
     selectedEntryId: props.selectedEntryId,
     canEdit: props.canEdit,
@@ -23,6 +24,7 @@ export const FileExplorerTree: FC<FileExplorerTreeNodeProps> = (props) => {
     onStartRename: props.onStartRename,
     onDelete: props.onDelete,
     onSelect: props.onSelect,
+    onMove: props.onMove,
   };
 
   return (

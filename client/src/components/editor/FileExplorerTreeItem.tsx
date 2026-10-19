@@ -1,7 +1,7 @@
 import type { FC } from 'react';
 import { Icon } from '@iconify/react';
 import { ExplorerActionButton } from './ExplorerActionButton';
-import { getFileIcon } from './fileExplorerUtils';
+import { getFileIcon, getMovableEntry } from './fileExplorerUtils';
 import { FileExplorerEntryButton } from './FileExplorerEntryButton';
 import type { FileExplorerTreeItemProps } from './fileExplorerTypes';
 
@@ -12,6 +12,8 @@ export const FileExplorerTreeItem: FC<FileExplorerTreeItemProps> = ({
   ...treeProps
 }) => {
   const {
+    onMove,
+    entries,
     selectedEntryId,
     canEdit,
     expandedFolders,
@@ -40,7 +42,28 @@ export const FileExplorerTreeItem: FC<FileExplorerTreeItemProps> = ({
     editing?.kind === 'rename' && editing.entry.id === entry.id;
 
   return (
-    <li role="treeitem" aria-expanded={entry.isFolder ? isExpanded : undefined}>
+    <li
+      role="treeitem"
+      aria-expanded={entry.isFolder ? isExpanded : undefined}
+      draggable={canEdit}
+      onDragStart={(event) =>
+        event.dataTransfer.setData('text/plain', entry.id)
+      }
+      onDragOver={(event) => {
+        if (canEdit && entry.isFolder) event.preventDefault();
+      }}
+      onDrop={(event) => {
+        if (!canEdit || !entry.isFolder) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const sourceEntry = getMovableEntry(
+          entries,
+          event.dataTransfer.getData('text/plain'),
+          entry.id
+        );
+        if (sourceEntry) void onMove(sourceEntry, entry.id);
+      }}
+    >
       <div
         className={`file-explorer-row${entry.id === selectedEntryId ? ' is-active' : ''}`}
       >

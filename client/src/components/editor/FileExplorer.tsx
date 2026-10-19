@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { DragEvent } from 'react';
 import { Icon, addCollection } from '@iconify/react';
 import type { RoomEntry } from '../../providers/SignalRCrdtProvider';
 import { ScrollbarPanel } from '../shared/ScrollbarPanel';
@@ -12,6 +13,7 @@ import type {
 } from './fileExplorerTypes';
 import {
   groupEntriesByParent,
+  getMovableEntry,
   resolveFileDiagnostics,
 } from './fileExplorerUtils';
 
@@ -26,6 +28,7 @@ export function FileExplorer({
   onCreateEntry,
   onRename,
   onDelete,
+  onMove,
 }: FileExplorerTreeProps) {
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(
     () => new Set()
@@ -217,6 +220,26 @@ export function FileExplorer({
     setSelection({ id, activeFileId });
   };
 
+  const moveEntry = (entry: RoomEntry, parentId: string | null) =>
+    onMove(entry, parentId).catch((error: unknown) => {
+      window.alert(
+        userFacingError(error, 'Could not move that file or folder.')
+      );
+    });
+
+  const handleDrop = (event: DragEvent, parentId: string | null) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!canEdit) return;
+    const entry = getMovableEntry(
+      entries,
+      event.dataTransfer.getData('text/plain'),
+      parentId
+    );
+    if (!entry) return;
+    void moveEntry(entry, parentId);
+  };
+
   return (
     <aside className="file-explorer" aria-label="File explorer">
       <div className="file-explorer-heading">
@@ -228,6 +251,10 @@ export function FileExplorer({
             className="file-explorer-root"
             role="treeitem"
             aria-expanded={isRootExpanded}
+            onDragOver={(event) => {
+              if (canEdit) event.preventDefault();
+            }}
+            onDrop={(event) => handleDrop(event, null)}
           >
             <div
               className={`file-explorer-row file-explorer-root-row${selectedEntryId === null ? ' is-active' : ''}`}
@@ -266,6 +293,7 @@ export function FileExplorer({
             {isRootExpanded && (
               <ul role="group">
                 <FileExplorerTree
+                  entries={entries}
                   parentId={null}
                   depth={0}
                   childrenByParent={childrenByParent}
@@ -288,6 +316,7 @@ export function FileExplorer({
                     selectEntry(id);
                     onSelect(id);
                   }}
+                  onMove={moveEntry}
                 />
               </ul>
             )}

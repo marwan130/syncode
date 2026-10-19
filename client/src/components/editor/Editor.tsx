@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from 'react';
 import type { Monaco, OnMount } from '@monaco-editor/react';
 import type * as monaco from 'monaco-editor';
 import { useNavigate, useParams } from 'react-router-dom';
-import { MonacoCrdtBinding } from '../../bindings/MonacoCrdtBinding';
 import { useAwareness } from '../../hooks/useAwareness';
 import { useCrdtSync } from '../../hooks/useCrdtSync';
 import { useChat } from '../../hooks/useChat';
@@ -13,6 +12,8 @@ import { useAutocompletePreference } from '../../hooks/useAutocompletePreference
 import { useEditorShortcuts } from '../../hooks/useEditorShortcuts';
 import { useExecutionEligibility } from '../../hooks/useExecutionEligibility';
 import { useEditorFileState } from '../../hooks/useEditorFileState';
+import { useExplorerActions } from '../../hooks/useExplorerActions';
+import { useEditorCrdtBindings } from '../../hooks/useEditorCrdtBindings';
 import { userFacingError } from '../../utils/userFacingError';
 import {
   createSiteId,
@@ -102,6 +103,7 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
     runFileAction,
     createEntry,
   } = useEditorFileState({ roomId, providerRef, status });
+  const explorerActions = useExplorerActions({ providerRef, runFileAction });
 
   const activeFile = entries.find(
     (entry) => entry.id === activeFileId && !entry.isFolder
@@ -201,6 +203,19 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
   });
   const isEditLocked = localParticipant?.isLocked === true;
 
+  useEditorCrdtBindings({
+    monacoApi,
+    entries,
+    openFileIds,
+    providerRef,
+    status,
+    primaryEditor: monacoEditor,
+    secondaryEditor: splitMonacoEditor,
+    activeFileId,
+    splitFileId,
+    broadcastCursor,
+  });
+
   const previewSource = useDebouncedPreview({
     providerRef,
     status,
@@ -212,51 +227,6 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
     monacoApi,
     entries,
   });
-
-  useEffect(() => {
-    if (!monacoApi || !providerRef.current) return;
-    const provider = providerRef.current;
-
-    openFileIds.forEach((fileId) => {
-      const entry = entries.find((e) => e.id === fileId && !e.isFolder);
-      if (!entry) return;
-      const filePath = getEntryPath(entry, entries);
-      const uri = monacoApi.Uri.parse(filePath);
-      const existing = monacoApi.editor.getModel(uri);
-      if (!existing) {
-        const content = provider.getFileContent(fileId);
-        const lang = languageForFileName(filePath);
-        monacoApi.editor.createModel(content, lang, uri);
-      }
-    });
-  }, [monacoApi, openFileIds, entries, providerRef]);
-
-  useEffect(() => {
-    const provider = providerRef.current;
-    if (!monacoEditor || !provider) return;
-
-    if (!activeFileId) return;
-    monacoEditor.setValue(provider.getFileContent(activeFileId));
-    const binding = new MonacoCrdtBinding(monacoEditor, provider, activeFileId);
-    const unsubscribeCursor = binding.onCursorChange(broadcastCursor);
-
-    return () => {
-      unsubscribeCursor();
-      binding.dispose();
-    };
-  }, [monacoEditor, providerRef, status, broadcastCursor, activeFileId]);
-
-  useEffect(() => {
-    const provider = providerRef.current;
-    if (!splitMonacoEditor || !provider || !splitFileId) return;
-    splitMonacoEditor.setValue(provider.getFileContent(splitFileId));
-    const binding = new MonacoCrdtBinding(
-      splitMonacoEditor,
-      provider,
-      splitFileId
-    );
-    return () => binding.dispose();
-  }, [splitMonacoEditor, providerRef, status, splitFileId]);
 
   const handleEditorMount: OnMount = (editor, monacoInstance) => {
     configureMonacoEditor(monacoInstance);
@@ -348,27 +318,9 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
           onCreateEntry={(parentId, name, isFolder) =>
             createEntry(parentId, name, isFolder)
           }
-          onRename={(entry, name) =>
-            runFileAction(`rename:${entry.id}`, () =>
-              providerRef.current!.renameEntry(entry.id, name)
-            )
-          }
-          onDelete={(entry) => {
-            const prompt = entry.isFolder
-              ? `Delete folder "${entry.name}" and everything inside it?`
-              : `Delete ${entry.name}?`;
-            if (window.confirm(prompt))
-              void runFileAction(`delete:${entry.id}`, () =>
-                providerRef.current!.deleteEntry(entry.id)
-              ).catch((error: unknown) =>
-                window.alert(
-                  userFacingError(
-                    error,
-                    'Could not complete that file operation. Try again.'
-                  )
-                )
-              );
-          }}
+          onRename={explorerActions.renameEntry}
+          onDelete={explorerActions.deleteEntry}
+          onMove={explorerActions.moveEntry}
         />
 
         <ChatPanelContainer

@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import type { RoomEntry } from '../../providers/SignalRCrdtProvider';
 
 export interface ExplorerNodeSharedProps {
+  entries: RoomEntry[];
   childrenByParent: Map<string | null, RoomEntry[]>;
   selectedEntryId: string | null;
   canEdit: boolean;
@@ -16,6 +17,7 @@ export interface ExplorerNodeSharedProps {
   onStartRename: (entry: RoomEntry) => void;
   onDelete: (entry: RoomEntry) => void;
   onSelect: (id: string) => void;
+  onMove: (entry: RoomEntry, parentId: string | null) => Promise<void>;
 }
 
 export interface FileExplorerTreeNodeProps extends ExplorerNodeSharedProps {
@@ -50,6 +52,7 @@ export interface FileExplorerTreeProps {
   ) => Promise<string | void>;
   onRename: (entry: RoomEntry, name: string) => Promise<void>;
   onDelete: (entry: RoomEntry) => void;
+  onMove: (entry: RoomEntry, parentId: string | null) => Promise<void>;
 }
 
 export interface FileExplorerPanelProps extends FileExplorerTreeProps {

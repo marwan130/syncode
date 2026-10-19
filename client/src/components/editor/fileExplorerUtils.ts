@@ -71,6 +71,47 @@ export function groupEntriesByParent(
   return children;
 }
 
+export function getMovableEntry(
+  entries: RoomEntry[],
+  entryId: string,
+  targetParentId: string | null
+): RoomEntry | null {
+  const entriesById = new Map(entries.map((entry) => [entry.id, entry]));
+  const entry = entriesById.get(entryId);
+  if (!entry || !isValidTarget(entry, targetParentId, entriesById)) return null;
+  if (
+    entry.isFolder &&
+    createsFolderCycle(entry.id, targetParentId, entriesById)
+  )
+    return null;
+  return entry;
+}
+
+function isValidTarget(
+  entry: RoomEntry,
+  targetParentId: string | null,
+  entriesById: Map<string, RoomEntry>
+): boolean {
+  if (entry.id === targetParentId) return false;
+  if (!targetParentId) return true;
+  return entriesById.get(targetParentId)?.isFolder === true;
+}
+
+function createsFolderCycle(
+  entryId: string,
+  targetParentId: string | null,
+  entriesById: Map<string, RoomEntry>
+): boolean {
+  let currentId = targetParentId;
+  const visited = new Set<string>();
+  while (currentId) {
+    if (currentId === entryId || visited.has(currentId)) return true;
+    visited.add(currentId);
+    currentId = entriesById.get(currentId)?.parentId ?? null;
+  }
+  return false;
+}
+
 export function resolveFileDiagnostics(
   entries: RoomEntry[],
   childrenByParent: Map<string | null, RoomEntry[]>,
@@ -79,30 +120,43 @@ export function resolveFileDiagnostics(
   const diagnosticsByEntry: FileDiagnostics = {};
 
   for (const entry of entries) {
-    let severity = fileDiagnostics[entry.id];
     if (!entry.isFolder) {
+      const severity = fileDiagnostics[entry.id];
       if (severity) diagnosticsByEntry[entry.id] = severity;
       continue;
     }
 
-    const pending = [...(childrenByParent.get(entry.id) ?? [])];
-    const visited = new Set<string>([entry.id]);
-    while (pending.length && severity !== 'error') {
-      const child = pending.pop();
-      if (!child || visited.has(child.id)) continue;
-      visited.add(child.id);
-      const childSeverity = fileDiagnostics[child.id];
-      if (childSeverity === 'error') {
-        severity = 'error';
-        break;
-      }
-      if (childSeverity === 'warning') severity = 'warning';
-      if (child.isFolder) {
-        pending.push(...(childrenByParent.get(child.id) ?? []));
-      }
-    }
+    const severity = resolveFolderDiagnostic(
+      entry.id,
+      childrenByParent,
+      fileDiagnostics
+    );
     if (severity) diagnosticsByEntry[entry.id] = severity;
   }
 
   return diagnosticsByEntry;
+}
+
+function resolveFolderDiagnostic(
+  folderId: string,
+  childrenByParent: Map<string | null, RoomEntry[]>,
+  fileDiagnostics: FileDiagnostics
+): FileDiagnostic | undefined {
+  const pending = [...(childrenByParent.get(folderId) ?? [])];
+  const visited = new Set<string>([folderId]);
+  let hasWarning = false;
+
+  while (pending.length) {
+    const child = pending.pop();
+    if (!child || visited.has(child.id)) continue;
+    visited.add(child.id);
+    const severity = fileDiagnostics[child.id];
+    if (severity === 'error') return 'error';
+    if (severity === 'warning') hasWarning = true;
+    if (child.isFolder) {
+      pending.push(...(childrenByParent.get(child.id) ?? []));
+    }
+  }
+
+  return hasWarning ? 'warning' : undefined;
 }
