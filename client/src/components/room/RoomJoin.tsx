@@ -152,7 +152,7 @@ export function RoomJoin({
               type="button"
               className={`profile-color-option${selectedColor === color ? ' is-selected' : ''}`}
               style={{ backgroundColor: color }}
-              aria-label={`Choose ${color} avatar color`}
+              aria-label={`${color} avatar color${selectedColor === color ? ', selected' : ''}`}
               aria-pressed={selectedColor === color}
               onClick={() => chooseColor(color)}
             />

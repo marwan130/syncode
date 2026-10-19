@@ -2,6 +2,8 @@
   --app-bg: #121214;
   --surface-bg: #18181b;
   --control-bg: #27272a;
+  --input-fg: var(--text);
+  --input-placeholder: var(--text-muted);
   --text: #d4d4d4;
   --text-h: #f3f3f3;
   --text-muted: #9ca3af;
@@ -1068,8 +1070,8 @@ code {
   border: 1px solid var(--accent);
   border-radius: 0;
   outline: none;
-  color: var(--text);
-  background: var(--surface-bg);
+  color: var(--input-fg);
+  background: var(--control-bg);
   font: inherit;
 }
 
@@ -1718,16 +1720,12 @@ code {
   padding: 16px;
 }
 
-.profile-popover-heading {
-  display: none;
-}
-
 .profile-name-input {
   box-sizing: border-box;
   width: 100%;
   height: 30px;
   padding: 0 8px;
-  color: var(--text-h);
+  color: var(--input-fg);
   background: var(--control-bg);
   border: 0;
   border-radius: 0;
@@ -1736,7 +1734,7 @@ code {
 }
 
 .profile-name-input:focus {
-  background: #303030;
+  background: var(--control-bg);
 }
 
 .profile-link-input {
@@ -1792,8 +1790,9 @@ code {
 }
 
 .profile-color-option.is-selected {
-  border-color: transparent;
-  outline: 0;
+  border-color: var(--app-bg);
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 .profile-join-button {
@@ -1963,11 +1962,18 @@ code {
   overflow-y: auto;
   scrollbar-width: none;
   padding: 8px 40px 8px 12px;
-  color: var(--text);
+  color: var(--input-fg);
   background: var(--control-bg);
   border: 1px solid var(--border);
   border-radius: 2px;
   font: 13px/16px var(--sans);
+}
+
+.profile-name-input::placeholder,
+.file-explorer-inline-input::placeholder,
+.chat-message-input::placeholder {
+  color: var(--input-placeholder);
+  opacity: 1;
 }
 
 .chat-message-input::-webkit-scrollbar {

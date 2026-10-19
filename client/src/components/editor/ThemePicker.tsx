@@ -211,6 +211,11 @@ function apply(entry: ThemeEntry, monaco: Monaco | null) {
     '--app-bg': get('titleBar.activeBackground', get('sideBar.background', bg)),
     '--surface-bg': get('panel.background', get('sideBar.background', bg)),
     '--control-bg': get('input.background', bg),
+    '--input-fg': get('input.foreground', fg),
+    '--input-placeholder': get(
+      'input.placeholderForeground',
+      get('descriptionForeground', theme.type === 'light' ? '#666666' : '#9ca3af')
+    ),
     '--bg': bg,
     '--code-bg': bg,
     '--text': fg,
