@@ -7,4 +7,5 @@ public record Participant(
     string UserId = "",
     bool IsAdmin = false,
     bool IsLocked = false,
-    string InstanceId = "");
+    string InstanceId = "",
+    string? AvatarUrl = null);
