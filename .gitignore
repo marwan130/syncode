@@ -17,3 +17,5 @@ dist/
 *.swp
 
 .env
+.dev.vars*
+NDependOut/
