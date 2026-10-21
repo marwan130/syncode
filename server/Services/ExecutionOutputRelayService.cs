@@ -1,13 +1,11 @@
 using System.Text.Json;
-using Microsoft.AspNetCore.SignalR;
-using server.Hubs;
 using StackExchange.Redis;
 
 namespace server.Services;
 
 public sealed class ExecutionOutputRelayService(
     IConnectionMultiplexer redis,
-    IHubContext<CollabHub> hub,
+    IRoomEventPublisher roomEvents,
     TerminalSessionRegistry terminalSessions,
     IConfiguration configuration,
     ServerInstanceIdentity instance,
@@ -79,7 +77,7 @@ public sealed class ExecutionOutputRelayService(
         {
             try
             {
-                var executionEvent = JsonSerializer.Deserialize<ExecutionOutputEvent>(message.Message.ToString(), JsonOptions);
+                var executionEvent = JsonSerializer.Deserialize<ExecutionOutputMessage>(message.Message.ToString(), JsonOptions);
                 if (executionEvent is null || !IsRoomId(executionEvent.RoomId)) return;
 
                 var (eventName, payload) = executionEvent.Type switch
@@ -91,8 +89,7 @@ public sealed class ExecutionOutputRelayService(
                 };
                 if (eventName.Length == 0) return;
 
-                await hub.Clients.Group(executionEvent.RoomId)
-                    .SendAsync(eventName, payload, stoppingToken);
+                await roomEvents.SendToRoomAsync(executionEvent.RoomId, eventName, payload, stoppingToken);
                 if (executionEvent.Type is "completed" or "failed")
                     terminalSessions.RemoveExecution(executionEvent.JobId);
             }
