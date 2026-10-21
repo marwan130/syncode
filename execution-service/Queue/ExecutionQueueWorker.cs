@@ -59,15 +59,18 @@ public sealed class ExecutionQueueWorker : BackgroundService
 
                 await _queue.MarkCompletedAsync(job, result);
                 await _outputPublisher.PublishCompletedAsync(job, result);
-                _logger.LogInformation(
-                    "Execution {ExecutionId} completed for room {RoomId}; language {Language}; duration {DurationMs} ms; exit code {ExitCode}; timed out: {TimedOut}; output limit exceeded: {OutputLimitExceeded}",
-                    job.Id,
-                    job.RoomId,
-                    job.Language,
-                    result.Duration.TotalMilliseconds,
-                    result.ExitCode,
-                    result.TimedOut,
-                    result.OutputLimitExceeded);
+                if (_logger.IsEnabled(LogLevel.Information))
+                {
+                    _logger.LogInformation(
+                        "Execution {ExecutionId} completed for room {RoomId}; language {Language}; duration {DurationMs} ms; exit code {ExitCode}; timed out: {TimedOut}; output limit exceeded: {OutputLimitExceeded}",
+                        job.Id,
+                        job.RoomId,
+                        job.Language,
+                        result.Duration.TotalMilliseconds,
+                        result.ExitCode,
+                        result.TimedOut,
+                        result.OutputLimitExceeded);
+                }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {

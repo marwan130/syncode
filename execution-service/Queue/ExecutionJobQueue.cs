@@ -30,8 +30,7 @@ public sealed class ExecutionJobQueue
 
     public ExecutionJobQueue(IConnectionMultiplexer redis, int maxPendingJobs = 50, string keyPrefix = "syncode:execution")
     {
-        if (maxPendingJobs < 1)
-            throw new ArgumentOutOfRangeException(nameof(maxPendingJobs));
+        ArgumentOutOfRangeException.ThrowIfLessThan(maxPendingJobs, 1);
         if (string.IsNullOrWhiteSpace(keyPrefix))
             throw new ArgumentException("A Redis key prefix is required.", nameof(keyPrefix));
 
@@ -159,5 +158,3 @@ public sealed class ExecutionJobQueue
         return $"{_statusPrefix}request:{Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)).ToLowerInvariant()}";
     }
 }
-
-public sealed record ExecutionEnqueueResult(string? JobId, int QueuePosition, bool IsFull, bool IsDuplicate);
