@@ -80,18 +80,24 @@ public sealed class GithubTokenVault
             throw new InvalidOperationException("The GitHub session has expired.");
 
         var plaintext = JsonSerializer.SerializeToUtf8Bytes(entry);
-        var nonce = RandomNumberGenerator.GetBytes(12);
-        var ciphertext = new byte[plaintext.Length];
-        var tag = new byte[16];
-        using (var aes = new AesGcm(encryptionKey, 16))
-            aes.Encrypt(nonce, plaintext, ciphertext, tag, Encoding.UTF8.GetBytes(key));
+        try
+        {
+            var nonce = RandomNumberGenerator.GetBytes(12);
+            var ciphertext = new byte[plaintext.Length];
+            var tag = new byte[16];
+            using (var aes = new AesGcm(encryptionKey, 16))
+                aes.Encrypt(nonce, plaintext, ciphertext, tag, Encoding.UTF8.GetBytes(key));
 
-        var packed = new byte[nonce.Length + tag.Length + ciphertext.Length];
-        nonce.CopyTo(packed, 0);
-        tag.CopyTo(packed, nonce.Length);
-        ciphertext.CopyTo(packed, nonce.Length + tag.Length);
-        await _database.StringSetAsync(key, Convert.ToBase64String(packed), ttl);
-        CryptographicOperations.ZeroMemory(plaintext);
+            var packed = new byte[nonce.Length + tag.Length + ciphertext.Length];
+            nonce.CopyTo(packed, 0);
+            tag.CopyTo(packed, nonce.Length);
+            ciphertext.CopyTo(packed, nonce.Length + tag.Length);
+            await _database.StringSetAsync(key, Convert.ToBase64String(packed), ttl);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(plaintext);
+        }
     }
 
     internal async Task DeleteAsync(string sessionId)

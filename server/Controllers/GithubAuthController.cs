@@ -7,6 +7,7 @@ namespace server.Controllers;
 
 [ApiController]
 [Route("api/github")]
+[ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
 public sealed partial class GithubAuthController(
     GithubOAuthService oauth,
     IConfiguration configuration,
@@ -34,7 +35,7 @@ public sealed partial class GithubAuthController(
         {
             var session = await oauth.ExchangeAsync(request, cancellationToken);
             SetSessionCookie(session);
-            return NoStore(Ok(new GithubSessionResponse(session.Account)));
+            return Ok(new GithubSessionResponse(session.Account));
         }
         catch (GithubOAuthException exception)
         {
@@ -52,7 +53,7 @@ public sealed partial class GithubAuthController(
         {
             var session = await oauth.GetSessionAsync(sessionId, cancellationToken);
             SetSessionCookie(session);
-            return NoStore(Ok(new GithubSessionResponse(session.Account)));
+            return Ok(new GithubSessionResponse(session.Account));
         }
         catch (GithubOAuthException exception)
         {
@@ -84,8 +85,8 @@ public sealed partial class GithubAuthController(
 
         ClearSessionCookie();
         return revoked
-            ? NoStore(NoContent())
-            : NoStore(StatusCode(StatusCodes.Status502BadGateway, new { error = "revoke_failed" }));
+            ? NoContent()
+            : StatusCode(StatusCodes.Status502BadGateway, new { error = "revoke_failed" });
     }
 
     private bool HasTrustedOrigin()
@@ -110,10 +111,10 @@ public sealed partial class GithubAuthController(
             "GitHub OAuth request failed with status {StatusCode}.",
             status);
         if (exception.Unauthorized) ClearSessionCookie();
-        return NoStore(StatusCode(status, new
+        return StatusCode(status, new
         {
             error = exception.Unauthorized ? "reauthorize" : "oauth_failed"
-        }));
+        });
     }
 
     private void SetSessionCookie(GithubOAuthSession session)
@@ -140,13 +141,6 @@ public sealed partial class GithubAuthController(
             SameSite = SameSiteMode.Lax,
             Path = "/api/github"
         });
-    }
-
-    private IActionResult NoStore(IActionResult result)
-    {
-        Response.Headers.CacheControl = "no-store";
-        Response.Headers.Pragma = "no-cache";
-        return result;
     }
 
     [GeneratedRegex("^[A-Za-z0-9_-]{43,128}$", RegexOptions.CultureInvariant)]

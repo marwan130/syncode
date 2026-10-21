@@ -87,6 +87,10 @@ builder.Services.AddHttpClient<ExecutionServiceClient>(client =>
 builder.Services.AddHostedService<ExecutionOutputRelayService>();
 
 var allowedOrigins = AllowedOriginsConfiguration.Resolve(builder.Configuration, builder.Environment);
+ProductionConfigurationValidator.ValidateGithub(
+    builder.Configuration,
+    builder.Environment,
+    allowedOrigins);
 builder.Services.AddCors(options => options.AddPolicy("client", policy =>
     policy.WithOrigins(allowedOrigins).AllowAnyHeader().AllowAnyMethod().AllowCredentials()));
 
