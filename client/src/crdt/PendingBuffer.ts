@@ -81,42 +81,47 @@ export class PendingBuffer {
   public processPending(): void {
     let progressed = true;
     while (progressed) {
-      progressed = false;
-      for (const [key, ops] of Array.from(this.pendingInserts.entries())) {
-        const remaining: InsertOp[] = [];
-        for (const op of ops) {
-          if (this.isInsertReady(op)) {
-            this.doc.integrateRemoteInsert(op);
-            this.drain(op.char.id);
-            progressed = true;
-          } else {
-            remaining.push(op);
-          }
-        }
-        if (remaining.length === 0) {
-          this.pendingInserts.delete(key);
-        } else {
-          this.pendingInserts.set(key, remaining);
-        }
-      }
-
-      for (const [key, ops] of Array.from(this.pendingDeletes.entries())) {
-        const remaining: DeleteOp[] = [];
-        for (const op of ops) {
-          if (this.doc.hasChar(op.id)) {
-            this.doc.integrateRemoteDelete(op);
-            progressed = true;
-          } else {
-            remaining.push(op);
-          }
-        }
-        if (remaining.length === 0) {
-          this.pendingDeletes.delete(key);
-        } else {
-          this.pendingDeletes.set(key, remaining);
-        }
-      }
+      progressed = this.processReadyInserts();
+      progressed = this.processReadyDeletes() || progressed;
     }
+  }
+
+  private processReadyInserts(): boolean {
+    let progressed = false;
+    for (const [key, operations] of Array.from(this.pendingInserts)) {
+      const remaining = operations.filter((op) => {
+        if (!this.isInsertReady(op)) return true;
+        this.doc.integrateRemoteInsert(op);
+        this.drain(op.char.id);
+        progressed = true;
+        return false;
+      });
+      this.replacePending(this.pendingInserts, key, remaining);
+    }
+    return progressed;
+  }
+
+  private processReadyDeletes(): boolean {
+    let progressed = false;
+    for (const [key, operations] of Array.from(this.pendingDeletes)) {
+      const remaining = operations.filter((op) => {
+        if (!this.doc.hasChar(op.id)) return true;
+        this.doc.integrateRemoteDelete(op);
+        progressed = true;
+        return false;
+      });
+      this.replacePending(this.pendingDeletes, key, remaining);
+    }
+    return progressed;
+  }
+
+  private replacePending<T>(
+    pending: Map<string, T[]>,
+    key: string,
+    remaining: T[]
+  ): void {
+    if (remaining.length === 0) pending.delete(key);
+    else pending.set(key, remaining);
   }
 
   /**

@@ -4,39 +4,39 @@ import { SignalRCrdtProvider } from '../providers/SignalRCrdtProvider';
 import type { ConnectionStatus } from '../providers/SignalRCrdtProvider';
 import { userFacingError } from '../utils/userFacingError';
 
-interface UseCrdtSyncProps {
+export interface UseCrdtSyncProps {
   siteId: string;
-  userId: string;
   roomId: string;
   accessKey: string;
   serverUrl?: string;
   displayName?: string;
   color?: string;
+  creatorToken?: string | null;
   enabled?: boolean;
 }
 
-interface UseCrdtSyncReturn {
+export interface UseCrdtSyncReturn {
   status: ConnectionStatus;
   connectionError: string | null;
+  wasKicked: boolean;
   providerRef: RefObject<SignalRCrdtProvider | null>;
-  evictedNewRoomId: string | null;
 }
 
 const DEFAULT_SERVER_URL = import.meta.env.VITE_BACKEND_URL || '';
 
 export function useCrdtSync({
   siteId,
-  userId,
   roomId,
   accessKey,
   serverUrl = DEFAULT_SERVER_URL,
   displayName,
   color,
+  creatorToken,
   enabled = true,
 }: UseCrdtSyncProps): UseCrdtSyncReturn {
   const [status, setStatus] = useState<ConnectionStatus>('disconnected');
   const [connectionError, setConnectionError] = useState<string | null>(null);
-  const [evictedNewRoomId, setEvictedNewRoomId] = useState<string | null>(null);
+  const [wasKicked, setWasKicked] = useState(false);
   const providerRef = useRef<SignalRCrdtProvider | null>(null);
   const profileRef = useRef({ displayName, color });
 
@@ -49,26 +49,20 @@ export function useCrdtSync({
 
     const p = new SignalRCrdtProvider(
       siteId,
-      userId,
       roomId,
       accessKey,
       serverUrl,
       profileRef.current.displayName,
-      profileRef.current.color
+      profileRef.current.color,
+      creatorToken
     );
     providerRef.current = p;
 
     const unsubStatus = p.onStatusChange((s) => {
       setStatus(s);
       if (s === 'connected') setConnectionError(null);
-      if (s === 'connecting' || s === 'connected') {
-        setEvictedNewRoomId(null);
-      }
     });
-
-    const unsubEvicted = p.onEvicted((newRoomId) => {
-      setEvictedNewRoomId(newRoomId || '');
-    });
+    const unsubKicked = p.onRoomKicked(() => setWasKicked(true));
 
     // React Strict Mode replays effects in development. Defer startup by one
     // microtask so the setup it immediately cleans up never opens a transport.
@@ -90,11 +84,19 @@ export function useCrdtSync({
     return () => {
       cancelled = true;
       unsubStatus();
-      unsubEvicted();
+      unsubKicked();
       p.disconnect().catch(() => {});
       providerRef.current = null;
     };
-  }, [siteId, userId, roomId, accessKey, serverUrl, displayName, enabled]);
+  }, [
+    siteId,
+    roomId,
+    accessKey,
+    serverUrl,
+    displayName,
+    creatorToken,
+    enabled,
+  ]);
 
   useEffect(() => {
     providerRef.current?.setLocalColor(color ?? '#38bdf8');
@@ -103,7 +105,7 @@ export function useCrdtSync({
   return {
     status,
     connectionError,
+    wasKicked,
     providerRef,
-    evictedNewRoomId,
   };
 }

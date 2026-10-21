@@ -8,7 +8,7 @@ import type {
 } from '../providers/SignalRCrdtProvider';
 import type { CursorAnchor } from '../crdt/CursorAnchor';
 
-interface UseAwarenessProps {
+export interface UseAwarenessProps {
   providerRef: RefObject<SignalRCrdtProvider | null>;
   status: ConnectionStatus;
   localName: string;
@@ -23,7 +23,7 @@ function toAwarenessState(
     cursor,
     name: participant.displayName,
     color: participant.color,
-    userId: participant.userId,
+    avatarUrl: participant.avatarUrl,
     isAdmin: participant.isAdmin,
     isLocked: participant.isLocked,
   };
@@ -58,7 +58,7 @@ export function useAwareness({
         const existing = next.get(peerId);
         next.set(peerId, {
           ...state,
-          userId: existing?.userId ?? state.userId,
+          avatarUrl: existing?.avatarUrl ?? state.avatarUrl,
           isAdmin: existing?.isAdmin ?? state.isAdmin,
           isLocked: existing?.isLocked ?? state.isLocked,
         });

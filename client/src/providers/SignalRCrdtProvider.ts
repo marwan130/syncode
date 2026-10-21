@@ -11,6 +11,12 @@ import { PendingBuffer } from '../crdt/PendingBuffer';
 import type { CursorAnchor } from '../crdt/CursorAnchor';
 import { ProjectTree } from '../crdt/ProjectTree';
 import type { ProjectTreeOperation } from '../crdt/ProjectTree';
+import type { ImportedFileContent } from '../import/folderImport';
+import { prepareProjectImport } from '../import/folderImport';
+import {
+  normalizeChatMessage,
+  normalizeParticipant,
+} from './serverMessageNormalization';
 
 function errorMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
@@ -25,7 +31,7 @@ export interface AwarenessState {
   cursor: CursorAnchor | null;
   name: string;
   color: string;
-  userId?: string;
+  avatarUrl?: string;
   isAdmin?: boolean;
   isLocked?: boolean;
 }
@@ -34,7 +40,7 @@ export interface ParticipantInfo {
   connectionId: string;
   displayName: string;
   color: string;
-  userId?: string;
+  avatarUrl?: string;
   isAdmin?: boolean;
   isLocked?: boolean;
 }
@@ -74,16 +80,16 @@ export interface ExecutionProjectFile {
   content: string;
 }
 
-interface ExecutionSubmission {
+export interface ExecutionSubmission {
   jobId: string;
   queuePosition: number;
 }
 
-interface TerminalSessionStart {
+export interface TerminalSessionStart {
   sessionId: string;
 }
 
-interface TerminalOutput {
+export interface TerminalOutput {
   text: string;
   offset: number;
   exited: boolean;
@@ -102,7 +108,7 @@ export class SignalRCrdtProvider {
   private buffers = new Map<string, PendingBuffer>();
   private activeFile = '';
   private files: RoomEntry[] = [];
-  private projectTree = new ProjectTree('pending');
+  private projectTree: ProjectTree;
   private pendingTreeOperations: ProjectTreeOperation[] = [];
   private treeFlushPromise: Promise<void> | null = null;
   private roomParticipants: ParticipantInfo[] = [];
@@ -132,6 +138,15 @@ export class SignalRCrdtProvider {
       color,
     }).catch(() => {});
   }
+
+  public setLocalAvatarUrl(avatarUrl?: string): void {
+    if (this.avatarUrl === avatarUrl) return;
+    this.avatarUrl = avatarUrl;
+    if (this.connection.state === HubConnectionState.Connected)
+      this.connection
+        .invoke('UpdateParticipantAvatar', avatarUrl ?? null)
+        .catch(() => {});
+  }
   public getFileContent(fileId: string): string {
     return this.documentFor(fileId).toVisibleString();
   }
@@ -139,18 +154,18 @@ export class SignalRCrdtProvider {
     return this.documentFor(fileId);
   }
   public readonly siteId: string;
-  private userId: string;
   private connection: HubConnection;
   private roomId: string;
   private accessKey: string;
+  private creatorToken: string | null;
   private displayName: string;
   private color: string;
+  private avatarUrl?: string;
   private statusListeners: Set<(s: ConnectionStatus) => void> = new Set();
   private changeListeners: Set<() => void> = new Set();
   private awarenessListeners: Set<
     (peerId: string, state: AwarenessState) => void
   > = new Set();
-  private evictedListeners: Set<(newRoomId?: string) => void> = new Set();
   private snapshotSaveTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private roomParticipantsListeners: Set<
     (participants: ParticipantInfo[]) => void
@@ -158,21 +173,21 @@ export class SignalRCrdtProvider {
   private chatMessageListeners = new Set<(message: ChatMessage) => void>();
   private chatHistoryListeners = new Set<(messages: ChatMessage[]) => void>();
   private executionEventListeners = new Set<(event: ExecutionEvent) => void>();
+  private roomKickedListeners = new Set<() => void>();
 
   constructor(
     siteId: string,
-    userId: string,
     roomId: string,
     accessKey: string,
     serverUrl: string,
     displayName: string = `User ${siteId.slice(0, 6)}`,
-    color: string = '#38bdf8'
+    color: string = '#38bdf8',
+    creatorToken: string | null = null
   ) {
     this.siteId = siteId;
-    this.projectTree = new ProjectTree(siteId);
-    this.userId = userId;
     this.roomId = roomId;
     this.accessKey = accessKey;
+    this.creatorToken = creatorToken;
     this.displayName = displayName;
     this.color = color;
     this.projectTree = ProjectTree.fromEntries(siteId, this.files);
@@ -181,7 +196,7 @@ export class SignalRCrdtProvider {
       try {
         this.projectTree.applyOperation(operation);
       } catch {
-        /* Invalid local cache is discarded below. */
+        continue;
       }
     }
     this.files = this.projectTree.getEntries();
@@ -314,6 +329,39 @@ export class SignalRCrdtProvider {
     const operation = this.projectTree.deleteEntry(entryId);
     await this.submitTreeOperation(operation);
   }
+
+  public async importProjectFiles(files: ImportedFileContent[]): Promise<void> {
+    if (!this.creatorToken)
+      throw new Error('Only the room creator can import a folder.');
+    if (this.localEditLocked)
+      throw new Error('The room admin has locked your editing access.');
+    if (this.connection.state !== HubConnectionState.Connected)
+      throw new Error('Connect to the room before importing a folder.');
+    await this.flushTreeOperations();
+    const importedFiles = await prepareProjectImport(files, this.siteId);
+
+    const importId = crypto.randomUUID().replaceAll('-', '');
+    const operations = await this.connection.invoke<ProjectTreeOperation[]>(
+      'ImportProject',
+      this.roomId,
+      this.creatorToken,
+      importId,
+      importedFiles.map(({ path, id, compressedSnapshot }) => ({
+        path,
+        id,
+        compressedSnapshot,
+      }))
+    );
+
+    for (const operation of operations) this.applyTreeOperation(operation);
+    for (const file of importedFiles) {
+      const document = this.documentFor(file.id);
+      document.fromSnapshot(file.snapshot);
+      this.buffers.get(file.id)?.processPending();
+    }
+    if (importedFiles[0]) this.setActiveFile(importedFiles[0].id);
+    this.emitChange();
+  }
   public async toggleParticipantEditLock(connectionId: string): Promise<void> {
     await this.connection.invoke(
       'ToggleParticipantEditLock',
@@ -333,7 +381,19 @@ export class SignalRCrdtProvider {
     );
   }
 
+  public async kickParticipant(connectionId: string): Promise<void> {
+    await this.connection.invoke('KickParticipant', this.roomId, connectionId);
+  }
+
   private updateFiles(files: RoomEntry[]): void {
+    this.removeStaleFileState(files);
+    this.files = files;
+    this.initializeFileDocuments(files);
+    this.reconcileActiveFile(files);
+    this.publishFileUpdates(files);
+  }
+
+  private removeStaleFileState(files: RoomEntry[]): void {
     const nextIds = new Set(files.map((entry) => entry.id));
     for (const oldEntry of this.files) {
       if (nextIds.has(oldEntry.id)) continue;
@@ -343,12 +403,23 @@ export class SignalRCrdtProvider {
       if (timer) clearTimeout(timer);
       this.snapshotSaveTimers.delete(oldEntry.id);
     }
-    this.files = files;
+  }
+
+  private initializeFileDocuments(files: RoomEntry[]): void {
     for (const file of files) {
       if (!file.isFolder) this.documentFor(file.id);
     }
-    if (!files.some((file) => file.id === this.activeFile && !file.isFolder))
+  }
+
+  private reconcileActiveFile(files: RoomEntry[]): void {
+    const activeFile = files.find(
+      (file) => file.id === this.activeFile && !file.isFolder
+    );
+    if (!activeFile)
       this.activeFile = files.find((file) => !file.isFolder)?.id ?? '';
+  }
+
+  private publishFileUpdates(files: RoomEntry[]): void {
     this.fileListeners.forEach((listener) => listener([...files]));
     const active = files.find((file) => file.id === this.activeFile);
     if (active)
@@ -438,7 +509,7 @@ export class SignalRCrdtProvider {
       try {
         localStorage.removeItem(this.pendingTreeStorageKey());
       } catch {
-        /* Browser storage can be disabled. */
+        return [];
       }
       return [];
     }
@@ -454,7 +525,7 @@ export class SignalRCrdtProvider {
           JSON.stringify(this.pendingTreeOperations)
         );
     } catch {
-      // The in-memory queue remains active if browser storage is unavailable.
+      return;
     }
   }
 
@@ -588,11 +659,6 @@ export class SignalRCrdtProvider {
     return () => this.awarenessListeners.delete(listener);
   }
 
-  public onEvicted(listener: (newRoomId?: string) => void): () => void {
-    this.evictedListeners.add(listener);
-    return () => this.evictedListeners.delete(listener);
-  }
-
   public onRoomParticipants(
     listener: (participants: ParticipantInfo[]) => void
   ): () => void {
@@ -601,7 +667,17 @@ export class SignalRCrdtProvider {
     return () => this.roomParticipantsListeners.delete(listener);
   }
 
+  public onRoomKicked(listener: () => void): () => void {
+    this.roomKickedListeners.add(listener);
+    return () => this.roomKickedListeners.delete(listener);
+  }
+
   private registerHubHandlers(): void {
+    this.connection.on('KickedFromRoom', () => {
+      this.roomKickedListeners.forEach((listener) => listener());
+      void this.connection.stop();
+    });
+
     const emitExecutionEvent = (event: ExecutionEvent) => {
       this.executionEventListeners.forEach((listener) => listener(event));
     };
@@ -611,7 +687,7 @@ export class SignalRCrdtProvider {
 
     this.connection.on('ChatMessage', (raw: Record<string, unknown>) => {
       this.chatMessageListeners.forEach((listener) =>
-        listener(this.normalizeChatMessage(raw))
+        listener(normalizeChatMessage(raw))
       );
     });
 
@@ -619,7 +695,7 @@ export class SignalRCrdtProvider {
       'ChatHistory',
       (rawMessages: Array<Record<string, unknown>>) => {
         const messages = (rawMessages || []).map((message) =>
-          this.normalizeChatMessage(message)
+          normalizeChatMessage(message)
         );
         this.chatHistoryListeners.forEach((listener) => listener(messages));
       }
@@ -631,7 +707,7 @@ export class SignalRCrdtProvider {
       try {
         this.projectTree.fromSnapshot(localSnapshot);
       } catch {
-        /* Initial local state may be empty. */
+        this.projectTree = ProjectTree.fromEntries(this.siteId, files);
       }
       this.updateFiles(this.projectTree.getEntries());
     });
@@ -713,15 +789,29 @@ export class SignalRCrdtProvider {
       'RoomParticipants',
       (rawParticipants: Array<Record<string, unknown>>) => {
         const participants = (rawParticipants || []).map((p) =>
-          this.normalizeParticipant(p)
+          normalizeParticipant(p)
         );
         this.setRoomParticipants(participants);
       }
     );
 
     this.connection.on('ParticipantUpdated', (raw: Record<string, unknown>) => {
-      this.upsertRoomParticipant(this.normalizeParticipant(raw));
+      this.upsertRoomParticipant(normalizeParticipant(raw));
     });
+
+    this.connection.on(
+      'ParticipantAvatarUpdated',
+      (connectionId: string, avatarUrl: string | null) => {
+        const participant = this.roomParticipants.find(
+          (item) => item.connectionId === connectionId
+        );
+        if (participant)
+          this.upsertRoomParticipant({
+            ...participant,
+            avatarUrl: avatarUrl ?? undefined,
+          });
+      }
+    );
 
     this.connection.on(
       'PeerJoined',
@@ -729,15 +819,15 @@ export class SignalRCrdtProvider {
         peerId: string,
         displayName: string,
         color: string,
-        userId?: string,
         isAdmin = false,
-        isLocked = false
+        isLocked = false,
+        avatarUrl?: string
       ) => {
         this.upsertRoomParticipant({
           connectionId: peerId,
           displayName,
           color,
-          userId,
+          avatarUrl,
           isAdmin,
           isLocked,
         });
@@ -749,19 +839,6 @@ export class SignalRCrdtProvider {
         (participant) => participant.connectionId === peerId
       );
     });
-
-    this.connection.on(
-      'PeerLeftByUser',
-      (userId: string, newRoomId?: string) => {
-        this.removeRoomParticipants(
-          (participant) => participant.userId === userId
-        );
-        if (userId === this.userId) {
-          this.evictedListeners.forEach((l) => l(newRoomId));
-          this.disconnect().catch(() => {});
-        }
-      }
-    );
 
     this.connection.onreconnecting(() => {
       this.emitStatus('reconnecting');
@@ -828,39 +905,15 @@ export class SignalRCrdtProvider {
     );
   }
 
-  private normalizeParticipant(raw: Record<string, unknown>): ParticipantInfo {
-    return {
-      connectionId: String(raw.connectionId ?? raw.ConnectionId ?? ''),
-      displayName: String(raw.displayName ?? raw.DisplayName ?? 'Anonymous'),
-      color: String(raw.color ?? raw.Color ?? '#38bdf8'),
-      userId: raw.userId
-        ? String(raw.userId)
-        : raw.UserId
-          ? String(raw.UserId)
-          : undefined,
-      isAdmin: Boolean(raw.isAdmin ?? raw.IsAdmin),
-      isLocked: Boolean(raw.isLocked ?? raw.IsLocked),
-    };
-  }
-
-  private normalizeChatMessage(raw: Record<string, unknown>): ChatMessage {
-    return {
-      id: String(raw.id ?? raw.Id ?? ''),
-      author: String(raw.author ?? raw.Author ?? 'Anonymous'),
-      color: String(raw.color ?? raw.Color ?? '#38bdf8'),
-      content: String(raw.content ?? raw.Content ?? ''),
-      sentAt: String(raw.sentAt ?? raw.SentAt ?? new Date().toISOString()),
-    };
-  }
-
   private async joinCurrentRoom(): Promise<void> {
     await this.connection.invoke(
       'JoinRoom',
       this.roomId,
       this.accessKey,
-      this.userId,
       this.displayName,
-      this.color
+      this.color,
+      this.creatorToken,
+      this.avatarUrl
     );
   }
 

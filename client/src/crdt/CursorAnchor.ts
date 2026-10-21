@@ -14,13 +14,13 @@ export interface CursorAnchor {
   beforeId?: CrdtId | null;
 }
 
-interface CursorPosition {
+export interface CursorPosition {
   offset: number;
   lineNumber: number;
   column: number;
 }
 
-interface SelectionAnchor {
+export interface SelectionAnchor {
   anchor: CursorAnchor;
   head: CursorAnchor;
 }
@@ -76,53 +76,41 @@ export function resolveCursorAnchor(
   anchor: CursorAnchor | null
 ): CursorPosition {
   if (!anchor) {
-    return { offset: 0, lineNumber: 1, column: 1 };
+    return startPosition();
   }
 
-  if (anchor.beforeId) {
-    const beforeIndex = doc.chars.findIndex((char) =>
-      crdtIdsEqual(char.id, anchor.beforeId!)
-    );
-    if (beforeIndex !== -1) {
-      let visibleOffset = 0;
-      for (let i = 0; i < doc.chars.length; i++) {
-        const char = doc.chars[i];
-        if (i >= beforeIndex && !char.isDeleted) {
-          return resolveVisibleOffset(doc, visibleOffset);
-        }
-        if (!char.isDeleted) {
-          visibleOffset += doc.chars[i].value.length;
-        }
-      }
-      // If the target and everything after it were deleted, clamp to EOF.
-      return resolveVisibleOffset(doc, visibleOffset);
-    }
+  const beforeIndex = findAnchorIndex(doc, anchor.beforeId);
+  if (beforeIndex !== -1) {
+    return resolveVisibleOffset(doc, visibleOffsetBefore(doc, beforeIndex));
   }
 
-  if (anchor.afterId === null) {
-    return { offset: 0, lineNumber: 1, column: 1 };
-  }
+  const afterIndex = findAnchorIndex(doc, anchor.afterId);
+  return afterIndex === -1
+    ? startPosition()
+    : resolveVisibleOffset(doc, visibleOffsetThrough(doc, afterIndex));
+}
 
-  let targetIndex = -1;
-  for (let i = 0; i < doc.chars.length; i++) {
-    if (crdtIdsEqual(doc.chars[i].id, anchor.afterId)) {
-      targetIndex = i;
-      break;
-    }
-  }
+function startPosition(): CursorPosition {
+  return { offset: 0, lineNumber: 1, column: 1 };
+}
 
-  if (targetIndex === -1) {
-    return { offset: 0, lineNumber: 1, column: 1 };
-  }
+function findAnchorIndex(
+  doc: CrdtDocument,
+  id: CrdtId | null | undefined
+): number {
+  return id ? doc.chars.findIndex((char) => crdtIdsEqual(char.id, id)) : -1;
+}
 
-  let visibleOffset = 0;
-  for (let i = 0; i <= targetIndex; i++) {
-    if (!doc.chars[i].isDeleted) {
-      visibleOffset += doc.chars[i].value.length;
-    }
+function visibleOffsetBefore(doc: CrdtDocument, index: number): number {
+  let offset = 0;
+  for (let i = 0; i < index; i++) {
+    if (!doc.chars[i].isDeleted) offset += doc.chars[i].value.length;
   }
+  return offset;
+}
 
-  return resolveVisibleOffset(doc, visibleOffset);
+function visibleOffsetThrough(doc: CrdtDocument, index: number): number {
+  return visibleOffsetBefore(doc, index + 1);
 }
 
 function resolveVisibleOffset(

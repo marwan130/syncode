@@ -8,7 +8,7 @@ import type {
   SignalRCrdtProvider,
 } from '../../providers/SignalRCrdtProvider';
 
-interface CursorsProps {
+export interface CursorsProps {
   editor: monacoType.editor.IStandaloneCodeEditor;
   peers: Map<string, AwarenessState>;
   providerRef: RefObject<SignalRCrdtProvider | null>;
