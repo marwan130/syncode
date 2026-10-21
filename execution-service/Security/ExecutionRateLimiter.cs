@@ -37,8 +37,7 @@ public sealed class ExecutionRateLimiter
         ArgumentNullException.ThrowIfNull(redis);
         if (string.IsNullOrWhiteSpace(keyPrefix))
             throw new ArgumentException("A Redis key prefix is required.", nameof(keyPrefix));
-        if (limit < 1)
-            throw new ArgumentOutOfRangeException(nameof(limit));
+        ArgumentOutOfRangeException.ThrowIfLessThan(limit, 1);
 
         _database = redis.GetDatabase();
         _keyPrefix = keyPrefix;

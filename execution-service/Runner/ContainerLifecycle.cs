@@ -70,8 +70,11 @@ public sealed class ContainerLifecycle : BackgroundService
         var now = DateTimeOffset.UtcNow;
         if (_lastCountLog == DateTimeOffset.MinValue || now - _lastCountLog >= ContainerCountLogInterval)
         {
-            _logger.LogInformation("Runner container count: {TotalContainers} total, {RunningContainers} running",
-                managed.Length, managed.Count(parts => parts[2] == "running"));
+            if (_logger.IsEnabled(LogLevel.Information))
+            {
+                _logger.LogInformation("Runner container count: {TotalContainers} total, {RunningContainers} running",
+                    managed.Length, managed.Count(parts => parts[2] == "running"));
+            }
             _lastCountLog = now;
         }
 

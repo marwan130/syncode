@@ -104,7 +104,7 @@ public sealed class InteractiveTerminalSessions : IHostedService, IAsyncDisposab
 
     public async Task<TerminalSessionOutput> ReadOutputAsync(string id, int offset, CancellationToken cancellationToken)
     {
-        if (offset < 0) throw new ArgumentOutOfRangeException(nameof(offset));
+        ArgumentOutOfRangeException.ThrowIfNegative(offset);
         var session = Find(id);
         await session.OutputLock.WaitAsync(cancellationToken);
         try
@@ -180,7 +180,10 @@ public sealed class InteractiveTerminalSessions : IHostedService, IAsyncDisposab
         ReleaseSlot(session);
         try { if (session.OutputTask is not null) await session.OutputTask; }
         catch (Exception exception) when (exception is IOException or ObjectDisposedException or OperationCanceledException)
-        { _logger.LogDebug(exception, "Terminal output stream closed for {SessionId}", session.Id); }
+        {
+            if (_logger.IsEnabled(LogLevel.Debug))
+                _logger.LogDebug(exception, "Terminal output stream closed for {SessionId}", session.Id);
+        }
     }
 
     private async Task CleanupLoopAsync(CancellationToken cancellationToken)
@@ -211,7 +214,10 @@ public sealed class InteractiveTerminalSessions : IHostedService, IAsyncDisposab
             { KillProcess(session.Process); }
             try { if (session.ExitTask is not null) await session.ExitTask.WaitAsync(TimeSpan.FromSeconds(2)); }
             catch (Exception exception) when (exception is InvalidOperationException or ObjectDisposedException or OperationCanceledException or TimeoutException)
-            { _logger.LogDebug(exception, "Terminal process watcher did not finish for {SessionId}", session.Id); }
+            {
+                if (_logger.IsEnabled(LogLevel.Debug))
+                    _logger.LogDebug(exception, "Terminal process watcher did not finish for {SessionId}", session.Id);
+            }
             session.Process.Dispose();
         }
         finally
@@ -223,7 +229,7 @@ public sealed class InteractiveTerminalSessions : IHostedService, IAsyncDisposab
 
     private void ReleaseSlot(Session session)
     {
-        if (Interlocked.Exchange(ref session.SlotReleased, 1) == 0) _sessionSlots.Release();
+        if (session.TryReleaseSlot()) _sessionSlots.Release();
     }
 
     private async Task KillContainerAsync(string name)
@@ -241,7 +247,10 @@ public sealed class InteractiveTerminalSessions : IHostedService, IAsyncDisposab
             if (process.Start()) await process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(3));
         }
         catch (Exception exception) when (exception is IOException or InvalidOperationException or TimeoutException or System.ComponentModel.Win32Exception)
-        { _logger.LogDebug(exception, "Could not immediately remove terminal container {ContainerName}", name); }
+        {
+            if (_logger.IsEnabled(LogLevel.Debug))
+                _logger.LogDebug(exception, "Could not immediately remove terminal container {ContainerName}", name);
+        }
     }
 
     private static void KillProcess(Process process)
@@ -267,19 +276,22 @@ public sealed class InteractiveTerminalSessions : IHostedService, IAsyncDisposab
 
     private sealed class Session(string id, string containerName, Process process)
     {
-        public string Id { get; } = id;
-        public string ContainerName { get; } = containerName;
-        public Process Process { get; } = process;
-        public StringBuilder Output { get; } = new();
-        public SemaphoreSlim InputLock { get; } = new(1, 1);
-        public SemaphoreSlim OutputLock { get; } = new(1, 1);
-        public DateTimeOffset CreatedAt { get; } = DateTimeOffset.UtcNow;
-        public DateTimeOffset LastActivity { get; set; } = DateTimeOffset.UtcNow;
-        public bool OutputLimitReached { get; set; }
-        public DateTimeOffset? ExitedAt { get; set; }
-        public int? ExitCode { get; set; }
-        public int SlotReleased;
-        public Task? OutputTask { get; set; }
-        public Task? ExitTask { get; set; }
+        internal string Id { get; } = id;
+        internal string ContainerName { get; } = containerName;
+        internal Process Process { get; } = process;
+        internal StringBuilder Output { get; } = new();
+        internal SemaphoreSlim InputLock { get; } = new(1, 1);
+        internal SemaphoreSlim OutputLock { get; } = new(1, 1);
+        internal DateTimeOffset CreatedAt { get; } = DateTimeOffset.UtcNow;
+        internal DateTimeOffset LastActivity { get; set; } = DateTimeOffset.UtcNow;
+        internal bool OutputLimitReached { get; set; }
+        internal DateTimeOffset? ExitedAt { get; set; }
+        internal int? ExitCode { get; set; }
+        internal Task? OutputTask { get; set; }
+        internal Task? ExitTask { get; set; }
+
+        private int _slotReleased;
+
+        internal bool TryReleaseSlot() => Interlocked.Exchange(ref _slotReleased, 1) == 0;
     }
 }

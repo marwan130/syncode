@@ -142,7 +142,7 @@ public sealed class ContainerRunner
         }
     }
 
-    private IReadOnlyList<string> BuildRunArguments(
+    private List<string> BuildRunArguments(
         string name,
         string image,
         string sourcePath,

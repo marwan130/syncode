@@ -1,13 +1,14 @@
-using System.Security.Cryptography;
 using System.Text;
 using Microsoft.AspNetCore.Http.Json;
 using StackExchange.Redis;
+using Syncode.ExecutionService.Api;
 using Syncode.ExecutionService.Queue;
 using Syncode.ExecutionService.Runner;
 using Syncode.ExecutionService.Security;
 
 var builder = WebApplication.CreateBuilder(args);
-var apiKey = builder.Configuration["ExecutionService:ApiKey"] ?? Environment.GetEnvironmentVariable("SYNCODE_EXECUTION_API_KEY");
+var apiKey = builder.Configuration["ExecutionService:ApiKey"] ??
+    Environment.GetEnvironmentVariable("SYNCODE_EXECUTION_API_KEY");
 if (string.IsNullOrWhiteSpace(apiKey))
     throw new InvalidOperationException("Set ExecutionService:ApiKey or SYNCODE_EXECUTION_API_KEY before starting the execution service.");
 if (Encoding.UTF8.GetByteCount(apiKey) < 32)
@@ -20,20 +21,20 @@ if (string.IsNullOrWhiteSpace(redisConnection))
         throw new InvalidOperationException("Configure Redis before starting the execution service outside Development.");
     redisConnection = "localhost:6379";
 }
+
 var redis = await ConnectionMultiplexer.ConnectAsync(redisConnection);
-builder.Services.ConfigureHttpJsonOptions(options => options.SerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter()));
+builder.Services.ConfigureHttpJsonOptions(options =>
+    options.SerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter()));
 builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = 128 * 1024);
 builder.WebHost.UseUrls(builder.Configuration["ExecutionService:Urls"] ?? "http://127.0.0.1:5112");
 builder.Services.AddSingleton<IConnectionMultiplexer>(redis);
-var outputChannel = RedisChannel.Literal(
-    $"{builder.Configuration["ExecutionService:QueuePrefix"] ?? "syncode:execution"}:output:stream");
+
+var queuePrefix = builder.Configuration["ExecutionService:QueuePrefix"] ?? "syncode:execution";
+var outputChannel = RedisChannel.Literal($"{queuePrefix}:output:stream");
 builder.Services.AddSingleton(sp => new ExecutionOutputPublisher(
-    redis.GetSubscriber(),
-    outputChannel,
-    sp.GetRequiredService<ILogger<ExecutionOutputPublisher>>()));
+    redis.GetSubscriber(), outputChannel, sp.GetRequiredService<ILogger<ExecutionOutputPublisher>>()));
 builder.Services.AddSingleton(sp => new ExecutionRateLimiter(
-    sp.GetRequiredService<IConnectionMultiplexer>(),
-    builder.Configuration["ExecutionService:QueuePrefix"] ?? "syncode:execution",
+    sp.GetRequiredService<IConnectionMultiplexer>(), queuePrefix,
     builder.Configuration.GetValue("ExecutionService:MaxExecutionsPerRoomPerMinute", 10),
     TimeSpan.FromMinutes(builder.Configuration.GetValue("ExecutionService:ExecutionRateWindowMinutes", 1))));
 builder.Services.AddSingleton(new DockerCli(builder.Configuration["ExecutionService:DockerCli"] ?? "docker"));
@@ -44,121 +45,22 @@ builder.Services.AddHostedService(sp => sp.GetRequiredService<InteractiveTermina
 builder.Services.AddSingleton(ResourceLimits.Default);
 builder.Services.AddSingleton(sp => new ExecutionJobQueue(
     sp.GetRequiredService<IConnectionMultiplexer>(),
-    builder.Configuration.GetValue("ExecutionService:MaxPendingJobs", 50),
-    builder.Configuration["ExecutionService:QueuePrefix"] ?? "syncode:execution"));
+    builder.Configuration.GetValue("ExecutionService:MaxPendingJobs", 50), queuePrefix));
 builder.Services.AddSingleton(sp => new ContainerRunner(
-    sp.GetRequiredService<DockerCli>(),
-    sp.GetRequiredService<ActiveContainerRegistry>(),
-    sp.GetRequiredService<ILogger<ContainerRunner>>(),
-    sp.GetRequiredService<ResourceLimits>()));
+    sp.GetRequiredService<DockerCli>(), sp.GetRequiredService<ActiveContainerRegistry>(),
+    sp.GetRequiredService<ILogger<ContainerRunner>>(), sp.GetRequiredService<ResourceLimits>()));
 builder.Services.AddHostedService(sp => new ContainerLifecycle(
-    sp.GetRequiredService<DockerCli>(),
-    sp.GetRequiredService<ActiveContainerRegistry>(),
-    sp.GetRequiredService<ILogger<ContainerLifecycle>>(),
-    sp.GetRequiredService<ResourceLimits>()));
+    sp.GetRequiredService<DockerCli>(), sp.GetRequiredService<ActiveContainerRegistry>(),
+    sp.GetRequiredService<ILogger<ContainerLifecycle>>(), sp.GetRequiredService<ResourceLimits>()));
 builder.Services.AddHostedService(sp => new ExecutionQueueWorker(
-    sp.GetRequiredService<ExecutionJobQueue>(),
-    sp.GetRequiredService<ContainerRunner>(),
-    sp.GetRequiredService<ExecutionOutputPublisher>(),
-    sp.GetRequiredService<ILogger<ExecutionQueueWorker>>(),
+    sp.GetRequiredService<ExecutionJobQueue>(), sp.GetRequiredService<ContainerRunner>(),
+    sp.GetRequiredService<ExecutionOutputPublisher>(), sp.GetRequiredService<ILogger<ExecutionQueueWorker>>(),
     builder.Configuration.GetValue("ExecutionService:WorkerCount", 3)));
 
 var app = builder.Build();
 app.UseExceptionHandler(_ => { });
 app.MapGet("/health", () => Results.Ok(new { status = "healthy" }));
-app.MapPost("/api/terminals", async (HttpContext context, InteractiveTerminalSessions terminals, CancellationToken cancellationToken) =>
-{
-    if (!HasValidApiKey(context, apiKey)) return Results.Unauthorized();
-    try { return Results.Ok(await terminals.CreateAsync(cancellationToken)); }
-    catch (TerminalSessionLimitException exception) { return Results.Problem(exception.Message, statusCode: StatusCodes.Status429TooManyRequests); }
-    catch (Exception exception) when (exception is IOException or InvalidOperationException or System.ComponentModel.Win32Exception)
-    { return Results.Problem("The isolated Bash terminal could not start. Check that Docker is available and the syncode-runner-bash image is built.", statusCode: StatusCodes.Status503ServiceUnavailable); }
-});
-app.MapPost("/api/terminals/{sessionId}/input", async (HttpContext context, string sessionId, InputRequest request, InteractiveTerminalSessions terminals, CancellationToken cancellationToken) =>
-{
-    if (!HasValidApiKey(context, apiKey)) return Results.Unauthorized();
-    try { await terminals.WriteInputAsync(sessionId, request.Input, cancellationToken); return Results.NoContent(); }
-    catch (KeyNotFoundException) { return Results.NotFound(); }
-    catch (ArgumentException exception) { return Results.BadRequest(new { error = exception.Message }); }
-    catch (InvalidOperationException exception) { return Results.Conflict(new { error = exception.Message }); }
-});
-app.MapGet("/api/terminals/{sessionId}/output", async (HttpContext context, string sessionId, int offset, InteractiveTerminalSessions terminals, CancellationToken cancellationToken) =>
-{
-    if (!HasValidApiKey(context, apiKey)) return Results.Unauthorized();
-    if (offset < 0) return Results.BadRequest(new { error = "Invalid terminal output offset." });
-    try { return Results.Ok(await terminals.ReadOutputAsync(sessionId, offset, cancellationToken)); }
-    catch (KeyNotFoundException) { return Results.NotFound(); }
-});
-app.MapDelete("/api/terminals/{sessionId}", async (HttpContext context, string sessionId, InteractiveTerminalSessions terminals) =>
-{
-    if (!HasValidApiKey(context, apiKey)) return Results.Unauthorized();
-    await terminals.CloseAsync(sessionId);
-    return Results.NoContent();
-});
-app.MapPost("/api/executions", async (HttpContext context, QueueExecutionRequest request, ExecutionJobQueue queue, ExecutionRateLimiter rateLimiter, CancellationToken cancellationToken) =>
-{
-    if (!HasValidApiKey(context, apiKey))
-        return Results.Unauthorized();
-
-    if (string.IsNullOrWhiteSpace(request.RoomId) || request.RoomId.Length > 128 ||
-        string.IsNullOrWhiteSpace(request.RequestedBy) || request.RequestedBy.Length > 128 ||
-        request.Source is null || Encoding.UTF8.GetByteCount(request.Source) > ResourceLimits.Default.MaxSourceBytes ||
-        request.ProjectFiles is null || request.ProjectFiles.Count is < 1 or > 500 ||
-        !IsSafeProjectPath(request.SourcePath) ||
-        !request.ProjectFiles.Any(file => file is not null && file.Path == request.SourcePath) ||
-        request.ProjectFiles.Any(file => file is null || file.Content is null || !IsSafeProjectPath(file.Path)) ||
-        request.ProjectFiles.Select(file => file.Path).Distinct(StringComparer.Ordinal).Count() != request.ProjectFiles.Count ||
-        request.ProjectFiles.Sum(file => (long)Encoding.UTF8.GetByteCount(file.Content)) -
-            Encoding.UTF8.GetByteCount(request.ProjectFiles.First(file => file.Path == request.SourcePath).Content) +
-            Encoding.UTF8.GetByteCount(request.Source) > ResourceLimits.Default.MaxSourceBytes ||
-        (request.RequestId is not null && !Guid.TryParse(request.RequestId, out _)) ||
-        !Enum.IsDefined(request.Language))
-        return Results.BadRequest(new { error = "Invalid execution request." });
-
-    var rateLimit = await rateLimiter.TryAcquireAsync(request.RoomId, Guid.NewGuid().ToString("N"), cancellationToken);
-    if (!rateLimit.Allowed)
-    {
-        context.Response.Headers["Retry-After"] = Math.Max(1, (int)Math.Ceiling(rateLimit.RetryAfter.TotalSeconds))
-            .ToString(System.Globalization.CultureInfo.InvariantCulture);
-        return Results.Json(
-            new { error = "Execution rate limit reached. Please wait before submitting another run." },
-            statusCode: StatusCodes.Status429TooManyRequests);
-    }
-
-    var job = new ExecutionJob(
-        Guid.NewGuid().ToString("N"), request.RoomId, request.RequestedBy, request.Language,
-        request.Source, DateTimeOffset.UtcNow, request.RequestId is null
-            ? Guid.NewGuid().ToString("N")
-            : Guid.Parse(request.RequestId).ToString("D"), request.SourcePath, request.ProjectFiles);
-    var enqueue = await queue.EnqueueOrGetAsync(job, cancellationToken);
-    return enqueue.IsFull
-        ? Results.Problem("The execution queue is full. Try again shortly.", statusCode: StatusCodes.Status503ServiceUnavailable)
-        : Results.Accepted($"/api/executions/{enqueue.JobId}", new { jobId = enqueue.JobId, queuePosition = enqueue.QueuePosition });
-});
-app.MapGet("/api/executions/{jobId}", async (HttpContext context, string jobId, ExecutionJobQueue queue, CancellationToken cancellationToken) =>
-{
-    if (!HasValidApiKey(context, apiKey))
-        return Results.Unauthorized();
-
-    if (jobId.Length != 32 || !jobId.All(Uri.IsHexDigit))
-        return Results.BadRequest(new { error = "Invalid execution id." });
-
-    var status = await queue.GetStatusAsync(jobId, cancellationToken);
-    return status is null ? Results.NotFound() : Results.Ok(status);
-});
-app.MapPost("/api/executions/{jobId}/input", async (HttpContext context, string jobId, InputRequest request, DockerCli docker, CancellationToken cancellationToken) =>
-{
-    if (!HasValidApiKey(context, apiKey)) return Results.Unauthorized();
-    if (jobId.Length != 32 || !jobId.All(Uri.IsHexDigit) || string.IsNullOrEmpty(request.Input) ||
-        request.Input.Length > 1024 || request.Input.Any(character =>
-            char.IsControl(character) && character is not '\r' and not '\n' and not '\t' and not '\b' and not '\x1b' and not '\x03'))
-        return Results.BadRequest(new { error = "Invalid terminal input." });
-    try { await docker.WriteExecutionInputAsync(jobId, request.Input, cancellationToken); return Results.NoContent(); }
-    catch (ExecutionInputBufferLimitException) { return Results.StatusCode(StatusCodes.Status429TooManyRequests); }
-    catch (KeyNotFoundException) { return Results.NotFound(); }
-    catch (InvalidOperationException) { return Results.NotFound(); }
-    catch (IOException) { return Results.Conflict(new { error = "This execution is no longer accepting input." }); }
-});
+ExecutionEndpoints.Map(app, apiKey);
 
 try
 {
@@ -168,32 +70,3 @@ finally
 {
     await redis.CloseAsync();
 }
-
-static bool HasValidApiKey(HttpContext context, string expected)
-{
-    if (!context.Request.Headers.TryGetValue("X-Execution-Service-Key", out var supplied))
-        return false;
-
-    var expectedBytes = Encoding.UTF8.GetBytes(expected);
-    var suppliedBytes = Encoding.UTF8.GetBytes(supplied.ToString());
-    return suppliedBytes.Length == expectedBytes.Length && CryptographicOperations.FixedTimeEquals(suppliedBytes, expectedBytes);
-}
-
-static bool IsSafeProjectPath(string path)
-{
-    if (string.IsNullOrWhiteSpace(path) || path.Length > 512 || path.StartsWith('/') ||
-        path.Contains('\\') || path.Any(char.IsControl)) return false;
-    return path.Split('/').All(segment => segment.Length > 0 && segment is not "." and not ".." &&
-        segment.IndexOfAny([ ':', '*', '?', '"', '<', '>', '|' ]) < 0);
-}
-
-public sealed record QueueExecutionRequest(
-    string RoomId,
-    string RequestedBy,
-    ExecutionLanguage Language,
-    string Source,
-    string? RequestId = null,
-    string SourcePath = "",
-    IReadOnlyList<ExecutionProjectFile>? ProjectFiles = null);
-
-public sealed record InputRequest(string Input);
