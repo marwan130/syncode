@@ -8,9 +8,9 @@ namespace server.Controllers;
 [Route("api/rooms")]
 public class RoomsController : ControllerBase
 {
-    private readonly RedisRoomStore _store;
+    private readonly RedisRoomMetadataStore _rooms;
 
-    public RoomsController(RedisRoomStore store) => _store = store;
+    public RoomsController(RedisRoomMetadataStore rooms) => _rooms = rooms;
 
     [HttpPost]
     public async Task<IActionResult> Create()
@@ -22,8 +22,14 @@ public class RoomsController : ControllerBase
             .Replace('/', '_');
         var accessKeyHash = Convert.ToHexString(
             SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(accessKey)));
-        await _store.CreateRoomAsync(roomId, accessKeyHash);
-        return Ok(new { roomId, accessKey });
+        var creatorToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))
+            .TrimEnd('=')
+            .Replace('+', '-')
+            .Replace('/', '_');
+        var creatorTokenHash = Convert.ToHexString(
+            SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(creatorToken)));
+        await _rooms.CreateRoomAsync(roomId, accessKeyHash, creatorTokenHash);
+        return Ok(new { roomId, accessKey, creatorToken });
     }
 
     private static string GenerateRoomId()

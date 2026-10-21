@@ -2,16 +2,16 @@ namespace server.Services;
 
 public sealed class RoomConnectionLeaseService : BackgroundService
 {
-    private readonly RedisRoomStore _store;
+    private readonly RedisParticipantStore _participants;
     private readonly ServerInstanceIdentity _instance;
     private readonly ILogger<RoomConnectionLeaseService> _logger;
 
     public RoomConnectionLeaseService(
-        RedisRoomStore store,
+        RedisParticipantStore participants,
         ServerInstanceIdentity instance,
         ILogger<RoomConnectionLeaseService> logger)
     {
-        _store = store;
+        _participants = participants;
         _instance = instance;
         _logger = logger;
     }
@@ -21,7 +21,7 @@ public sealed class RoomConnectionLeaseService : BackgroundService
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(30));
         while (await timer.WaitForNextTickAsync(stoppingToken))
         {
-            try { await _store.RefreshInstanceConnectionLeaseAsync(_instance.Id); }
+            try { await _participants.RefreshInstanceConnectionLeaseAsync(_instance.Id); }
             catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
             {
                 _logger.LogWarning(ex, "Could not refresh the server connection capacity lease");

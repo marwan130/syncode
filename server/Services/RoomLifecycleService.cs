@@ -2,17 +2,20 @@ namespace server.Services;
 
 public class RoomLifecycleService : BackgroundService
 {
-    private readonly RedisRoomStore _store;
+    private readonly RedisRoomMetadataStore _rooms;
+    private readonly RedisParticipantStore _participants;
     private readonly ILogger<RoomLifecycleService> _logger;
     private readonly TimeSpan _expiryThreshold;
     private readonly TimeSpan _cleanupInterval;
 
     public RoomLifecycleService(
-        RedisRoomStore store,
+        RedisRoomMetadataStore rooms,
+        RedisParticipantStore participants,
         IConfiguration config,
         ILogger<RoomLifecycleService> logger)
     {
-        _store = store;
+        _rooms = rooms;
+        _participants = participants;
         _logger = logger;
 
         var expiryMinutes = config.GetValue<int>("RoomExpiry:Minutes", 120);
@@ -36,11 +39,11 @@ public class RoomLifecycleService : BackgroundService
     {
         try
         {
-            await _store.PruneInactiveRoomsAsync();
-            var stale = await _store.GetStaleRoomsAsync(_expiryThreshold);
+            await _participants.PruneInactiveRoomsAsync();
+            var stale = await _rooms.GetStaleRoomsAsync(_expiryThreshold);
             foreach (var roomId in stale)
             {
-                await _store.DeleteRoomAsync(roomId);
+                await _rooms.DeleteRoomAsync(roomId);
             }
         }
         catch (Exception ex)
