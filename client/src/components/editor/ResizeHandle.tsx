@@ -1,6 +1,6 @@
 import { useResizeHandle } from '../../hooks/useResizeHandle';
 
-interface ResizeHandleProps {
+export interface ResizeHandleProps {
   label: string;
   onResize: (deltaX: number) => void;
   reverse?: boolean;

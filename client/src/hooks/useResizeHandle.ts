@@ -1,6 +1,6 @@
 import { useRef, type KeyboardEvent, type PointerEvent } from 'react';
 
-type ResizeAxis = 'horizontal' | 'vertical';
+export type ResizeAxis = 'horizontal' | 'vertical';
 
 function getResizeDelta(
   axis: ResizeAxis,

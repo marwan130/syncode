@@ -28,7 +28,7 @@ export function storeTerminalHeight(value: number): void {
   try {
     localStorage.setItem(TERMINAL_HEIGHT_KEY, String(value));
   } catch {
-    // Panel sizing is still usable without persistent browser storage.
+    return;
   }
 }
 
@@ -47,7 +47,7 @@ export function storeExplorerWidth(value: number): void {
   try {
     localStorage.setItem(EXPLORER_WIDTH_KEY, String(value));
   } catch {
-    // Panel sizing is still usable without persistent browser storage.
+    return;
   }
 }
 
@@ -63,7 +63,7 @@ export function storeActiveFileId(roomId: string, fileId: string): void {
   try {
     sessionStorage.setItem(`syncode_active_file:${roomId}`, fileId);
   } catch {
-    // The current file remains usable without session storage.
+    return;
   }
 }
 
@@ -82,7 +82,7 @@ export function storePreviewWidth(width: number): void {
   try {
     localStorage.setItem(PREVIEW_WIDTH_KEY, String(width));
   } catch {
-    // Panel sizing is still usable without persistent browser storage.
+    return;
   }
 }
 

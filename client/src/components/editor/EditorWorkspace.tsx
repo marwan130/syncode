@@ -1,13 +1,10 @@
 import { useRef } from 'react';
 import type { DragEvent, FC, RefObject } from 'react';
-import Editor, { type OnMount } from '@monaco-editor/react';
+import type { OnMount } from '@monaco-editor/react';
 import type * as monaco from 'monaco-editor';
-import { Cursors } from './Cursors';
-import { EditorTabs } from './EditorTabs';
 import { ResizeHandle } from './ResizeHandle';
-import { languageForFileName, type LanguageMode } from './languageModes';
-import { configureMonacoEditor } from '../../utils/configureMonacoEditor';
-import { EmptyEditorPane } from './EmptyEditorPane';
+import type { LanguageMode } from './languageModes';
+import { EditorGroupPane } from './EditorGroupPane';
 import type {
   AwarenessState,
   ConnectionStatus,
@@ -15,12 +12,13 @@ import type {
   SignalRCrdtProvider,
 } from '../../providers/SignalRCrdtProvider';
 
-interface EditorWorkspaceProps {
+export interface EditorWorkspaceProps {
   entries: RoomEntry[];
   activeFileId: string;
   activeFile?: RoomEntry;
   activeFilePath: string;
   openFileIds: string[];
+  canSplitWorkspace: boolean;
   splitFileId: string | null;
   splitFile?: RoomEntry;
   splitFilePath: string;
@@ -51,6 +49,7 @@ export const EditorWorkspace: FC<EditorWorkspaceProps> = ({
   activeFile,
   activeFilePath,
   openFileIds,
+  canSplitWorkspace,
   splitFileId,
   splitFile,
   splitFilePath,
@@ -75,15 +74,6 @@ export const EditorWorkspace: FC<EditorWorkspaceProps> = ({
   fileDiagnostics,
 }) => {
   const editorGroupsRef = useRef<HTMLDivElement>(null);
-  const autocompleteOptions = {
-    quickSuggestions: autocompleteEnabled,
-    suggestOnTriggerCharacters: autocompleteEnabled,
-    wordBasedSuggestions: autocompleteEnabled
-      ? ('currentDocument' as const)
-      : ('off' as const),
-    parameterHints: { enabled: autocompleteEnabled },
-  };
-
   const handleDragOver = (event: DragEvent<HTMLDivElement>) => {
     if (event.dataTransfer.types.includes('application/x-syncode-file-id')) {
       event.preventDefault();
@@ -113,138 +103,158 @@ export const EditorWorkspace: FC<EditorWorkspaceProps> = ({
         </div>
       )}
       <div className="editor-workspace" ref={editorGroupsRef}>
-        <div
-          className="editor-pane"
-          style={
-            isSplitWorkspaceOpen
-              ? { flexBasis: `${100 - splitWidth}%` }
-              : undefined
-          }
-          onFocusCapture={() => onSetActiveGroup('primary')}
+        <EditorGroupPane
+          group="primary"
+          entries={entries}
+          activeFileId={activeFileId}
+          activeFile={activeFile}
+          activeFilePath={activeFilePath}
+          fileIds={openFileIds}
+          canSplitWorkspace={canSplitWorkspace}
+          isSplitWorkspaceOpen={isSplitWorkspaceOpen}
+          splitWidth={splitWidth}
+          status={status}
+          isLocked={isLocked}
+          autocompleteEnabled={autocompleteEnabled}
+          language={language}
+          peers={peers}
+          providerRef={providerRef}
+          monacoEditor={monacoEditor}
+          onMount={onMountPrimary}
+          onOpenFile={onOpenFile}
+          onCloseFileTab={onCloseFileTab}
+          onSplitWorkspace={onSplitWorkspace}
+          onSetActiveGroup={onSetActiveGroup}
           onDragOver={handleDragOver}
-          onDrop={(event) => handleDrop(event, 'primary')}
-        >
-          <EditorTabs
-            group="primary"
-            entries={entries}
-            fileIds={openFileIds}
-            selectedFileId={activeFileId}
-            fileDiagnostics={fileDiagnostics}
-            onSelectFile={(id) => onOpenFile(id, 'primary')}
-            onCloseFile={onCloseFileTab}
-            onSplitWorkspace={onSplitWorkspace}
-          />
-          {activeFile ? (
-            <div className="room-code-editor">
-              <Editor
-                height="100%"
-                language={language}
-                path={activeFilePath}
-                defaultValue=""
-                theme="syncode-current-theme"
-                beforeMount={configureMonacoEditor}
-                onMount={onMountPrimary}
-                options={{
-                  automaticLayout: true,
-                  fontSize: 14,
-                  minimap: { enabled: true },
-                  readOnly: status !== 'connected' || isLocked,
-                  renderValidationDecorations: 'on',
-                  glyphMargin: true,
-                  lightbulb: {
-                    enabled: 'on' as monaco.editor.ShowLightbulbIconMode,
-                  },
-                  fixedOverflowWidgets: true,
-                  ...autocompleteOptions,
-                }}
-              />
-              {monacoEditor && (
-                <Cursors
-                  editor={monacoEditor}
-                  peers={peers}
-                  providerRef={providerRef}
-                  status={status}
-                  fileId={activeFileId}
-                />
-              )}
-            </div>
-          ) : (
-            <EmptyEditorPane
-              entries={entries}
-              group="primary"
-              onOpenFile={onOpenFile}
-            />
-          )}
-        </div>
+          onDrop={handleDrop}
+          fileDiagnostics={fileDiagnostics}
+        />
 
         {isSplitWorkspaceOpen && (
-          <>
-            <ResizeHandle
-              label="Resize editor groups"
-              reverse
-              onResize={(delta) => {
-                const width =
-                  editorGroupsRef.current?.getBoundingClientRect().width ?? 0;
-                if (width > 0) {
-                  onSplitWidthChange((ratio) =>
-                    Math.max(25, Math.min(75, ratio + (delta / width) * 100))
-                  );
-                }
-              }}
-            />
-            <div
-              className="editor-pane split-editor-pane"
-              style={{ flexBasis: `${splitWidth}%` }}
-              onFocusCapture={() => onSetActiveGroup('secondary')}
-              onDragOver={handleDragOver}
-              onDrop={(event) => handleDrop(event, 'secondary')}
-            >
-              <EditorTabs
-                group="secondary"
-                entries={entries}
-                fileIds={splitFileId ? [splitFileId] : []}
-                selectedFileId={splitFileId}
-                fileDiagnostics={fileDiagnostics}
-                onSelectFile={(id) => onOpenFile(id, 'secondary')}
-                onCloseFile={onCloseFileTab}
-                onCloseGroup={onCloseSplitGroup}
-              />
-              {splitFile ? (
-                <div className="room-code-editor split-code-editor">
-                  <Editor
-                    height="100%"
-                    language={languageForFileName(splitFilePath)}
-                    path={splitFilePath}
-                    defaultValue=""
-                    theme="syncode-current-theme"
-                    beforeMount={configureMonacoEditor}
-                    onMount={onMountSecondary}
-                    options={{
-                      automaticLayout: true,
-                      fontSize: 14,
-                      minimap: { enabled: false },
-                      readOnly: status !== 'connected' || isLocked,
-                      renderValidationDecorations: 'on',
-                      glyphMargin: true,
-                      lightbulb: {
-                        enabled: 'on' as monaco.editor.ShowLightbulbIconMode,
-                      },
-                      fixedOverflowWidgets: true,
-                      ...autocompleteOptions,
-                    }}
-                  />
-                </div>
-              ) : (
-                <EmptyEditorPane
-                  entries={entries}
-                  group="secondary"
-                  onOpenFile={onOpenFile}
-                />
-              )}
-            </div>
-          </>
+          <SplitEditorGroup
+            editorGroupsRef={editorGroupsRef}
+            canSplitWorkspace={canSplitWorkspace}
+            entries={entries}
+            splitFileId={splitFileId}
+            splitFile={splitFile}
+            splitFilePath={splitFilePath}
+            splitWidth={splitWidth}
+            status={status}
+            isLocked={isLocked}
+            autocompleteEnabled={autocompleteEnabled}
+            language={language}
+            peers={peers}
+            providerRef={providerRef}
+            onMountSecondary={onMountSecondary}
+            onOpenFile={onOpenFile}
+            onCloseFileTab={onCloseFileTab}
+            onCloseSplitGroup={onCloseSplitGroup}
+            onSplitWidthChange={onSplitWidthChange}
+            onSetActiveGroup={onSetActiveGroup}
+            onDragOver={handleDragOver}
+            onDrop={handleDrop}
+            fileDiagnostics={fileDiagnostics}
+          />
         )}
       </div>
     </div>
   );
 };
+
+type SplitEditorGroupProps = Pick<
+  EditorWorkspaceProps,
+  | 'entries'
+  | 'splitFileId'
+  | 'splitFile'
+  | 'splitFilePath'
+  | 'splitWidth'
+  | 'status'
+  | 'isLocked'
+  | 'autocompleteEnabled'
+  | 'language'
+  | 'peers'
+  | 'providerRef'
+  | 'onMountSecondary'
+  | 'onOpenFile'
+  | 'onCloseFileTab'
+  | 'onCloseSplitGroup'
+  | 'onSplitWidthChange'
+  | 'onSetActiveGroup'
+  | 'fileDiagnostics'
+> & {
+  canSplitWorkspace: boolean;
+  editorGroupsRef: RefObject<HTMLDivElement | null>;
+  onDragOver: (event: DragEvent<HTMLDivElement>) => void;
+  onDrop: (
+    event: DragEvent<HTMLDivElement>,
+    group: 'primary' | 'secondary'
+  ) => void;
+};
+
+function SplitEditorGroup({
+  editorGroupsRef,
+  canSplitWorkspace,
+  entries,
+  splitFileId,
+  splitFile,
+  splitFilePath,
+  splitWidth,
+  status,
+  isLocked,
+  autocompleteEnabled,
+  language,
+  peers,
+  providerRef,
+  onMountSecondary,
+  onOpenFile,
+  onCloseFileTab,
+  onCloseSplitGroup,
+  onSplitWidthChange,
+  onSetActiveGroup,
+  onDragOver,
+  onDrop,
+  fileDiagnostics,
+}: SplitEditorGroupProps) {
+  const handleResize = (delta: number) => {
+    const width = editorGroupsRef.current?.getBoundingClientRect().width ?? 0;
+    if (width <= 0) return;
+    onSplitWidthChange((ratio) =>
+      Math.max(25, Math.min(75, ratio + (delta / width) * 100))
+    );
+  };
+
+  return (
+    <>
+      <ResizeHandle
+        label="Resize editor groups"
+        reverse
+        onResize={handleResize}
+      />
+      <EditorGroupPane
+        group="secondary"
+        entries={entries}
+        activeFileId={splitFileId ?? ''}
+        activeFile={splitFile}
+        activeFilePath={splitFilePath}
+        fileIds={splitFileId ? [splitFileId] : []}
+        canSplitWorkspace={canSplitWorkspace}
+        isSplitWorkspaceOpen
+        splitWidth={splitWidth}
+        status={status}
+        isLocked={isLocked}
+        autocompleteEnabled={autocompleteEnabled}
+        language={language}
+        peers={peers}
+        providerRef={providerRef}
+        onMount={onMountSecondary}
+        onOpenFile={onOpenFile}
+        onCloseFileTab={onCloseFileTab}
+        onCloseGroup={onCloseSplitGroup}
+        onSetActiveGroup={onSetActiveGroup}
+        onDragOver={onDragOver}
+        onDrop={onDrop}
+        fileDiagnostics={fileDiagnostics}
+      />
+    </>
+  );
+}

@@ -1,6 +1,6 @@
 import { useResizeHandle } from '../../hooks/useResizeHandle';
 
-interface VerticalResizeHandleProps {
+export interface VerticalResizeHandleProps {
   label: string;
   onResize: (deltaY: number) => void;
 }

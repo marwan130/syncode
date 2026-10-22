@@ -3,7 +3,7 @@ import type { FC } from 'react';
 import type { RoomEntry } from '../../providers/SignalRCrdtProvider';
 import { getEntryPath } from './editorLayoutStorage';
 
-interface EmptyEditorPaneProps {
+export interface EmptyEditorPaneProps {
   entries: RoomEntry[];
   group: 'primary' | 'secondary';
   onOpenFile: (fileId: string, group?: 'primary' | 'secondary') => void;
@@ -29,7 +29,8 @@ export const EmptyEditorPane: FC<EmptyEditorPaneProps> = ({
         </button>
       ) : (
         <div className="editor-drop-placeholder is-empty">
-          This workspace is empty. Create a file in the Explorer to start editing.
+          This workspace is empty. Create a file in the Explorer to start
+          editing.
         </div>
       )}
       {isFilePickerOpen && (
