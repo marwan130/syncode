@@ -13,7 +13,7 @@ export interface TerminalOutputChunk {
   text: string;
 }
 
-interface UseExecutionStreamProps {
+export interface UseExecutionStreamProps {
   providerRef: RefObject<SignalRCrdtProvider | null>;
   status: ConnectionStatus;
 }

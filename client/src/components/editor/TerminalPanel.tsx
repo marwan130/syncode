@@ -16,7 +16,7 @@ const Terminal = lazy(() =>
   import('./Terminal').then((module) => ({ default: module.Terminal }))
 );
 
-interface TerminalPanelProps {
+export interface TerminalPanelProps {
   isOpen: boolean;
   hasOpened: boolean;
   height: number;
@@ -24,7 +24,6 @@ interface TerminalPanelProps {
   outputRevision: number;
   message: string;
   jobId: string | null;
-  isRunning: boolean;
   providerRef: RefObject<SignalRCrdtProvider | null>;
   status: ConnectionStatus;
   newTerminalRequest: number;
@@ -42,7 +41,6 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
   outputRevision,
   message,
   jobId,
-  isRunning,
   providerRef,
   status,
   newTerminalRequest,
@@ -90,7 +88,6 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
             outputRevision={outputRevision}
             message={message}
             jobId={jobId}
-            isRunning={isRunning}
             providerRef={providerRef}
             status={status}
             newTerminalRequest={newTerminalRequest}
