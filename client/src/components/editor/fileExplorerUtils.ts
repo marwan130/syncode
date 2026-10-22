@@ -148,15 +148,26 @@ function resolveFolderDiagnostic(
 
   while (pending.length) {
     const child = pending.pop();
-    if (!child || visited.has(child.id)) continue;
-    visited.add(child.id);
+    if (!child || !markVisited(visited, child.id)) continue;
     const severity = fileDiagnostics[child.id];
     if (severity === 'error') return 'error';
-    if (severity === 'warning') hasWarning = true;
-    if (child.isFolder) {
-      pending.push(...(childrenByParent.get(child.id) ?? []));
-    }
+    hasWarning ||= severity === 'warning';
+    addChildrenToPending(child, childrenByParent, pending);
   }
 
   return hasWarning ? 'warning' : undefined;
+}
+
+function markVisited(visited: Set<string>, id: string): boolean {
+  if (visited.has(id)) return false;
+  visited.add(id);
+  return true;
+}
+
+function addChildrenToPending(
+  entry: RoomEntry,
+  childrenByParent: Map<string | null, RoomEntry[]>,
+  pending: RoomEntry[]
+): void {
+  if (entry.isFolder) pending.push(...(childrenByParent.get(entry.id) ?? []));
 }

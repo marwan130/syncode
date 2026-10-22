@@ -1,8 +1,14 @@
 import type { FC, ReactNode } from 'react';
 
-type ExplorerActionKind = 'new-file' | 'new-folder' | 'rename' | 'delete';
+export type ExplorerActionKind =
+  | 'new-file'
+  | 'new-folder'
+  | 'rename'
+  | 'delete'
+  | 'import-folder'
+  | 'save-project';
 
-interface ExplorerActionButtonProps {
+export interface ExplorerActionButtonProps {
   kind: ExplorerActionKind;
   label: string;
   disabled?: boolean;
@@ -20,6 +26,18 @@ const PATHS: Record<ExplorerActionKind, ReactNode> = {
     <>
       <path d="M2.75 5A1.75 1.75 0 0 1 4.5 3.25h4l1.75 2h5.25A1.75 1.75 0 0 1 17.25 7v7.5a1.75 1.75 0 0 1-1.75 1.75h-11a1.75 1.75 0 0 1-1.75-1.75z" />
       <path d="M10 8.5v6m-3-3h6" />
+    </>
+  ),
+  'import-folder': (
+    <>
+      <path d="M2.75 5A1.75 1.75 0 0 1 4.5 3.25h4l1.75 2h5.25A1.75 1.75 0 0 1 17.25 7v7.5a1.75 1.75 0 0 1-1.75 1.75h-11a1.75 1.75 0 0 1-1.75-1.75z" />
+      <path d="M10 13V7m-2 2 2-2 2 2" />
+    </>
+  ),
+  'save-project': (
+    <>
+      <path d="M2.75 5A1.75 1.75 0 0 1 4.5 3.25h4l1.75 2h5.25A1.75 1.75 0 0 1 17.25 7v7.5a1.75 1.75 0 0 1-1.75 1.75h-11a1.75 1.75 0 0 1-1.75-1.75z" />
+      <path d="M10 7v6m-2-2 2 2 2-2" />
     </>
   ),
   rename: (

@@ -22,6 +22,9 @@ export const FileExplorerPanel: FC<FileExplorerPanelProps> = ({
   onRename,
   onDelete,
   onMove,
+  canImportFolder,
+  onImportFolder,
+  onSaveProject,
 }) => {
   if (!isOpen) return null;
 
@@ -38,6 +41,9 @@ export const FileExplorerPanel: FC<FileExplorerPanelProps> = ({
           onRename={onRename}
           onDelete={onDelete}
           onMove={onMove}
+          canImportFolder={canImportFolder}
+          onImportFolder={onImportFolder}
+          onSaveProject={onSaveProject}
         />
       </div>
       <ResizeHandle

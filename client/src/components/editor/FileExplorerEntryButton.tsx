@@ -4,7 +4,7 @@ import type { RoomEntry } from '../../providers/SignalRCrdtProvider';
 import { getFileIcon } from './fileExplorerUtils';
 import { getExplorerNavigationAction } from './fileExplorerKeyboard';
 
-interface FileExplorerEntryButtonProps {
+export interface FileExplorerEntryButtonProps {
   entry: RoomEntry;
   depth: number;
   isExpanded: boolean;

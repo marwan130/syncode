@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import type { RoomEntry } from '../../providers/SignalRCrdtProvider';
+import type { ImportedFileContent } from '../../import/folderImport';
 
 export interface ExplorerNodeSharedProps {
   entries: RoomEntry[];
@@ -53,6 +54,9 @@ export interface FileExplorerTreeProps {
   onRename: (entry: RoomEntry, name: string) => Promise<void>;
   onDelete: (entry: RoomEntry) => void;
   onMove: (entry: RoomEntry, parentId: string | null) => Promise<void>;
+  canImportFolder?: boolean;
+  onImportFolder?: (files: ImportedFileContent[]) => Promise<void>;
+  onSaveProject?: () => Promise<void>;
 }
 
 export interface FileExplorerPanelProps extends FileExplorerTreeProps {
