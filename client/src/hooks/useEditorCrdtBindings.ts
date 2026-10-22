@@ -12,7 +12,7 @@ import type { CursorAnchor } from '../crdt/CursorAnchor';
 import { getEntryPath } from '../components/editor/editorLayoutStorage';
 import { languageForFileName } from '../components/editor/languageModes';
 
-interface UseEditorCrdtBindingsOptions {
+export interface UseEditorCrdtBindingsOptions {
   monacoApi: Monaco | null;
   entries: RoomEntry[];
   openFileIds: string[];

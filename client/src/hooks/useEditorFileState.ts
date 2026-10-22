@@ -16,7 +16,7 @@ import type {
 } from '../providers/SignalRCrdtProvider';
 import type { ConnectionStatus } from '../providers/SignalRCrdtProvider';
 
-interface EditorFileStateOptions {
+export interface EditorFileStateOptions {
   roomId: string;
   providerRef: RefObject<SignalRCrdtProvider | null>;
   status: ConnectionStatus;
