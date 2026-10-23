@@ -11,7 +11,10 @@ import EditorComponent from './components/editor/Editor';
 import { RoomJoin } from './components/room/RoomJoin';
 import type { RoomProfileForm } from './components/room/RoomJoin';
 import { ThemeInitializer } from './components/editor/ThemePicker';
-import { isValidRoomAccessKey, parseRoomInvite } from './utils/roomInvites';
+import { GithubOAuthCallback } from './components/github/GithubOAuthCallback';
+import { GithubAuthProvider } from './github/GithubAuthProvider';
+import { AppFeedbackProvider } from './components/shared/AppFeedback';
+import { isValidRoomAccessKey } from './utils/roomInvites';
 import {
   createSiteId,
   getStoredDisplayName,
@@ -19,6 +22,7 @@ import {
   setStoredColor,
   setStoredDisplayName,
   setParticipantId,
+  setStoredRoomCreatorToken,
 } from './utils/userStorage';
 
 function Home() {
@@ -27,11 +31,7 @@ function Home() {
   const [creating, setCreating] = useState(false);
   const [intent, setIntent] = useState<'create' | 'join' | null>(null);
 
-  async function startRoom({
-    displayName,
-    color,
-    inviteLink,
-  }: RoomProfileForm) {
+  async function startRoom({ displayName, color, invite }: RoomProfileForm) {
     if (intent === 'create') setCreating(true);
     setError('');
     if (intent === 'create') {
@@ -40,12 +40,13 @@ function Home() {
         const response = await fetch('/api/rooms', { method: 'POST' });
         if (!response.ok)
           throw new Error(`Room creation failed (${response.status})`);
-        const { roomId, accessKey } = await response.json();
-        if (!roomId || !accessKey)
+        const { roomId, accessKey, creatorToken } = await response.json();
+        if (!roomId || !accessKey || !creatorToken)
           throw new Error('The server did not return a complete room invite.');
         setStoredDisplayName(roomId, displayName);
         setParticipantId(roomId, participantId);
         setStoredColor(color, participantId);
+        setStoredRoomCreatorToken(roomId, creatorToken);
         navigate(`/room/${roomId}#key=${accessKey}`, { replace: true });
       } catch {
         setIntent(null);
@@ -55,7 +56,6 @@ function Home() {
       return;
     }
 
-    const invite = parseRoomInvite(inviteLink);
     if (!invite) {
       setError('Use a complete room invite link with its access key.');
       return;
@@ -132,14 +132,17 @@ function RoomRoute() {
 
 function App() {
   return (
-    <>
+    <GithubAuthProvider>
       <ThemeInitializer />
-      <Routes>
-        <Route path="/" element={<Home />} />
-        <Route path="/room/:roomId" element={<RoomRoute />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </>
+      <AppFeedbackProvider>
+        <Routes>
+          <Route path="/" element={<Home />} />
+          <Route path="/github/callback" element={<GithubOAuthCallback />} />
+          <Route path="/room/:roomId" element={<RoomRoute />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </AppFeedbackProvider>
+    </GithubAuthProvider>
   );
 }
 

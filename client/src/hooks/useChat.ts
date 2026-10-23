@@ -6,7 +6,7 @@ import type {
   SignalRCrdtProvider,
 } from '../providers/SignalRCrdtProvider';
 
-interface UseChatProps {
+export interface UseChatProps {
   providerRef: RefObject<SignalRCrdtProvider | null>;
   status: ConnectionStatus;
 }

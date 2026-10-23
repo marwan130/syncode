@@ -80,6 +80,14 @@ const SAFE_MESSAGES = new Map<string, string>([
     'Only a room admin can change admin roles.',
   ],
   [
+    'Only a room admin can remove participants.',
+    'Only a room admin can remove participants from the room.',
+  ],
+  [
+    'You cannot remove yourself from the room.',
+    'You cannot remove yourself from the room.',
+  ],
+  [
     'That participant is no longer in the room.',
     'That participant is no longer in the room.',
   ],

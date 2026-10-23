@@ -5,7 +5,7 @@ import type { ChatMessage as ChatMessageData } from '../../providers/SignalRCrdt
 import { ScrollbarPanel } from '../shared/ScrollbarPanel';
 import { ChatMessage } from './ChatMessage';
 
-interface ChatPanelProps {
+export interface ChatPanelProps {
   messages: ChatMessageData[];
   onSendMessage: (content: string) => Promise<void>;
   disabled?: boolean;

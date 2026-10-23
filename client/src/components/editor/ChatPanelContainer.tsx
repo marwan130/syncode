@@ -7,7 +7,7 @@ import type {
   ConnectionStatus,
 } from '../../providers/SignalRCrdtProvider';
 
-interface ChatPanelContainerProps {
+export interface ChatPanelContainerProps {
   isOpen: boolean;
   width: number;
   messages: ChatMessage[];
