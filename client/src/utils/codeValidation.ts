@@ -2,7 +2,7 @@ import type { Monaco } from '@monaco-editor/react';
 import type * as monaco from 'monaco-editor';
 import type { LanguageMode } from '../components/editor/languageModes';
 
-interface CodeValidationOptions {
+export interface CodeValidationOptions {
   code: string;
   language: LanguageMode;
   filePath: string;

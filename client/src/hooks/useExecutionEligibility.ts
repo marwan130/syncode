@@ -20,7 +20,7 @@ const EXECUTION_LANGUAGES: Partial<Record<LanguageMode, ExecutionLanguage>> = {
   java: 'Java',
 };
 
-interface ExecutionEligibilityOptions {
+export interface ExecutionEligibilityOptions {
   activeFile?: RoomEntry;
   activeFilePath: string;
   language: LanguageMode;

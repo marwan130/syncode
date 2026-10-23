@@ -6,14 +6,14 @@ import type {
   RoomEntry,
 } from '../providers/SignalRCrdtProvider';
 
-interface UseDebouncedPreviewProps {
+export interface UseDebouncedPreviewProps {
   providerRef: RefObject<SignalRCrdtProvider | null>;
   status: ConnectionStatus;
   enabled: boolean;
   activeFileId: string;
 }
 
-interface PreviewFile {
+export interface PreviewFile {
   path: string;
   content: string;
 }

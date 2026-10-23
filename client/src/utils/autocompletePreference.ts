@@ -19,6 +19,5 @@ export function setAutocompleteEnabled(enabled: boolean): void {
     useInMemoryPreference = false;
   } catch {
     useInMemoryPreference = true;
-    // The in-memory value keeps this tab's preference available.
   }
 }

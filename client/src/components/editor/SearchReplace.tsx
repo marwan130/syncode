@@ -1,6 +1,6 @@
 import type { editor as MonacoEditor } from 'monaco-editor';
 
-interface SearchReplaceProps {
+export interface SearchReplaceProps {
   editor: MonacoEditor.IStandaloneCodeEditor | null;
 }
 

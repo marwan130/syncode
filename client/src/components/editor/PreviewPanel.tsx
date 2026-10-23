@@ -11,7 +11,7 @@ import {
 import { isPreviewLanguage, type LanguageMode } from './languageModes';
 import type { PreviewProject } from '../../hooks/useDebouncedPreview';
 
-interface PreviewPanelProps {
+export interface PreviewPanelProps {
   isOpen: boolean;
   width: number;
   hasActiveFile: boolean;

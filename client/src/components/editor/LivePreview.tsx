@@ -5,7 +5,7 @@ import type { editor as MonacoEditor } from 'monaco-editor';
 import type { PreviewLanguage } from './languageModes';
 import type { PreviewProject } from '../../hooks/useDebouncedPreview';
 
-interface LivePreviewProps {
+export interface LivePreviewProps {
   project: PreviewProject;
   language: PreviewLanguage;
   monaco: Monaco | null;

@@ -6,9 +6,9 @@ import type {
   ReactNode,
 } from 'react';
 
-type PanelElement = 'aside' | 'div';
+export type PanelElement = 'aside' | 'div';
 
-interface ScrollbarPanelProps extends HTMLAttributes<HTMLElement> {
+export interface ScrollbarPanelProps extends HTMLAttributes<HTMLElement> {
   as?: PanelElement;
   children: ReactNode;
 }

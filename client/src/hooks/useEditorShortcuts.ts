@@ -4,10 +4,12 @@ import type { ExecutionLanguage } from '../providers/SignalRCrdtProvider';
 import type { LanguageMode } from '../components/editor/languageModes';
 import { isPreviewLanguage } from '../components/editor/languageModes';
 
-interface EditorShortcutOptions {
+export interface EditorShortcutOptions {
   isShortcutGuideOpen: boolean;
   setShortcutGuideOpen: Dispatch<SetStateAction<boolean>>;
   isTerminalOpen: boolean;
+  canSplitWorkspace: boolean;
+  onSplitWorkspace: () => void;
   setTerminalOpen: Dispatch<SetStateAction<boolean>>;
   setPreviewOpen: Dispatch<SetStateAction<boolean>>;
   setExplorerOpen: Dispatch<SetStateAction<boolean>>;
@@ -26,6 +28,8 @@ export function useEditorShortcuts({
   isShortcutGuideOpen,
   setShortcutGuideOpen,
   isTerminalOpen,
+  canSplitWorkspace,
+  onSplitWorkspace,
   setTerminalOpen,
   setPreviewOpen,
   setExplorerOpen,
@@ -53,6 +57,8 @@ export function useEditorShortcuts({
       }
       handleCommandShortcut(event, {
         isTerminalOpen,
+        canSplitWorkspace,
+        onSplitWorkspace,
         language,
         canRunCode,
         executionLanguage,
@@ -72,6 +78,7 @@ export function useEditorShortcuts({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [
     canRunCode,
+    canSplitWorkspace,
     executionLanguage,
     handleRunCode,
     isShortcutGuideOpen,
@@ -86,6 +93,7 @@ export function useEditorShortcuts({
     setShortcutGuideOpen,
     setStartBashOnTerminalOpen,
     setTerminalOpen,
+    onSplitWorkspace,
   ]);
 }
 
@@ -129,6 +137,8 @@ function handleCommandShortcut(
   options: Pick<
     EditorShortcutOptions,
     | 'isTerminalOpen'
+    | 'canSplitWorkspace'
+    | 'onSplitWorkspace'
     | 'language'
     | 'canRunCode'
     | 'executionLanguage'
@@ -148,6 +158,11 @@ function handleCommandShortcut(
     return;
 
   const actions: Record<string, () => void> = {
+    s: () => {
+      if (!options.canSplitWorkspace) return;
+      event.preventDefault();
+      options.onSplitWorkspace();
+    },
     k: () => {
       event.preventDefault();
       options.setShortcutGuideOpen((open) => !open);

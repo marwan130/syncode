@@ -15,6 +15,8 @@
   --accent-border: rgba(56, 189, 248, 0.5);
   --social-bg: var(--surface-bg);
   --danger: #f87171;
+  --warning: #fbbf24;
+  --success: #4ade80;
   --button-bg: #0284c7;
   --button-fg: #ffffff;
   --scrollbar-track: transparent;
@@ -170,10 +172,18 @@ code {
 }
 
 .room-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  height: 40px;
+  background: var(--app-bg);
+  flex-shrink: 0;
+  user-select: none;
   position: relative;
   z-index: 200;
   box-sizing: border-box;
-  border-bottom: 1px solid #363636;
+  border-bottom: 1px solid var(--border);
 }
 
 .room-editor {
@@ -241,7 +251,7 @@ code {
 }
 
 .editor-file-tab + .editor-file-tab {
-  border-left: 1px solid #303030;
+  border-left: 1px solid var(--border);
 }
 
 .editor-file-tab.is-active {
@@ -277,27 +287,27 @@ code {
 }
 
 .editor-file-tab.has-error button[role='tab'] {
-  color: #f87171 !important;
+  color: var(--danger) !important;
 }
 
 .editor-file-tab.has-error:hover button[role='tab'] {
-  color: #fca5a5 !important;
+  color: color-mix(in srgb, var(--danger) 75%, var(--text-h)) !important;
 }
 
 .editor-file-tab.has-warning button[role='tab'] {
-  color: #fbbf24 !important;
+  color: var(--warning) !important;
 }
 
 .editor-file-tab.has-warning:hover button[role='tab'] {
-  color: #fde047 !important;
+  color: color-mix(in srgb, var(--warning) 75%, var(--text-h)) !important;
 }
 
 .file-explorer-name.has-error {
-  color: #f87171 !important;
+  color: var(--danger) !important;
 }
 
 .file-explorer-name.has-warning {
-  color: #fbbf24 !important;
+  color: var(--warning) !important;
 }
 
 .file-explorer-diagnostic {
@@ -309,11 +319,11 @@ code {
 }
 
 .file-explorer-diagnostic.is-error {
-  background: #f87171;
+  background: var(--danger);
 }
 
 .file-explorer-diagnostic.is-warning {
-  background: #fbbf24;
+  background: var(--warning);
 }
 
 .editor-workspace {
@@ -545,7 +555,7 @@ code {
   position: absolute;
   inset: 2px 0;
   content: '';
-  background: #303030;
+  background: var(--border);
 }
 
 .vertical-resize-handle:hover::after,
@@ -824,7 +834,7 @@ code {
   display: grid;
   place-items: center;
   padding: 16px;
-  background: rgb(0 0 0 / 55%);
+  background: color-mix(in srgb, var(--app-bg) 78%, transparent);
 }
 
 .shortcut-dialog {
@@ -908,7 +918,7 @@ code {
   position: absolute;
   inset: 0 2px;
   content: '';
-  background: #303030;
+  background: var(--border);
 }
 
 .resize-handle:hover::after,
@@ -1036,11 +1046,21 @@ code {
   font: 600 11px var(--sans);
   letter-spacing: 0.25px;
   text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   cursor: pointer;
 }
 
 .file-explorer-root-select:hover {
   color: var(--text-h);
+}
+
+.file-explorer-root-select > span {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .file-explorer-row.is-editing {
@@ -1097,7 +1117,7 @@ code {
 
 .file-explorer-edit-error {
   padding: 2px 8px 4px 14px;
-  color: var(--error, #f48771);
+  color: var(--danger);
   font-size: 11px;
 }
 
@@ -1125,9 +1145,13 @@ code {
 }
 
 .file-explorer-name {
+  display: block;
+  flex: 1 1 0;
   min-width: 0;
+  width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .file-explorer-actions {
@@ -1412,6 +1436,29 @@ code {
   color: var(--text-h);
 }
 
+.github-auth-button {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 28px;
+  padding: 0 8px;
+  color: var(--text-muted);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font: 12px/1 var(--sans);
+}
+
+.github-auth-button:hover:not(:disabled) {
+  color: var(--text-h);
+}
+
+.github-auth-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .room-header-left,
 .room-header-right {
   display: flex;
@@ -1479,7 +1526,7 @@ code {
 }
 
 .share-link-button.is-copied {
-  color: #4ade80;
+  color: var(--success);
 }
 
 .preview-view-button:hover {
@@ -1681,7 +1728,7 @@ code {
   z-index: 9999;
   display: grid;
   place-items: center;
-  background: rgba(0, 0, 0, 0.45);
+  background: color-mix(in srgb, var(--app-bg) 78%, transparent);
 }
 
 .profile-popover.profile-dialog {
@@ -1728,7 +1775,7 @@ code {
 }
 
 .profile-error {
-  color: #f87171;
+  color: var(--danger);
 }
 
 .profile-color-options {
@@ -1993,11 +2040,11 @@ code {
 }
 
 .preview-tab-strip {
-  border-bottom: 1px solid #303030;
+  border-bottom: 1px solid var(--border);
 }
 
 .chat-error {
-  color: #f87171;
+  color: var(--danger);
   font-size: 12px;
 }
 
@@ -2074,4 +2121,194 @@ code {
   margin: 0;
   color: var(--danger);
   font-size: 13px;
+}
+
+.github-callback-page p.github-callback-status {
+  color: var(--text-muted);
+}
+
+.github-callback-page p.github-callback-error {
+  color: var(--danger);
+}
+
+.app-feedback-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: color-mix(in srgb, var(--app-bg) 78%, transparent);
+}
+
+.app-feedback-dialog {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: min(420px, 100%);
+  padding: 18px;
+  color: var(--text);
+  background: var(--surface-bg);
+  border: 1px solid var(--border);
+}
+
+.app-feedback-dialog p {
+  margin: 0;
+  color: var(--text);
+  font: 13px/1.5 var(--sans);
+  overflow-wrap: anywhere;
+}
+
+.app-feedback-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.app-feedback-actions button {
+  min-height: 30px;
+  padding: 0 10px;
+  color: var(--text);
+  background: var(--control-bg);
+  border: 1px solid var(--border);
+  font: 12px var(--sans);
+  cursor: pointer;
+}
+
+.app-feedback-actions button:last-child {
+  color: var(--button-fg);
+  background: var(--button-bg);
+  border-color: var(--button-bg);
+}
+
+.app-feedback-actions button:hover {
+  opacity: 0.86;
+}
+
+.project-import-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: color-mix(in srgb, var(--app-bg) 78%, transparent);
+}
+
+.project-import-dialog {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(720px, 100%);
+  max-height: min(82vh, 720px);
+  padding: 16px;
+  color: var(--text);
+  background: var(--surface-bg);
+  border: 1px solid var(--border);
+}
+
+.project-import-dialog h2 {
+  margin: 0;
+  color: var(--text-h);
+  font-size: 16px;
+}
+
+.project-import-warning,
+.project-import-summary,
+.project-import-error {
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.project-import-warning,
+.project-import-summary {
+  color: var(--text-muted);
+}
+
+.project-import-select,
+.project-import-actions button {
+  min-height: 30px;
+  padding: 5px 10px;
+  color: var(--text);
+  background: var(--control-bg);
+  border: 1px solid var(--border);
+  border-radius: 0;
+  cursor: pointer;
+  font: 12px var(--sans);
+}
+
+.project-import-select {
+  align-self: flex-start;
+}
+
+.project-import-select:hover:not(:disabled),
+.project-import-actions button:hover:not(:disabled) {
+  color: var(--text-h);
+  background: var(--control-bg);
+}
+
+.project-import-select:disabled,
+.project-import-actions button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.project-import-list {
+  box-sizing: border-box;
+  flex: 1 1 auto;
+  min-height: 100px;
+  max-height: 42vh;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.project-import-list .syncode-scrollbar-content {
+  min-width: 0;
+  padding-right: 14px;
+}
+
+.project-import-row {
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) max-content;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  padding: 3px 8px;
+  font-size: 12px;
+}
+
+.project-import-row:hover {
+  background: var(--control-bg);
+}
+
+.project-import-row input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.project-import-path {
+  overflow: hidden;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-import-size,
+.project-import-skip-reason,
+.project-import-skipped-label {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.project-import-error {
+  color: var(--danger);
+}
+
+.project-import-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }

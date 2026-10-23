@@ -2,7 +2,7 @@ import type { FC } from 'react';
 import type { RoomEntry } from '../../providers/SignalRCrdtProvider';
 import { getEntryPath } from './editorLayoutStorage';
 
-interface EditorTabsProps {
+export interface EditorTabsProps {
   group: 'primary' | 'secondary';
   entries: RoomEntry[];
   fileIds: string[];
@@ -11,6 +11,7 @@ interface EditorTabsProps {
   onSelectFile: (fileId: string) => void;
   onCloseFile: (fileId: string) => void;
   onSplitWorkspace?: () => void;
+  canSplitWorkspace: boolean;
   onCloseGroup?: () => void;
 }
 
@@ -23,6 +24,7 @@ export const EditorTabs: FC<EditorTabsProps> = ({
   onSelectFile,
   onCloseFile,
   onSplitWorkspace,
+  canSplitWorkspace,
   onCloseGroup,
 }) => {
   return (
@@ -79,24 +81,26 @@ export const EditorTabs: FC<EditorTabsProps> = ({
       })}
       <div className="editor-group-actions">
         {group === 'primary' ? (
-          <button
-            type="button"
-            title="Split workspace"
-            aria-label="Split workspace"
-            onClick={onSplitWorkspace}
-          >
-            <svg viewBox="0 0 16 16" aria-hidden="true">
-              <rect
-                x="1.5"
-                y="2"
-                width="13"
-                height="12"
-                fill="none"
-                stroke="currentColor"
-              />
-              <path d="M8 2v12" stroke="currentColor" />
-            </svg>
-          </button>
+          canSplitWorkspace && (
+            <button
+              type="button"
+              title="Split workspace"
+              aria-label="Split workspace"
+              onClick={onSplitWorkspace}
+            >
+              <svg viewBox="0 0 16 16" aria-hidden="true">
+                <rect
+                  x="1.5"
+                  y="2"
+                  width="13"
+                  height="12"
+                  fill="none"
+                  stroke="currentColor"
+                />
+                <path d="M8 2v12" stroke="currentColor" />
+              </svg>
+            </button>
+          )
         ) : (
           <button
             type="button"

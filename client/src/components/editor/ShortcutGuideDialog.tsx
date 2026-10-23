@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import type { FC } from 'react';
 
-interface ShortcutGuideDialogProps {
+export interface ShortcutGuideDialogProps {
   isOpen: boolean;
   onClose: () => void;
 }
@@ -14,6 +14,10 @@ const SHORTCUTS: Array<{ label: string; keys: string[] }> = [
   { label: 'Toggle file explorer', keys: ['Ctrl', 'Alt', 'E'] },
   { label: 'Toggle chat', keys: ['Ctrl', 'Alt', 'C'] },
   { label: 'Toggle preview', keys: ['Ctrl', 'Alt', 'P'] },
+  {
+    label: 'Split editor workspace when files exist',
+    keys: ['Ctrl', 'Alt', 'S'],
+  },
   { label: 'Show this guide', keys: ['Ctrl', 'Alt', 'K'] },
   {
     label: 'Move through workspace regions',
