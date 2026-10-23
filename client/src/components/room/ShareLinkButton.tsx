@@ -9,7 +9,6 @@ export function ShareLinkButton() {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
-      // fallback for older browsers or permission issues
       const input = document.createElement('input');
       input.value = window.location.href;
       document.body.appendChild(input);

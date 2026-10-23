@@ -1,5 +1,10 @@
 import { useRef, useState } from 'react';
-import { getRoomIdFromInvite, parseRoomInvite } from '../../utils/roomInvites';
+import type { ChangeEvent, FormEvent } from 'react';
+import { getRoomIdFromInvite, type RoomInvite } from '../../utils/roomInvites';
+import {
+  getRoomJoinValidationMessage,
+  validateRoomJoinForm,
+} from './roomJoinForm';
 import {
   CURSOR_COLORS,
   getStoredColor,
@@ -11,10 +16,10 @@ import {
 export interface RoomProfileForm {
   displayName: string;
   color: string;
-  inviteLink: string;
+  invite?: RoomInvite;
 }
 
-interface RoomJoinProps {
+export interface RoomJoinProps {
   roomId?: string;
   defaultName?: string;
   mode?: 'profile' | 'create' | 'join';
@@ -47,14 +52,8 @@ export function RoomJoin({
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const submittingRef = useRef(false);
-  const linkedRoomId =
-    mode === 'join' ? (getRoomIdFromInvite(inviteLink) ?? '') : '';
-  const lockedName =
-    mode === 'profile'
-      ? defaultName
-      : linkedRoomId
-        ? (getStoredDisplayName(linkedRoomId) ?? '')
-        : '';
+  const linkedRoomId = mode === 'join' ? getRoomIdFromInvite(inviteLink) : null;
+  const lockedName = getLockedName(mode, defaultName, linkedRoomId);
 
   const chooseColor = (color: string) => {
     setSelectedColor(color);
@@ -62,43 +61,34 @@ export function RoomJoin({
     onColorChange?.(color);
   };
 
-  const handleSubmit = async (event: React.FormEvent) => {
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const trimmedName = (lockedName || name).trim();
-    if (!trimmedName) {
-      setError('Enter a name to continue.');
+    const validation = validateRoomJoinForm({
+      mode,
+      name,
+      lockedName,
+      inviteLink,
+      currentRoomId,
+    });
+    if (!validation.valid) {
+      setError(getRoomJoinValidationMessage(validation.reason));
       return;
     }
 
-    const info = { displayName: trimmedName, color: selectedColor };
+    const info = { displayName: validation.displayName, color: selectedColor };
     if (mode === 'profile' && roomId) {
-      const fixedName = getStoredDisplayName(roomId) ?? trimmedName;
+      const fixedName = getStoredDisplayName(roomId) ?? validation.displayName;
       setStoredDisplayName(roomId, fixedName);
       onJoin?.({ ...info, displayName: fixedName });
       onClose();
       return;
     }
 
-    if (mode === 'join' && !inviteLink.trim()) {
-      setError('Paste a room invite link.');
-      return;
-    }
-    if (mode === 'join') {
-      const invite = parseRoomInvite(inviteLink);
-      if (!invite) {
-        setError('Use a complete room invite link.');
-        return;
-      }
-      if (invite.roomId === currentRoomId) {
-        setError('You are already in this room.');
-        return;
-      }
-    }
     if (submittingRef.current) return;
     submittingRef.current = true;
     setIsSubmitting(true);
     try {
-      await onStart?.({ ...info, inviteLink: inviteLink.trim() });
+      await onStart?.({ ...info, invite: validation.invite });
     } catch {
       setError('Could not continue. Please try again.');
     } finally {
@@ -114,63 +104,31 @@ export function RoomJoin({
       aria-label={mode === 'join' ? 'Join a room' : 'Set your room profile'}
     >
       <form onSubmit={handleSubmit}>
-        <input
-          id="room-display-name"
-          className="profile-name-input"
-          type="text"
-          maxLength={24}
+        <RoomNameInput
+          name={lockedName || name}
+          locked={Boolean(lockedName)}
           autoFocus={!defaultName}
-          readOnly={Boolean(lockedName)}
-          value={lockedName || name}
-          onChange={(event) => {
-            setName(event.target.value);
+          onChange={(value) => {
+            setName(value);
             setError('');
           }}
-          placeholder="Enter a name"
-          aria-label="Display name"
         />
         {mode === 'join' && (
-          <input
-            className="profile-name-input profile-link-input"
-            type="text"
-            autoFocus
-            placeholder="Paste a room invite link"
+          <RoomInviteInput
             value={inviteLink}
-            onChange={(event) => {
-              setInviteLink(event.target.value);
+            onChange={(value) => {
+              setInviteLink(value);
               setError('');
             }}
-            aria-label="Room invite link"
           />
         )}
         {error && <span className="profile-error">{error}</span>}
-
-        <div className="profile-color-options" aria-label="Avatar color">
-          {CURSOR_COLORS.map((color) => (
-            <button
-              key={color}
-              type="button"
-              className={`profile-color-option${selectedColor === color ? ' is-selected' : ''}`}
-              style={{ backgroundColor: color }}
-              aria-label={`${color} avatar color${selectedColor === color ? ', selected' : ''}`}
-              aria-pressed={selectedColor === color}
-              onClick={() => chooseColor(color)}
-            />
-          ))}
-        </div>
-
+        <RoomColorOptions
+          selectedColor={selectedColor}
+          onSelect={chooseColor}
+        />
         {mode !== 'profile' && (
-          <button
-            className="profile-join-button"
-            type="submit"
-            disabled={isSubmitting}
-          >
-            {isSubmitting
-              ? 'Please wait…'
-              : mode === 'create'
-                ? 'Create room'
-                : 'Join room'}
-          </button>
+          <RoomJoinSubmitButton mode={mode} isSubmitting={isSubmitting} />
         )}
       </form>
     </section>
@@ -182,5 +140,112 @@ export function RoomJoin({
     </div>
   ) : (
     content
+  );
+}
+
+function getLockedName(
+  mode: RoomJoinProps['mode'],
+  defaultName: string,
+  linkedRoomId: string | null
+): string {
+  if (mode === 'profile') return defaultName;
+  if (!linkedRoomId) return '';
+  return getStoredDisplayName(linkedRoomId) ?? '';
+}
+
+function RoomNameInput({
+  name,
+  locked,
+  autoFocus,
+  onChange,
+}: {
+  name: string;
+  locked: boolean;
+  autoFocus: boolean;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <input
+      id="room-display-name"
+      className="profile-name-input"
+      type="text"
+      maxLength={24}
+      autoFocus={autoFocus}
+      readOnly={locked}
+      value={name}
+      onChange={(event: ChangeEvent<HTMLInputElement>) =>
+        onChange(event.target.value)
+      }
+      placeholder="Enter a name"
+      aria-label="Display name"
+    />
+  );
+}
+
+function RoomInviteInput({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <input
+      className="profile-name-input profile-link-input"
+      type="text"
+      autoFocus
+      placeholder="Paste a room invite link"
+      value={value}
+      onChange={(event: ChangeEvent<HTMLInputElement>) =>
+        onChange(event.target.value)
+      }
+      aria-label="Room invite link"
+    />
+  );
+}
+
+function RoomColorOptions({
+  selectedColor,
+  onSelect,
+}: {
+  selectedColor: string;
+  onSelect: (color: string) => void;
+}) {
+  return (
+    <div className="profile-color-options" aria-label="Avatar color">
+      {CURSOR_COLORS.map((color) => (
+        <button
+          key={color}
+          type="button"
+          className={`profile-color-option${selectedColor === color ? ' is-selected' : ''}`}
+          style={{ backgroundColor: color }}
+          aria-label={`${color} avatar color${selectedColor === color ? ', selected' : ''}`}
+          aria-pressed={selectedColor === color}
+          onClick={() => onSelect(color)}
+        />
+      ))}
+    </div>
+  );
+}
+
+function RoomJoinSubmitButton({
+  mode,
+  isSubmitting,
+}: {
+  mode: 'create' | 'join';
+  isSubmitting: boolean;
+}) {
+  return (
+    <button
+      className="profile-join-button"
+      type="submit"
+      disabled={isSubmitting}
+    >
+      {isSubmitting
+        ? 'Please wait…'
+        : mode === 'create'
+          ? 'Create room'
+          : 'Join room'}
+    </button>
   );
 }

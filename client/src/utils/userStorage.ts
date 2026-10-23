@@ -6,6 +6,24 @@ const STORAGE_KEYS = {
 } as const;
 
 const participantKey = (roomId: string) => `syncode_participant_id:${roomId}`;
+const roomCreatorTokenKey = (roomId: string) =>
+  `syncode_room_creator_token:${roomId}`;
+
+export function getStoredRoomCreatorToken(roomId: string): string | null {
+  try {
+    return sessionStorage.getItem(roomCreatorTokenKey(roomId));
+  } catch {
+    return null;
+  }
+}
+
+export function setStoredRoomCreatorToken(roomId: string, token: string): void {
+  try {
+    sessionStorage.setItem(roomCreatorTokenKey(roomId), token);
+  } catch {
+    return;
+  }
+}
 
 export const CURSOR_COLORS = [
   '#f97316',
@@ -21,6 +39,11 @@ export const CURSOR_COLORS = [
 function getRandomColor(): string {
   const index = Math.floor(Math.random() * CURSOR_COLORS.length);
   return CURSOR_COLORS[index];
+}
+
+function readValidColor(key: string): string | null {
+  const color = localStorage.getItem(key);
+  return color && CURSOR_COLORS.includes(color) ? color : null;
 }
 
 export function getStoredDisplayName(roomId: string): string | null {
@@ -43,37 +66,37 @@ export function setStoredDisplayName(roomId: string, name: string): boolean {
 }
 
 export function getStoredColor(participantId?: string): string {
+  const fallback = getRandomColor();
   try {
-    const scopedKey = participantId
-      ? `${STORAGE_KEYS.USER_COLOR}:${participantId}`
-      : STORAGE_KEYS.USER_COLOR;
-    const scopedColor = localStorage.getItem(scopedKey);
-    if (scopedColor && CURSOR_COLORS.includes(scopedColor)) return scopedColor;
-
-    const color = participantId
-      ? localStorage.getItem(STORAGE_KEYS.USER_COLOR)
-      : scopedColor;
-    if (color && CURSOR_COLORS.includes(color)) {
-      if (participantId) localStorage.setItem(scopedKey, color);
-      return color;
+    const scopedKey = getColorStorageKey(participantId);
+    const scopedColor = readValidColor(scopedKey);
+    if (scopedColor) return scopedColor;
+    if (participantId) {
+      const legacyColor = readValidColor(STORAGE_KEYS.USER_COLOR);
+      if (legacyColor) {
+        localStorage.setItem(scopedKey, legacyColor);
+        return legacyColor;
+      }
     }
   } catch {
-    // Use an in-memory color if browser storage is unavailable.
+    return fallback;
   }
-  const fallback = getRandomColor();
   setStoredColor(fallback, participantId);
   return fallback;
 }
 
 export function setStoredColor(color: string, participantId?: string): void {
   try {
-    const key = participantId
-      ? `${STORAGE_KEYS.USER_COLOR}:${participantId}`
-      : STORAGE_KEYS.USER_COLOR;
-    localStorage.setItem(key, color);
+    localStorage.setItem(getColorStorageKey(participantId), color);
   } catch {
-    // The current avatar color remains available for this session.
+    return;
   }
+}
+
+function getColorStorageKey(participantId?: string) {
+  return participantId
+    ? `${STORAGE_KEYS.USER_COLOR}:${participantId}`
+    : STORAGE_KEYS.USER_COLOR;
 }
 
 export function createSiteId(): string {
@@ -99,6 +122,6 @@ export function setParticipantId(roomId: string, id: string): void {
   try {
     sessionStorage.setItem(participantKey(roomId), id);
   } catch {
-    // A new participant ID is generated on the next room entry.
+    return;
   }
 }

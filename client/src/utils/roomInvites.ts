@@ -13,6 +13,25 @@ export interface RoomInvite {
   accessKey: string;
 }
 
+export type RoomInviteValidation =
+  | { valid: true; invite: RoomInvite }
+  | { valid: false; reason: 'missing' | 'invalid' | 'same-room' };
+
+export function validateRoomInvite(
+  value: string,
+  currentRoomId?: string,
+  baseUrl?: string
+): RoomInviteValidation {
+  if (!value.trim()) return { valid: false, reason: 'missing' };
+  const invite = baseUrl
+    ? parseRoomInvite(value, baseUrl)
+    : parseRoomInvite(value);
+  if (!invite) return { valid: false, reason: 'invalid' };
+  if (invite.roomId === currentRoomId)
+    return { valid: false, reason: 'same-room' };
+  return { valid: true, invite };
+}
+
 function getInviteUrl(value: string, baseUrl: string): URL | null {
   const invite = value.trim();
   if (!invite) return null;

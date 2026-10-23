@@ -4,7 +4,7 @@ import type { ConnectionStatus } from '../../providers/SignalRCrdtProvider';
 import { SearchReplace } from '../editor/SearchReplace';
 import { ThemePicker } from '../editor/ThemePicker';
 
-interface RoomHeaderToolbarProps {
+export interface RoomHeaderToolbarProps {
   status: ConnectionStatus;
   editor: monaco.editor.IStandaloneCodeEditor | null;
   monaco: Monaco | null;

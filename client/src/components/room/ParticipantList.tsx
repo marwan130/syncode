@@ -1,18 +1,21 @@
 import { useRef, useState } from 'react';
+import type { CSSProperties } from 'react';
 import type { AwarenessState } from '../../providers/SignalRCrdtProvider';
 import { useOutsidePointerDismiss } from '../../hooks/useOutsidePointerDismiss';
 import { RoomJoin } from './RoomJoin';
 import { Avatar } from './Avatar';
 
-interface ParticipantListProps {
+export interface ParticipantListProps {
   roomId: string;
   participantId: string;
   localName: string;
   localColor: string;
+  localAvatarUrl?: string;
   peers: Map<string, AwarenessState>;
   isAdmin: boolean;
   onToggleLock: (connectionId: string) => Promise<void>;
   onSetAdmin: (connectionId: string, isAdmin: boolean) => Promise<void>;
+  onKick: (connectionId: string) => Promise<void>;
   onJoinProfile: (info: { displayName: string; color: string }) => void;
   onColorChange: (color: string) => void;
 }
@@ -22,10 +25,12 @@ export function ParticipantList({
   participantId,
   localName,
   localColor,
+  localAvatarUrl,
   peers,
   isAdmin,
   onToggleLock,
   onSetAdmin,
+  onKick,
   onJoinProfile,
   onColorChange,
 }: ParticipantListProps) {
@@ -37,12 +42,6 @@ export function ParticipantList({
     profileState.roomId === roomId ? profileState.isOpen : !localName;
   const setProfileOpen = (isOpen: boolean) =>
     setProfileState({ roomId, isOpen });
-  const [pendingActions, setPendingActions] = useState<Set<string>>(
-    () => new Set()
-  );
-  const [openParticipantId, setOpenParticipantId] = useState<string | null>(
-    null
-  );
   const profileAnchorRef = useRef<HTMLDivElement>(null);
   const stacked = peers.size + 1 > 3;
 
@@ -53,29 +52,6 @@ export function ParticipantList({
       target instanceof Node &&
       Boolean(profileAnchorRef.current?.contains(target))
   );
-
-  useOutsidePointerDismiss(
-    Boolean(openParticipantId),
-    () => setOpenParticipantId(null),
-    (target) =>
-      target instanceof Element &&
-      Boolean(target.closest('.participant-manage-anchor'))
-  );
-
-  const runParticipantAction = (
-    connectionId: string,
-    action: (connectionId: string) => Promise<void>
-  ) => {
-    setPendingActions((current) => new Set(current).add(connectionId));
-    setOpenParticipantId(null);
-    void action(connectionId).finally(() => {
-      setPendingActions((current) => {
-        const next = new Set(current);
-        next.delete(connectionId);
-        return next;
-      });
-    });
-  };
 
   return (
     <div
@@ -96,6 +72,7 @@ export function ParticipantList({
           <Avatar
             name={localName || '?'}
             color={localColor}
+            avatarUrl={localAvatarUrl}
             title={localName ? `${localName} (you)` : 'Choose your name'}
             cursor="pointer"
           />
@@ -115,105 +92,202 @@ export function ParticipantList({
           />
         )}
       </div>
-      {Array.from(peers.entries()).map(([peerId, peer], index) => {
-        const style = stacked
-          ? {
-              marginLeft: -8,
-              transform: `translateY(${index % 2 === 0 ? -2 : 2}px)`,
-              zIndex: index + 1,
-            }
-          : undefined;
-        if (isAdmin) {
-          const menuOpen = openParticipantId === peerId;
-          return (
-            <div
-              key={peerId}
-              className="participant-manage-anchor"
-              style={menuOpen && style ? { ...style, zIndex: 100 } : style}
-            >
-              <button
-                type="button"
-                className={`participant-avatar-action${peer.isLocked ? ' is-locked' : ''}`}
-                data-hint={`Manage ${peer.name}`}
-                aria-label={`Manage ${peer.name}`}
-                aria-expanded={menuOpen}
-                aria-haspopup="true"
-                disabled={pendingActions.has(peerId)}
-                onClick={() => setOpenParticipantId(menuOpen ? null : peerId)}
-              >
-                <Avatar name={peer.name} color={peer.color} />
-                {peer.isLocked && (
-                  <span className="participant-lock-mark" aria-hidden="true">
-                    <svg
-                      viewBox="0 0 12 12"
-                      width="8"
-                      height="8"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.4"
-                    >
-                      <rect x="2.5" y="5.2" width="7" height="5" rx="0.8" />
-                      <path d="M4 5V3.6a2 2 0 0 1 4 0V5" />
-                    </svg>
-                  </span>
-                )}
-              </button>
-              {menuOpen && (
-                <div
-                  className="participant-manage-menu"
-                  aria-label={`Manage ${peer.name}`}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Escape') setOpenParticipantId(null);
-                  }}
-                >
-                  {peer.isAdmin ? (
-                    <button
-                      type="button"
-                      disabled={pendingActions.has(peerId)}
-                      onClick={() =>
-                        runParticipantAction(peerId, (id) =>
-                          onSetAdmin(id, false)
-                        )
-                      }
-                    >
-                      Remove admin role
-                    </button>
-                  ) : (
-                    <>
-                      <button
-                        type="button"
-                        disabled={pendingActions.has(peerId)}
-                        onClick={() =>
-                          runParticipantAction(peerId, onToggleLock)
-                        }
-                      >
-                        {peer.isLocked ? 'Allow editing' : 'Prevent editing'}
-                      </button>
-                      <button
-                        type="button"
-                        disabled={pendingActions.has(peerId)}
-                        onClick={() =>
-                          runParticipantAction(peerId, (id) =>
-                            onSetAdmin(id, true)
-                          )
-                        }
-                      >
-                        Make admin
-                      </button>
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
-          );
-        }
-
-        return (
-          <div key={peerId} className="participant-avatar-wrap" style={style}>
-            <Avatar name={peer.name} color={peer.color} />
-          </div>
-        );
-      })}
+      {Array.from(peers.entries(), ([peerId, peer], index) => (
+        <ParticipantItem
+          key={peerId}
+          peerId={peerId}
+          peer={peer}
+          index={index}
+          stacked={stacked}
+          canManage={isAdmin}
+          onToggleLock={onToggleLock}
+          onSetAdmin={onSetAdmin}
+          onKick={onKick}
+        />
+      ))}
     </div>
+  );
+}
+
+interface ParticipantItemProps {
+  peerId: string;
+  peer: AwarenessState;
+  index: number;
+  stacked: boolean;
+  canManage: boolean;
+  onToggleLock: (connectionId: string) => Promise<void>;
+  onSetAdmin: (connectionId: string, isAdmin: boolean) => Promise<void>;
+  onKick: (connectionId: string) => Promise<void>;
+}
+
+function ParticipantItem({
+  peerId,
+  peer,
+  index,
+  stacked,
+  canManage,
+  onToggleLock,
+  onSetAdmin,
+  onKick,
+}: ParticipantItemProps) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [pending, setPending] = useState(false);
+  const anchorRef = useRef<HTMLDivElement>(null);
+  const style = getStackStyle(stacked, index, menuOpen);
+
+  useOutsidePointerDismiss(
+    menuOpen,
+    () => setMenuOpen(false),
+    (target) =>
+      target instanceof Node && Boolean(anchorRef.current?.contains(target))
+  );
+
+  if (!canManage)
+    return (
+      <div className="participant-avatar-wrap" style={style}>
+        <Avatar
+          name={peer.name}
+          color={peer.color}
+          avatarUrl={peer.avatarUrl}
+        />
+      </div>
+    );
+
+  return (
+    <div ref={anchorRef} className="participant-manage-anchor" style={style}>
+      <button
+        type="button"
+        className={`participant-avatar-action${peer.isLocked ? ' is-locked' : ''}`}
+        data-hint={`Manage ${peer.name}`}
+        aria-label={`Manage ${peer.name}`}
+        aria-expanded={menuOpen}
+        aria-haspopup="true"
+        disabled={pending}
+        onClick={() => setMenuOpen((open) => !open)}
+      >
+        <Avatar
+          name={peer.name}
+          color={peer.color}
+          avatarUrl={peer.avatarUrl}
+        />
+        {peer.isLocked && <ParticipantLockMark />}
+      </button>
+      {menuOpen && (
+        <ParticipantManageMenu
+          peer={peer}
+          pending={pending}
+          onClose={() => setMenuOpen(false)}
+          onAction={(action) => {
+            setPending(true);
+            setMenuOpen(false);
+            void action(peerId).finally(() => setPending(false));
+          }}
+          onToggleLock={onToggleLock}
+          onSetAdmin={onSetAdmin}
+          onKick={onKick}
+        />
+      )}
+    </div>
+  );
+}
+
+function getStackStyle(
+  stacked: boolean,
+  index: number,
+  menuOpen: boolean
+): CSSProperties | undefined {
+  if (!stacked) return undefined;
+  return {
+    marginLeft: -8,
+    transform: `translateY(${index % 2 === 0 ? -2 : 2}px)`,
+    zIndex: menuOpen ? 100 : index + 1,
+  };
+}
+
+function ParticipantManageMenu({
+  peer,
+  pending,
+  onClose,
+  onAction,
+  onToggleLock,
+  onSetAdmin,
+  onKick,
+}: {
+  peer: AwarenessState;
+  pending: boolean;
+  onClose: () => void;
+  onAction: (action: (connectionId: string) => Promise<void>) => void;
+  onToggleLock: (connectionId: string) => Promise<void>;
+  onSetAdmin: (connectionId: string, isAdmin: boolean) => Promise<void>;
+  onKick: (connectionId: string) => Promise<void>;
+}) {
+  return (
+    <div
+      className="participant-manage-menu"
+      aria-label={`Manage ${peer.name}`}
+      onKeyDown={(event) => {
+        if (event.key === 'Escape') onClose();
+      }}
+    >
+      {peer.isAdmin ? (
+        <ParticipantActionButton
+          pending={pending}
+          label="Remove admin role"
+          onClick={() => onAction((id) => onSetAdmin(id, false))}
+        />
+      ) : (
+        <>
+          <ParticipantActionButton
+            pending={pending}
+            label={peer.isLocked ? 'Allow editing' : 'Prevent editing'}
+            onClick={() => onAction(onToggleLock)}
+          />
+          <ParticipantActionButton
+            pending={pending}
+            label="Make admin"
+            onClick={() => onAction((id) => onSetAdmin(id, true))}
+          />
+        </>
+      )}
+      <ParticipantActionButton
+        pending={pending}
+        label="Kick from room"
+        onClick={() => onAction(onKick)}
+      />
+    </div>
+  );
+}
+
+function ParticipantActionButton({
+  pending,
+  label,
+  onClick,
+}: {
+  pending: boolean;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button type="button" disabled={pending} onClick={onClick}>
+      {label}
+    </button>
+  );
+}
+
+function ParticipantLockMark() {
+  return (
+    <span className="participant-lock-mark" aria-hidden="true">
+      <svg
+        viewBox="0 0 12 12"
+        width="8"
+        height="8"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.4"
+      >
+        <rect x="2.5" y="5.2" width="7" height="5" rx="0.8" />
+        <path d="M4 5V3.6a2 2 0 0 1 4 0V5" />
+      </svg>
+    </span>
   );
 }

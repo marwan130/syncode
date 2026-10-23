@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import type { RefObject } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useOutsidePointerDismiss } from '../../hooks/useOutsidePointerDismiss';
-import { parseRoomInvite } from '../../utils/roomInvites';
+import { validateRoomInvite } from '../../utils/roomInvites';
 import {
   getOrCreateParticipantId,
   getStoredDisplayName,
@@ -10,7 +10,7 @@ import {
   setStoredDisplayName,
 } from '../../utils/userStorage';
 
-interface JoinRoomModalProps {
+export interface JoinRoomModalProps {
   isOpen: boolean;
   onClose: () => void;
   currentRoomId?: string;
@@ -54,15 +54,16 @@ export function JoinRoomModal({
       return;
     }
 
-    const invite = parseRoomInvite(inviteLink);
-    if (!invite) {
-      setError('Use a complete room invite link.');
+    const validation = validateRoomInvite(inviteLink, currentRoomId);
+    if (!validation.valid) {
+      setError(
+        validation.reason === 'same-room'
+          ? 'You are already in this room.'
+          : 'Use a complete room invite link.'
+      );
       return;
     }
-    if (invite.roomId === currentRoomId) {
-      setError('You are already in this room.');
-      return;
-    }
+    const { invite } = validation;
 
     submittedRef.current = true;
     setStoredDisplayName(

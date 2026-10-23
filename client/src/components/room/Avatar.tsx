@@ -1,3 +1,5 @@
+import { useState } from 'react';
+
 function getAvatarInitials(name: string): string {
   const parts = name.trim().split(/\s+/);
   if (parts.length >= 2) {
@@ -9,14 +11,19 @@ function getAvatarInitials(name: string): string {
 export function Avatar({
   name,
   color,
+  avatarUrl,
   title,
   cursor = 'default',
 }: {
   name: string;
   color: string;
+  avatarUrl?: string;
   title?: string;
   cursor?: 'default' | 'pointer';
 }) {
+  const [failedAvatarUrl, setFailedAvatarUrl] = useState<string | null>(null);
+  const showAvatarImage = Boolean(avatarUrl && failedAvatarUrl !== avatarUrl);
+
   return (
     <div
       title={title ?? name}
@@ -39,7 +46,23 @@ export function Avatar({
         letterSpacing: '0.5px',
       }}
     >
-      {getAvatarInitials(name)}
+      {showAvatarImage ? (
+        <img
+          src={avatarUrl}
+          alt=""
+          aria-hidden="true"
+          referrerPolicy="no-referrer"
+          style={{
+            width: '100%',
+            height: '100%',
+            borderRadius: '50%',
+            objectFit: 'cover',
+          }}
+          onError={() => setFailedAvatarUrl(avatarUrl ?? null)}
+        />
+      ) : (
+        getAvatarInitials(name)
+      )}
     </div>
   );
 }
