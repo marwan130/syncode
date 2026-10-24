@@ -1,14 +1,14 @@
 import { getIgnoredDirectoryPath, getImportIgnoreReason } from './ignoreRules';
 import { normalizeImportPath } from './pathSafety';
 import { CrdtDocument } from '../crdt/CrdtDocument';
-import type { CrdtId } from '../crdt/CrdtId';
+import { compressCrdtSnapshot } from '../crdt/snapshotCompression';
 
-export const MAX_IMPORT_TOTAL_BYTES = 512 * 1024;
+export const MAX_IMPORT_TOTAL_BYTES = 1024 * 1024;
 const MAX_IMPORT_FILE_COUNT = 500;
 const MAX_IMPORT_FILE_BYTES = 64 * 1024;
-const MAX_IMPORT_FILE_SNAPSHOT_BYTES = 2 * 1024 * 1024;
-const MAX_IMPORT_TOTAL_SNAPSHOT_BYTES = 8 * 1024 * 1024;
-const MAX_IMPORT_TOTAL_COMPRESSED_BYTES = 4 * 1024 * 1024;
+const MAX_IMPORT_FILE_COMPRESSED_BYTES = 1024 * 1024;
+const MAX_IMPORT_TOTAL_SNAPSHOT_BYTES = 192 * 1024 * 1024;
+const MAX_IMPORT_TOTAL_COMPRESSED_BYTES = 10 * 1024 * 1024;
 
 export interface ImportFileCandidate {
   path: string;
@@ -25,7 +25,6 @@ export interface ImportedFileContent {
 export interface ImportSnapshot {
   path: string;
   id: string;
-  snapshot: string;
   compressedSnapshot: string;
 }
 
@@ -177,7 +176,7 @@ export async function readSelectedImportFiles(
     selected.reduce((total, candidate) => total + candidate.size, 0) >
     MAX_IMPORT_TOTAL_BYTES
   )
-    throw new Error('The selected files exceed the 512 KB total import limit.');
+    throw new Error('The selected files exceed the 1 MB total import limit.');
 
   return Promise.all(
     selected.map(async ({ path, file }) => ({
@@ -185,22 +184,6 @@ export async function readSelectedImportFiles(
       content: await file.text(),
     }))
   );
-}
-
-async function compressImportSnapshot(snapshot: string): Promise<string> {
-  if (typeof CompressionStream === 'undefined')
-    throw new Error('This browser does not support safe folder imports.');
-  const stream = new Blob([snapshot])
-    .stream()
-    .pipeThrough(new CompressionStream('gzip'));
-  const compressed = new Uint8Array(await new Response(stream).arrayBuffer());
-  let binary = '';
-  for (let offset = 0; offset < compressed.length; offset += 0x8000) {
-    binary += String.fromCharCode(
-      ...compressed.subarray(offset, offset + 0x8000)
-    );
-  }
-  return btoa(binary);
 }
 
 interface InspectedSource {
@@ -317,15 +300,11 @@ async function createImportSnapshot(
       'A selected file is invalid or exceeds the 64 KB file limit.'
     );
 
-  const snapshot = createImportDocument(file.content, siteId).toSnapshot();
-  const snapshotBytes = encoder.encode(snapshot).byteLength;
-  if (snapshotBytes > MAX_IMPORT_FILE_SNAPSHOT_BYTES)
-    throw new Error(
-      'A selected file exceeds the collaborative snapshot limit.'
-    );
-
-  const compressedSnapshot = await compressImportSnapshot(snapshot);
-  const compressedBytes = encoder.encode(compressedSnapshot).byteLength;
+  const snapshot = CrdtDocument.fromText(siteId, file.content).toSnapshot();
+  const compressed = await compressCrdtSnapshot(snapshot);
+  const { snapshotBytes, compressedBytes } = compressed;
+  if (compressedBytes > MAX_IMPORT_FILE_COMPRESSED_BYTES)
+    throw new Error('A compressed file snapshot exceeds the 1 MB per-file limit.');
   return {
     path,
     contentBytes,
@@ -334,8 +313,7 @@ async function createImportSnapshot(
     file: {
       path,
       id: crypto.randomUUID().replaceAll('-', ''),
-      snapshot,
-      compressedSnapshot,
+      compressedSnapshot: compressed.value,
     },
   };
 }
@@ -346,23 +324,17 @@ function validateProjectImportTotals(totals: {
   compressedBytes: number;
 }): void {
   if (totals.contentBytes > MAX_IMPORT_TOTAL_BYTES)
-    throw new Error('The selected files exceed the 512 KB total import limit.');
+    throw new Error(
+      `Selected source files total ${(totals.contentBytes / (1024 * 1024)).toFixed(2)} MB. The import limit is 1 MB.`
+    );
   if (totals.snapshotBytes > MAX_IMPORT_TOTAL_SNAPSHOT_BYTES)
     throw new Error(
-      'The selected files exceed the collaborative import limit.'
+      `CRDT snapshots total ${(totals.snapshotBytes / (1024 * 1024)).toFixed(1)} MB. The import limit is 192 MB.`
     );
   if (totals.compressedBytes > MAX_IMPORT_TOTAL_COMPRESSED_BYTES)
-    throw new Error('The selected files exceed the network import limit.');
-}
-
-function createImportDocument(content: string, siteId: string): CrdtDocument {
-  const document = new CrdtDocument(siteId);
-  let originId: CrdtId | null = null;
-  for (const character of content) {
-    const operation = document.localInsert(originId, character);
-    originId = operation.char.id;
-  }
-  return document;
+    throw new Error(
+      `Compressed snapshots total ${(totals.compressedBytes / (1024 * 1024)).toFixed(1)} MB. The network limit is 10 MB.`
+    );
 }
 
 export async function saveProjectFilesToFolder(

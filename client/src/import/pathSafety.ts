@@ -1,4 +1,5 @@
 const INVALID_SEGMENT_CHARACTERS = /[\\/:*?"<>|]/;
+const MAX_PATH_DEPTH = 32;
 
 function containsControlCharacter(value: string): boolean {
   for (const character of value) {
@@ -22,6 +23,7 @@ export function normalizeImportPath(path: string): string {
 
   const segments = path.split('/');
   if (
+    segments.length > MAX_PATH_DEPTH ||
     segments.some(
       (segment) =>
         !segment ||

@@ -7,11 +7,23 @@ namespace server.Services;
 
 public static class ImportedSnapshotValidator
 {
+    public const string CompressedPrefix = "gzip:v1:";
+    public const int MaxCompressedSnapshotBytes = 5 * 1024 * 1024 + 8;
+    public const int MaxExpandedSnapshotBytes = 16 * 1024 * 1024;
+
+    public static string StoreCompressed(string compressedSnapshot) =>
+        compressedSnapshot.StartsWith(CompressedPrefix, StringComparison.Ordinal)
+            ? compressedSnapshot
+            : CompressedPrefix + compressedSnapshot;
+
     public static string Decompress(string compressedSnapshot, long maximumBytes)
     {
         try
         {
-            using var source = new MemoryStream(Convert.FromBase64String(compressedSnapshot));
+            var payload = compressedSnapshot.StartsWith(CompressedPrefix, StringComparison.Ordinal)
+                ? compressedSnapshot[CompressedPrefix.Length..]
+                : compressedSnapshot;
+            using var source = new MemoryStream(Convert.FromBase64String(payload));
             using var gzip = new GZipStream(source, CompressionMode.Decompress);
             using var output = new MemoryStream();
             var buffer = new byte[8192];
@@ -61,7 +73,7 @@ public static class ImportedSnapshotValidator
             !root.TryGetProperty("clock", out var clockValue) ||
             !clockValue.TryGetInt64(out var clock) || clock < 0 ||
             !root.TryGetProperty("chars", out var characters) ||
-            characters.ValueKind != JsonValueKind.Array || characters.GetArrayLength() > 24_000)
+            characters.ValueKind != JsonValueKind.Array || characters.GetArrayLength() > 65_536)
             throw InvalidSnapshot();
         return (clock, characters);
     }

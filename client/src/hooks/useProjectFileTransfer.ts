@@ -9,6 +9,7 @@ import {
   saveProjectFilesToFolder,
 } from '../import/folderImport';
 import type { ImportedFileContent } from '../import/folderImport';
+import type { GithubRepositoryBaseline } from '../github/githubTypes';
 import { getEntryPath } from '../components/editor/editorLayoutStorage';
 import { userFacingError } from '../utils/userFacingError';
 import { useAppFeedback } from '../components/shared/useAppFeedback';
@@ -33,25 +34,66 @@ export function useProjectFileTransfer({
     [providerRef]
   );
 
-  const saveProjectFiles = useCallback(async () => {
-    const files = entries
-      .filter((entry) => !entry.isFolder)
-      .map((entry) => ({
-        path: getEntryPath(entry, entries),
-        content: providerRef.current?.getFileContent(entry.id) ?? '',
-      }));
-    if (files.length === 0) return;
+  const importGithubRepository = useCallback(
+    async (
+      files: ImportedFileContent[],
+      baseline: GithubRepositoryBaseline
+    ) => {
+      const provider = providerRef.current;
+      if (!provider)
+        throw new Error('Connect to the room before importing a repository.');
+      await provider.importProjectFiles(files, baseline);
+    },
+    [providerRef]
+  );
 
-    try {
-      const savedToFolder = await saveProjectFilesToFolder(files);
-      if (!savedToFolder) downloadProjectFiles(files);
-    } catch (error) {
-      if (error instanceof DOMException && error.name === 'AbortError') return;
-      await showMessage(
-        userFacingError(error, 'Could not save project files.')
-      );
-    }
+  const saveProjectFiles = useCallback(async () => {
+    const files = getProjectFiles(entries, providerRef);
+    await saveProjectFilesToDestination(files, showMessage);
   }, [entries, providerRef, showMessage]);
 
-  return { importProjectFiles, saveProjectFiles };
+  return { importProjectFiles, importGithubRepository, saveProjectFiles };
+}
+
+function getProjectFiles(
+  entries: RoomEntry[],
+  providerRef: RefObject<SignalRCrdtProvider | null>
+): ImportedFileContent[] {
+  return entries
+    .filter((entry) => !entry.isFolder)
+    .map((entry) => ({
+      path: getEntryPath(entry, entries),
+      content: providerRef.current?.getFileContent(entry.id) ?? '',
+    }));
+}
+
+async function saveOrDownloadProjectFiles(
+  files: ImportedFileContent[]
+): Promise<void> {
+  const savedToFolder = await saveProjectFilesToFolder(files);
+  if (!savedToFolder) downloadProjectFiles(files);
+}
+
+async function saveProjectFilesToDestination(
+  files: ImportedFileContent[],
+  showMessage: (message: string) => Promise<void>
+): Promise<void> {
+  if (files.length === 0) return;
+  try {
+    await saveOrDownloadProjectFiles(files);
+  } catch (error) {
+    await reportProjectFileSaveError(error, showMessage);
+  }
+}
+
+async function reportProjectFileSaveError(
+  error: unknown,
+  showMessage: (message: string) => Promise<void>
+): Promise<void> {
+  if (isUserCancelledSave(error)) return;
+  await showMessage(userFacingError(error, 'Could not save project files.'));
+}
+
+function isUserCancelledSave(error: unknown): boolean {
+  return error instanceof DOMException && error.name === 'AbortError';
 }

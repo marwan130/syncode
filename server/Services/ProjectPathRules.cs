@@ -2,6 +2,8 @@ namespace server.Services;
 
 public static class ProjectPathRules
 {
+    public const int MaximumDepth = 32;
+
     public static string NormalizeName(string? value)
     {
         var name = value?.Trim() ?? string.Empty;
@@ -14,7 +16,8 @@ public static class ProjectPathRules
     {
         if (string.IsNullOrWhiteSpace(path) || path.Length > 512 || path.StartsWith('/') ||
             path.Contains('\\') || path.Any(char.IsControl)) return false;
-        return path.Split('/').All(segment => segment.Length > 0 && segment is not "." and not ".." &&
+        var segments = path.Split('/');
+        return segments.Length <= MaximumDepth && segments.All(segment => segment.Length > 0 && segment is not "." and not ".." &&
             segment.IndexOfAny([ ':', '*', '?', '"', '<', '>', '|' ]) < 0);
     }
 

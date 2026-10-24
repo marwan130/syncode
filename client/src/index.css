@@ -2227,10 +2227,11 @@ code {
   color: var(--text-muted);
 }
 
-.project-import-select,
-.project-import-actions button {
-  min-height: 30px;
-  padding: 5px 10px;
+.project-action-button {
+  box-sizing: border-box;
+  height: 32px;
+  min-height: 32px;
+  padding: 0 10px;
   color: var(--text);
   background: var(--control-bg);
   border: 1px solid var(--border);
@@ -2243,14 +2244,12 @@ code {
   align-self: flex-start;
 }
 
-.project-import-select:hover:not(:disabled),
-.project-import-actions button:hover:not(:disabled) {
+.project-action-button:hover:not(:disabled) {
   color: var(--text-h);
   background: var(--control-bg);
 }
 
-.project-import-select:disabled,
-.project-import-actions button:disabled {
+.project-action-button:disabled {
   opacity: 0.55;
   cursor: default;
 }
