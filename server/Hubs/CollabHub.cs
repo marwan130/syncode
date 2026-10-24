@@ -9,6 +9,7 @@ namespace server.Hubs;
 
 public class CollabHub : Hub
 {
+    private static readonly object PendingJoinContextKey = new();
     private readonly CollabHubServices _services;
     private readonly RoomCapacityOptions _roomLimits;
     private readonly string _instanceId;
@@ -70,7 +71,7 @@ public class CollabHub : Hub
         await base.OnConnectedAsync();
     }
 
-    public async Task JoinRoom(
+    public async Task<RoomJoinResult> JoinRoom(
         string roomId,
         string accessKey,
         string displayName,
@@ -85,6 +86,35 @@ public class CollabHub : Hub
             color,
             avatarUrl,
             creatorToken);
+        var hasAdmin = (await Participants.GetParticipantsAsync(roomId)).Any(participant => participant.IsAdmin);
+        var roomHadAdmin = await _services.JoinApprovals.HasHadAdminAsync(roomId);
+        var alreadyJoined = await Participants.IsParticipantAsync(roomId, Context.ConnectionId);
+        var pendingJoin = Context.Items.TryGetValue(PendingJoinContextKey, out var pendingValue) &&
+            pendingValue is PendingJoinContext existingRequest && existingRequest.RoomId == roomId
+                ? existingRequest
+                : null;
+        var isApproved = pendingJoin is not null && await _services.JoinApprovals.IsApprovedAsync(
+            roomId,
+            pendingJoin.RequestId,
+            Context.ConnectionId);
+        if (!alreadyJoined && !joinRequest.IsRoomCreator && !isApproved && (hasAdmin || !roomHadAdmin))
+        {
+            var requestId = pendingJoin?.RequestId ?? Guid.NewGuid().ToString("N");
+            var requestCreated = await _services.JoinApprovals.UpsertRequestAsync(
+                roomId,
+                requestId,
+                Context.ConnectionId,
+                joinRequest.DisplayName,
+                joinRequest.Color,
+                joinRequest.AvatarUrl,
+                _roomLimits.MaxParticipantsPerRoom);
+            if (!requestCreated)
+                throw new HubOperationException("This room has too many pending join requests. Try again later.");
+            Context.Items[PendingJoinContextKey] = new PendingJoinContext(roomId, requestId);
+            await PublishJoinRequestsToAdminsAsync(roomId);
+            return new RoomJoinResult("pending");
+        }
+
         var oldRoomId = await Participants.GetConnectionRoomAsync(Context.ConnectionId);
         if (!string.IsNullOrEmpty(oldRoomId) && oldRoomId != roomId)
         {
@@ -99,7 +129,17 @@ public class CollabHub : Hub
         }
 
         var joined = await _services.Join.JoinAsync(joinRequest, Context.ConnectionId, _instanceId);
+        if (pendingJoin is not null)
+        {
+            await _services.JoinApprovals.RemoveRequestAsync(
+                roomId,
+                pendingJoin.RequestId,
+                Context.ConnectionId);
+            Context.Items.Remove(PendingJoinContextKey);
+            await PublishJoinRequestsToAdminsAsync(roomId);
+        }
         await Groups.AddToGroupAsync(Context.ConnectionId, roomId);
+        await Clients.Caller.SendAsync("GithubRepositoryBaseline", joined.GithubRepository);
         await Clients.Caller.SendAsync("RoomFiles", joined.Files);
         if (!string.IsNullOrEmpty(joined.ProjectTreeSnapshot))
             await Clients.Caller.SendAsync("ProjectTreeSnapshot", joined.ProjectTreeSnapshot);
@@ -124,6 +164,41 @@ public class CollabHub : Hub
                 localParticipant.IsAdmin,
                 false,
                 localParticipant.AvatarUrl);
+        if (localParticipant.IsAdmin)
+            await Clients.Caller.SendAsync(
+                "RoomJoinRequestsChanged",
+                await _services.JoinApprovals.GetRequestsAsync(roomId));
+        return new RoomJoinResult("joined");
+    }
+
+    public sealed record RoomJoinResult(string Status);
+    private sealed record PendingJoinContext(string RoomId, string RequestId);
+
+    public async Task ApproveRoomJoinRequest(string roomId, string requestId)
+    {
+        await _authorization.EnsureAdminAsync(roomId, Context.ConnectionId);
+        var request = await _services.JoinApprovals.ApproveAsync(roomId, requestId)
+            ?? throw new HubOperationException("That join request is no longer available.");
+        await Clients.Client(request.ConnectionId).SendAsync("RoomJoinApproved");
+        await PublishJoinRequestsToAdminsAsync(roomId);
+    }
+
+    public async Task RejectRoomJoinRequest(string roomId, string requestId)
+    {
+        await _authorization.EnsureAdminAsync(roomId, Context.ConnectionId);
+        var request = await _services.JoinApprovals.RejectAsync(roomId, requestId)
+            ?? throw new HubOperationException("That join request is no longer available.");
+        await Clients.Client(request.ConnectionId).SendAsync("RoomJoinRejected");
+        await PublishJoinRequestsToAdminsAsync(roomId);
+    }
+
+    private async Task PublishJoinRequestsToAdminsAsync(string roomId)
+    {
+        var requests = await _services.JoinApprovals.GetRequestsAsync(roomId);
+        var admins = (await Participants.GetParticipantsAsync(roomId))
+            .Where(participant => participant.IsAdmin);
+        foreach (var admin in admins)
+            await Clients.Client(admin.ConnectionId).SendAsync("RoomJoinRequestsChanged", requests);
     }
 
     public async Task SaveFileSnapshot(string roomId, string fileId, string snapshotJson)
@@ -133,17 +208,27 @@ public class CollabHub : Hub
 
     public async Task<IReadOnlyList<ProjectTreeCreateOperation>> ImportProject(
         string roomId,
-        string creatorToken,
         string importId,
-        IReadOnlyList<ProjectImportFile>? files)
+        IReadOnlyList<ProjectImportFile>? files,
+        GithubRepositoryBaseline? repositoryBaseline = null)
     {
         await _authorization.EnsureCanEditAsync(roomId, Context.ConnectionId);
-        var result = await _services.ProjectImport.ImportAsync(roomId, Context.ConnectionId, creatorToken, importId, files);
+        var result = await _services.ProjectImport.ImportAsync(
+            roomId, Context.ConnectionId, importId, files, repositoryBaseline);
         foreach (var operation in result.ChangedOperations)
             await Clients.Group(roomId).SendAsync("ProjectTreeOperation", operation);
         foreach (var file in result.Files)
             await Clients.Group(roomId).SendAsync("LoadFileSnapshot", file.FileId, file.Snapshot);
+        await Clients.Group(roomId).SendAsync("GithubRepositoryBaseline", repositoryBaseline);
         return result.Operations;
+    }
+
+    public async Task<string> CreateGithubRepositoryAdminGrant(string roomId)
+    {
+        if (string.IsNullOrWhiteSpace(roomId) ||
+            await Participants.GetConnectionRoomAsync(Context.ConnectionId) != roomId)
+            throw new HubOperationException("Join this room before importing a repository.");
+        return await _services.GithubRepositoryAccess.CreateAdminGrantAsync(roomId, Context.ConnectionId);
     }
     public async Task SendFileSnapshotToPeer(string roomId, string fileId, string targetConnectionId, string snapshotJson)
     {
@@ -174,14 +259,20 @@ public class CollabHub : Hub
         await _authorization.EnsureParticipantAsync(roomId, Context.ConnectionId);
         var participant = await _services.Interactions.SetAdminAsync(roomId, Context.ConnectionId, targetConnectionId, isAdmin);
         await Clients.Group(roomId).SendAsync("ParticipantUpdated", participant);
+        if (!isAdmin)
+            await Clients.Client(targetConnectionId).SendAsync(
+                "RoomJoinRequestsChanged",
+                Array.Empty<RoomJoinRequestView>());
+        await PublishJoinRequestsToAdminsAsync(roomId);
     }
     public async Task KickParticipant(string roomId, string targetConnectionId)
     {
         await _authorization.EnsureParticipantAsync(roomId, Context.ConnectionId);
         await _services.Interactions.KickAsync(roomId, Context.ConnectionId, targetConnectionId);
-        await Clients.Client(targetConnectionId).SendAsync("KickedFromRoom");
         await Groups.RemoveFromGroupAsync(targetConnectionId, roomId);
-        await Clients.OthersInGroup(roomId).SendAsync("PeerLeft", targetConnectionId);
+        var participants = await Participants.GetParticipantsAsync(roomId);
+        await Clients.Group(roomId).SendAsync("RoomParticipants", participants);
+        await Clients.Client(targetConnectionId).SendAsync("KickedFromRoom");
     }
     public async Task UpdateAwareness(string roomId, object awarenessState)
     {
@@ -220,6 +311,16 @@ public class CollabHub : Hub
     }
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
+        if (Context.Items.TryGetValue(PendingJoinContextKey, out var pendingValue) &&
+            pendingValue is PendingJoinContext pendingJoin)
+        {
+            await _services.JoinApprovals.RemoveRequestAsync(
+                pendingJoin.RoomId,
+                pendingJoin.RequestId,
+                Context.ConnectionId);
+            await PublishJoinRequestsToAdminsAsync(pendingJoin.RoomId);
+        }
+
         foreach (var sessionId in TerminalSessions.RemoveAll(Context.ConnectionId))
         {
             try { await ExecutionService.CloseTerminalAsync(sessionId, CancellationToken.None); }

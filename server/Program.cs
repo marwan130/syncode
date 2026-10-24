@@ -46,7 +46,7 @@ builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
 
 builder.Services.AddSignalR(options =>
     {
-        options.MaximumReceiveMessageSize = 6 * 1024 * 1024;
+        options.MaximumReceiveMessageSize = 16 * 1024 * 1024;
         options.AddFilter<HubOperationExceptionFilter>();
     })
     .AddStackExchangeRedis(redisConnStr);
@@ -57,6 +57,7 @@ builder.Services.AddHttpClient("GithubOAuth", client => client.Timeout = TimeSpa
 
 builder.Services.AddSingleton<RedisFileStore>();
 builder.Services.AddSingleton<RedisParticipantStore>();
+builder.Services.AddSingleton<RedisRoomJoinApprovalStore>();
 builder.Services.AddSingleton<RedisProjectTreeStore>();
 builder.Services.AddSingleton<RedisRoomMetadataStore>();
 builder.Services.AddSingleton<RedisRoomChatStore>();
@@ -64,6 +65,10 @@ builder.Services.AddSingleton<RedisRoomRateLimitStore>();
 builder.Services.AddSingleton<ProjectTreeStateService>();
 builder.Services.AddSingleton<ProjectTreeOperationService>();
 builder.Services.AddSingleton<ProjectImportService>();
+builder.Services.AddSingleton<GithubRepositoryStore>();
+builder.Services.AddSingleton<GithubRepositoryAccessStore>();
+builder.Services.AddSingleton<GithubApiClient>();
+builder.Services.AddSingleton<GithubRepositoryService>();
 builder.Services.AddSingleton<RoomJoinService>();
 builder.Services.AddSingleton<RoomAuthorizationService>();
 builder.Services.AddSingleton<RoomFileService>();

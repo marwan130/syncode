@@ -12,5 +12,6 @@ public sealed record RoomJoinState(
     IReadOnlyDictionary<string, string> FileSnapshots,
     IReadOnlyList<Participant> Participants,
     IReadOnlyList<ChatMessage> ChatMessages,
-    string? PeerConnectionId);
+    string? PeerConnectionId,
+    GithubRepositoryBaseline? GithubRepository);
 

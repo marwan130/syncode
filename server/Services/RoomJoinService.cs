@@ -10,6 +10,7 @@ public sealed class RoomJoinService(
     RedisRoomMetadataStore rooms,
     RedisRoomChatStore chat,
     RedisProjectTreeStore projectTree,
+    GithubRepositoryStore githubRepository,
     ProjectTreeStateService projectTreeState,
     IOptions<RoomCapacityOptions> roomLimits)
 {
@@ -110,7 +111,8 @@ public sealed class RoomJoinService(
             fileSnapshots,
             roomParticipants,
             await chat.GetMessagesAsync(roomId),
-            roomParticipants.FirstOrDefault(participant => participant.ConnectionId != connectionId)?.ConnectionId);
+            roomParticipants.FirstOrDefault(participant => participant.ConnectionId != connectionId)?.ConnectionId,
+            await githubRepository.GetAsync(roomId));
     }
 
 }

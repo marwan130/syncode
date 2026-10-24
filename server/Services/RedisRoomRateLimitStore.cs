@@ -28,6 +28,11 @@ public sealed class RedisRoomRateLimitStore(IConnectionMultiplexer redis)
             [$"room:{roomId}:project-import:connection:{connectionId}", $"room:{roomId}:project-import:room"],
             importId, 1, 2, 2, 3);
 
+    public Task<bool> TryConsumeGithubRepositoryAsync(string roomId, string actorId, string operationId) =>
+        TryConsumeAsync(
+            [$"room:{{{roomId}}}:github:rate:actor:{actorId}", $"room:{{{roomId}}}:github:rate:room"],
+            operationId, 5, 30, 10, 100);
+
     public Task<bool> TryConsumeChatAsync(string roomId, string connectionId, string messageId) =>
         TryConsumeAsync(
             [ChatConnectionKey(roomId, connectionId, "10s"), ChatConnectionKey(roomId, connectionId, "1m"), ChatRoomKey(roomId, "10s"), ChatRoomKey(roomId, "1m")],

@@ -1,0 +1,53 @@
+namespace server.Models;
+
+public sealed record GithubRepositoryImportRequest(
+    string RoomId,
+    string AccessKey,
+    string Owner,
+    string Name,
+    string? Branch);
+
+public sealed record GithubRepositoryFile(
+    string Path,
+    string Content,
+    string BlobSha,
+    long Size);
+
+public sealed record GithubSkippedFile(string Path, string Reason);
+
+public sealed record GithubRepositoryImportResponse(
+    GithubRepositoryBaseline Baseline,
+    IReadOnlyList<GithubRepositoryFile> Files,
+    IReadOnlyList<GithubSkippedFile> Skipped);
+
+public sealed record GithubFileChange(string Path, string? Content, bool Deleted);
+
+public sealed record GithubPushRequest(
+    string RoomId,
+    string AccessKey,
+    string Message,
+    IReadOnlyList<GithubFileChange> Changes);
+
+public sealed record GithubPushResponse(
+    GithubRepositoryBaseline Baseline,
+    string BranchUrl,
+    string CompareUrl,
+    string CommitSha);
+
+public sealed class GithubRepositoryException : Exception
+{
+    public GithubRepositoryException(string message, int statusCode)
+        : base(message) => StatusCode = statusCode;
+
+    public int StatusCode { get; }
+    public string Code => StatusCode switch
+    {
+        StatusCodes.Status401Unauthorized => "reauthorize",
+        StatusCodes.Status403Forbidden => "scope_required",
+        StatusCodes.Status404NotFound => "repository_unavailable",
+        StatusCodes.Status409Conflict => "branch_moved",
+        StatusCodes.Status413PayloadTooLarge => "import_too_large",
+        StatusCodes.Status429TooManyRequests => "rate_limited",
+        _ => "github_request_failed",
+    };
+}

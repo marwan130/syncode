@@ -121,7 +121,9 @@ public sealed class RedisRoomMetadataStore
         var projectFileIds = await projectTreeState.GetFileIdsAsync(roomId);
         var projectTreeKeys = await treeStore.GetRoomDeletionKeysAsync(roomId, projectFileIds);
         var keys = new RedisKey[] {
-            RedisRoomKeys.Meta(roomId), RedisRoomKeys.Participants(roomId), RedisRoomKeys.Snapshot(roomId), RedisRoomKeys.Chat(roomId), RedisRoomKeys.Files(roomId),
+            RedisRoomKeys.Meta(roomId), RedisRoomKeys.Participants(roomId), RedisRoomKeys.PreviousApprovedParticipants(roomId), RedisRoomKeys.PreviousParticipantIdentities(roomId), RedisRoomKeys.PendingJoinRequests(roomId), RedisRoomKeys.Snapshot(roomId), RedisRoomKeys.Chat(roomId), RedisRoomKeys.Files(roomId),
+            RedisRoomKeys.GithubRepository(roomId),
+            RedisRoomKeys.GithubRepositoryPushLock(roomId),
         }.Concat(fileIds.Select(id => (string)id!).Concat(projectFileIds)
             .Distinct().Select(id => (RedisKey)RedisRoomKeys.FileSnapshot(roomId, id)))
             .Concat(projectTreeKeys).ToArray();
