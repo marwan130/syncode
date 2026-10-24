@@ -1,0 +1,95 @@
+name: ZAP Baseline
+
+on:
+  pull_request:
+  schedule:
+    - cron: '59 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: zap-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scan:
+    name: Passive scan of the local app
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7.4-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+
+      - name: Install client dependencies
+        working-directory: client
+        run: npm ci
+
+      - name: Start the room server
+        env:
+          ASPNETCORE_ENVIRONMENT: Development
+          Redis: 127.0.0.1:6379
+        run: |
+          nohup dotnet run --project server/Syncode.Server.csproj --no-launch-profile --urls http://127.0.0.1:5111 > "$RUNNER_TEMP/room-server.log" 2>&1 &
+          for attempt in {1..60}; do
+            if curl --fail --silent http://127.0.0.1:5111/openapi/v1.json > /dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          cat "$RUNNER_TEMP/room-server.log"
+          exit 1
+
+      - name: Start the client
+        working-directory: client
+        run: |
+          nohup npm run dev -- --host 127.0.0.1 --port 5173 --strictPort > "$RUNNER_TEMP/client.log" 2>&1 &
+          for attempt in {1..60}; do
+            if curl --fail --silent http://127.0.0.1:5173/ > /dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          cat "$RUNNER_TEMP/client.log"
+          exit 1
+
+      - name: Run ZAP Baseline
+        continue-on-error: true
+        run: >-
+          docker run --rm --network host
+          -v "$PWD:/zap/wrk/:rw"
+          ghcr.io/zaproxy/zaproxy:stable
+          zap-baseline.py -t http://127.0.0.1:5173
+          -J zap-report.json -w zap-report.md
+
+      - name: Save ZAP report
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: zap-baseline-report
+          path: |
+            zap-report.json
+            zap-report.md
+          if-no-files-found: warn
