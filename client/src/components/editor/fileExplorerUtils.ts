@@ -1,4 +1,6 @@
 import type { RoomEntry } from '../../providers/SignalRCrdtProvider';
+import type { GithubChangeStatus } from '../../github/changeTracker';
+import { getEntryPath } from './editorLayoutStorage';
 
 const EXTENSION_ICONS: Record<string, string> = {
   c: 'c',
@@ -38,6 +40,73 @@ const EXTENSION_ICONS: Record<string, string> = {
 
 export type FileDiagnostic = 'error' | 'warning';
 export type FileDiagnostics = Record<string, FileDiagnostic>;
+
+export interface FileExplorerGitStatus {
+  kind: GithubChangeStatus['kind'] | 'mixed';
+  changeCount: number;
+  stagedCount: number;
+}
+
+export function getFileExplorerIndent(depth: number): number {
+  return 8 + Math.min(depth, 4) * 14;
+}
+
+export function resolveFileExplorerGitStatus(
+  entries: RoomEntry[],
+  changes: GithubChangeStatus[],
+  stagedPaths: ReadonlySet<string>
+): Map<string, FileExplorerGitStatus> {
+  const entriesByPath = new Map(
+    entries.map((entry) => [getEntryPath(entry, entries), entry])
+  );
+  const changesByEntry = new Map<string, GithubChangeStatus[]>();
+
+  for (const change of changes) {
+    const file = entriesByPath.get(change.path);
+    if (file && !file.isFolder) addChange(changesByEntry, file.id, change);
+
+    const pathParts = change.path.split('/');
+    pathParts.pop();
+    while (pathParts.length) {
+      const folder = entriesByPath.get(pathParts.join('/'));
+      if (folder?.isFolder) addChange(changesByEntry, folder.id, change);
+      pathParts.pop();
+    }
+  }
+
+  return new Map(
+    [...changesByEntry].map(([entryId, entryChanges]) => [
+      entryId,
+      summarizeChanges(entryChanges, stagedPaths),
+    ])
+  );
+}
+
+function addChange(
+  changesByEntry: Map<string, GithubChangeStatus[]>,
+  entryId: string,
+  change: GithubChangeStatus
+): void {
+  const entryChanges = changesByEntry.get(entryId) ?? [];
+  entryChanges.push(change);
+  changesByEntry.set(entryId, entryChanges);
+}
+
+function summarizeChanges(
+  changes: GithubChangeStatus[],
+  stagedPaths: ReadonlySet<string>
+): FileExplorerGitStatus {
+  const kinds = new Set(changes.map((change) => change.kind));
+  return {
+    kind: kinds.size === 1 ? changes[0].kind : 'mixed',
+    changeCount: new Set(changes.map((change) => change.path)).size,
+    stagedCount: new Set(
+      changes
+        .filter((change) => stagedPaths.has(change.path))
+        .map((change) => change.path)
+    ).size,
+  };
+}
 
 export function getFileIcon(
   entry: Pick<RoomEntry, 'name' | 'isFolder'>,

@@ -1,7 +1,7 @@
-import type { DragEvent } from 'react';
+import type { DragEvent, ReactNode } from 'react';
 import { Icon } from '@iconify/react';
 import type { RoomEntry } from '../../providers/SignalRCrdtProvider';
-import { ExplorerActionButton } from './ExplorerActionButton';
+import { FileExplorerRootActions } from './FileExplorerRootActions';
 import { FileExplorerTree } from './FileExplorerTree';
 import type { ExplorerNodeSharedProps } from './fileExplorerTypes';
 import { ScrollbarPanel } from '../shared/ScrollbarPanel';
@@ -14,6 +14,8 @@ export interface FileExplorerRootProps {
   canImportFolder: boolean;
   onImportFolder?: () => void;
   onSaveProject?: () => void;
+  githubAction?: ReactNode;
+  githubStatus?: ReactNode;
   onToggleRoot: () => void;
   onDragOver: (event: DragEvent<HTMLLIElement>) => void;
   onDrop: (event: DragEvent<HTMLLIElement>) => void;
@@ -27,6 +29,8 @@ export function FileExplorerRoot({
   canImportFolder,
   onImportFolder,
   onSaveProject,
+  githubAction,
+  githubStatus,
   onToggleRoot,
   onDragOver,
   onDrop,
@@ -37,7 +41,7 @@ export function FileExplorerRoot({
         <span>EXPLORER</span>
       </div>
       <ScrollbarPanel className="file-explorer-scroll-area">
-        <ul role="tree" aria-label="Project files">
+        <ul className="file-explorer-tree" role="tree" aria-label="Project files">
           <li
             className="file-explorer-root"
             role="treeitem"
@@ -52,50 +56,26 @@ export function FileExplorerRoot({
                 type="button"
                 className="file-explorer-root-select"
                 aria-expanded={isRootExpanded}
+                aria-label={`${isRootExpanded ? 'Collapse' : 'Expand'} Syncode project`}
                 onClick={onToggleRoot}
               >
                 <Icon
-                  className="file-explorer-icon"
-                  icon={`vscode-icons:default-folder${isRootExpanded ? '-opened' : ''}`}
+                  className="file-explorer-root-chevron"
+                  icon={`codicon:chevron-${isRootExpanded ? 'down' : 'right'}`}
                   aria-hidden="true"
                 />
                 <span>SYNCODE</span>
               </button>
-              <div className="file-explorer-actions is-visible">
-                <ExplorerActionButton
-                  kind="new-file"
-                  label="New file"
-                  disabled={!tree.canEdit}
-                  onClick={() => tree.onStartCreate(null, false)}
-                />
-                <ExplorerActionButton
-                  kind="new-folder"
-                  label="New folder"
-                  disabled={!tree.canEdit}
-                  onClick={() => tree.onStartCreate(null, true)}
-                />
-                {onImportFolder && (
-                  <ExplorerActionButton
-                    kind="import-folder"
-                    label={
-                      canImportFolder
-                        ? 'Import folder'
-                        : 'Only the room creator can import a folder'
-                    }
-                    disabled={!tree.canEdit || !canImportFolder}
-                    onClick={onImportFolder}
-                  />
-                )}
-                {onSaveProject && (
-                  <ExplorerActionButton
-                    kind="save-project"
-                    label="Save project files"
-                    disabled={entries.every((entry) => entry.isFolder)}
-                    onClick={onSaveProject}
-                  />
-                )}
-              </div>
+              <FileExplorerRootActions
+                tree={tree}
+                entries={entries}
+                canImportFolder={canImportFolder}
+                onImportFolder={onImportFolder}
+                onSaveProject={onSaveProject}
+                githubAction={githubAction}
+              />
             </div>
+            {githubStatus}
             {isRootExpanded && (
               <ul role="group">
                 <FileExplorerTree {...tree} parentId={null} depth={0} />

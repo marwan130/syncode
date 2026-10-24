@@ -1,8 +1,10 @@
 import type { FC, KeyboardEvent } from 'react';
 import { Icon } from '@iconify/react';
 import type { RoomEntry } from '../../providers/SignalRCrdtProvider';
-import { getFileIcon } from './fileExplorerUtils';
+import { getFileExplorerIndent, getFileIcon } from './fileExplorerUtils';
 import { getExplorerNavigationAction } from './fileExplorerKeyboard';
+import type { FileExplorerGitStatus } from './fileExplorerUtils';
+import { FileExplorerGitIndicator } from './FileExplorerGitIndicator';
 
 export interface FileExplorerEntryButtonProps {
   entry: RoomEntry;
@@ -10,8 +12,10 @@ export interface FileExplorerEntryButtonProps {
   isExpanded: boolean;
   diagnostic?: 'error' | 'warning';
   diagnosticHint?: string;
+  gitStatus?: FileExplorerGitStatus;
   onToggleFolder: (id: string) => void;
   onSelect: (id: string) => void;
+  onOpenContextMenu: (x: number, y: number) => void;
 }
 
 function focusEntry(
@@ -40,7 +44,16 @@ function handleKeyDown(
   event: KeyboardEvent<HTMLButtonElement>,
   props: FileExplorerEntryButtonProps
 ) {
-  const { entry, depth, isExpanded, onToggleFolder } = props;
+  const { entry, depth, isExpanded, onToggleFolder, onOpenContextMenu } = props;
+  if (
+    event.key === 'ContextMenu' ||
+    (event.key === 'F10' && event.shiftKey)
+  ) {
+    event.preventDefault();
+    const bounds = event.currentTarget.getBoundingClientRect();
+    onOpenContextMenu(bounds.left, bounds.bottom);
+    return;
+  }
   const action = getExplorerNavigationAction(
     event.key,
     entry.isFolder,
@@ -81,20 +94,25 @@ export const FileExplorerEntryButton: FC<FileExplorerEntryButtonProps> = (
     isExpanded,
     diagnostic,
     diagnosticHint,
+    gitStatus,
     onToggleFolder,
     onSelect,
   } = props;
+  const gitStatusHint = gitStatus
+    ? `${gitStatus.changeCount} ${gitStatus.kind} ${gitStatus.changeCount === 1 ? 'change' : 'changes'}, ${gitStatus.stagedCount} staged`
+    : undefined;
+  const entryHints = [diagnosticHint, gitStatusHint].filter(Boolean).join('. ');
   return (
     <button
       className="file-explorer-select"
       type="button"
-      style={{ paddingLeft: 8 + depth * 14 }}
+      style={{ paddingLeft: getFileExplorerIndent(depth) }}
       onClick={() =>
         entry.isFolder ? onToggleFolder(entry.id) : onSelect(entry.id)
       }
       aria-expanded={entry.isFolder ? isExpanded : undefined}
-      aria-label={`${entry.isFolder ? 'Folder' : 'File'} ${entry.name}${diagnosticHint ? `. ${diagnosticHint}` : ''}`}
-      title={diagnosticHint ? `${entry.name}: ${diagnosticHint}` : entry.name}
+      aria-label={`${entry.isFolder ? 'Folder' : 'File'} ${entry.name}${entryHints ? `. ${entryHints}` : ''}`}
+      title={entryHints ? `${entry.name}: ${entryHints}` : entry.name}
       draggable={!entry.isFolder}
       onDragStart={(event) => {
         if (entry.isFolder) return;
@@ -119,6 +137,7 @@ export const FileExplorerEntryButton: FC<FileExplorerEntryButtonProps> = (
           aria-hidden="true"
         />
       )}
+      <FileExplorerGitIndicator status={gitStatus} aggregate={entry.isFolder} />
     </button>
   );
 };
