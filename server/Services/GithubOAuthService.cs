@@ -45,9 +45,10 @@ public sealed partial class GithubOAuthService(
         }, cancellationToken);
 
         GithubAccountResponse account;
+        IReadOnlyList<string> scopes;
         try
         {
-            account = await FetchAccountAsync(token.AccessToken!, cancellationToken);
+            (account, scopes) = await FetchAccountAsync(token.AccessToken!, cancellationToken);
         }
         catch
         {
@@ -64,7 +65,8 @@ public sealed partial class GithubOAuthService(
             token.AccessToken!,
             token.RefreshToken!,
             now.AddSeconds(token.ExpiresIn),
-            now.AddSeconds(token.RefreshTokenExpiresIn));
+            now.AddSeconds(token.RefreshTokenExpiresIn),
+            MergeScopes(scopes, token.Scope));
         try
         {
             await vault.SetAsync(sessionId, entry);
@@ -95,6 +97,17 @@ public sealed partial class GithubOAuthService(
             entry = await RefreshSessionAsync(sessionId, cancellationToken);
 
         return new GithubOAuthSession(ToAccount(entry), sessionId, entry.RefreshExpiresAt);
+    }
+
+    public async Task<(string AccessToken, IReadOnlyList<string> Scopes)> GetAccessTokenAsync(
+        string sessionId,
+        CancellationToken cancellationToken)
+    {
+        await GetSessionAsync(sessionId, cancellationToken);
+        var entry = await vault.GetAsync(sessionId);
+        if (entry is null)
+            throw new GithubOAuthException("GitHub sign-in has expired.", true);
+        return (entry.AccessToken, entry.Scopes ?? []);
     }
 
     public async Task<bool> RevokeSessionAsync(
@@ -244,7 +257,7 @@ public sealed partial class GithubOAuthService(
         return token!;
     }
 
-    private async Task<GithubAccountResponse> FetchAccountAsync(
+    private async Task<(GithubAccountResponse Account, IReadOnlyList<string> Scopes)> FetchAccountAsync(
         string accessToken,
         CancellationToken cancellationToken)
     {
@@ -270,11 +283,42 @@ public sealed partial class GithubOAuthService(
             avatar.Scheme == Uri.UriSchemeHttps && avatar.Host == "avatars.githubusercontent.com"
                 ? avatar
                 : null;
-        return new GithubAccountResponse(user.Id, user.Login!, avatarUrl ?? new Uri("", UriKind.Relative));
+        var scopes = response.Headers.TryGetValues("X-OAuth-Scopes", out var values)
+            ? values.SelectMany(value => value.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToArray()
+            : [];
+        var account = new GithubAccountResponse(
+            user.Id,
+            user.Login!,
+            avatarUrl ?? new Uri("", UriKind.Relative),
+            HasScope(scopes, "public_repo") || HasScope(scopes, "repo"),
+            HasScope(scopes, "repo"));
+        return (account, scopes);
     }
 
     private static GithubAccountResponse ToAccount(GithubVaultEntry entry) =>
-        new(entry.GithubId, entry.Login, entry.AvatarUrl ?? new Uri("", UriKind.Relative));
+        new(
+            entry.GithubId,
+            entry.Login,
+            entry.AvatarUrl ?? new Uri("", UriKind.Relative),
+            HasScope(entry.Scopes, "public_repo") || HasScope(entry.Scopes, "repo"),
+            HasScope(entry.Scopes, "repo"));
+
+    private static IReadOnlyList<string> MergeScopes(
+        IReadOnlyList<string> accountScopes,
+        string? tokenScopes) => accountScopes
+        .Concat((tokenScopes ?? "").Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+        .ToArray();
+
+    private static bool HasScope(IReadOnlyList<string>? scopes, string scope) =>
+        scopes?.Contains(scope, StringComparer.OrdinalIgnoreCase) == true;
+
+    public static bool HasRequiredRepositoryScope(
+        IReadOnlyList<string> scopes,
+        bool isPrivate) => isPrivate
+        ? HasScope(scopes, "repo")
+        : HasScope(scopes, "public_repo") || HasScope(scopes, "repo");
 
     private static bool IsValidSessionId(string sessionId) =>
         sessionId.Length == 43 && sessionId.All(character =>
@@ -311,6 +355,9 @@ public sealed partial class GithubOAuthService(
 
         [JsonPropertyName("token_type")]
         public string TokenType { get; init; } = "";
+
+        [JsonPropertyName("scope")]
+        public string? Scope { get; init; }
 
         [JsonPropertyName("error")]
         public string? Error { get; init; }

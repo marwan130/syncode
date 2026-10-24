@@ -7,4 +7,5 @@ internal sealed record GithubVaultEntry(
     string AccessToken,
     string RefreshToken,
     DateTimeOffset AccessExpiresAt,
-    DateTimeOffset RefreshExpiresAt);
+    DateTimeOffset RefreshExpiresAt,
+    IReadOnlyList<string>? Scopes);

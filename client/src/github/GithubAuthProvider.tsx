@@ -51,8 +51,11 @@ export function GithubAuthProvider({ children }: { children: ReactNode }) {
   );
 
   const login = useCallback(
-    (returnTo: string, popup?: Window | null) =>
-      startGithubLogin(returnTo, popup),
+    (
+      returnTo: string,
+      popup?: Window | null,
+      pushScope?: 'public_repo' | 'repo'
+    ) => startGithubLogin(returnTo, popup, pushScope),
     []
   );
 

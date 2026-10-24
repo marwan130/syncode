@@ -23,7 +23,7 @@ public sealed partial class GithubAuthController(
         [FromBody] GithubOAuthExchangeRequest? request,
         CancellationToken cancellationToken)
     {
-        if (!HasTrustedOrigin()) return Forbid();
+        if (!GithubRequestSecurity.HasTrustedOrigin(Request, configuration, environment)) return Forbid();
         if (request is null ||
             string.IsNullOrWhiteSpace(request.Code) || request.Code.Length > 512 ||
             string.IsNullOrWhiteSpace(request.CodeVerifier) ||
@@ -46,7 +46,7 @@ public sealed partial class GithubAuthController(
     [HttpPost("session/refresh")]
     public async Task<IActionResult> GetSession(CancellationToken cancellationToken)
     {
-        if (!HasTrustedOrigin()) return Forbid();
+        if (!GithubRequestSecurity.HasTrustedOrigin(Request, configuration, environment)) return Forbid();
         if (!Request.Cookies.TryGetValue(SessionCookieName, out var sessionId))
             return Unauthorized(new { error = "unauthorized" });
         try
@@ -65,7 +65,7 @@ public sealed partial class GithubAuthController(
     [HttpDelete("session")]
     public async Task<IActionResult> DeleteSession(CancellationToken cancellationToken)
     {
-        if (!HasTrustedOrigin()) return Forbid();
+        if (!GithubRequestSecurity.HasTrustedOrigin(Request, configuration, environment)) return Forbid();
         var revoked = true;
         if (Request.Cookies.TryGetValue(SessionCookieName, out var sessionId))
         {
@@ -87,17 +87,6 @@ public sealed partial class GithubAuthController(
         return revoked
             ? NoContent()
             : StatusCode(StatusCodes.Status502BadGateway, new { error = "revoke_failed" });
-    }
-
-    private bool HasTrustedOrigin()
-    {
-        var origin = Request.Headers.Origin.ToString();
-        if (!Uri.TryCreate(origin, UriKind.Absolute, out var parsed) ||
-            parsed.AbsoluteUri.TrimEnd('/') != origin.TrimEnd('/'))
-            return false;
-
-        var allowedOrigins = AllowedOriginsConfiguration.Resolve(configuration, environment);
-        return allowedOrigins?.Contains(origin, StringComparer.OrdinalIgnoreCase) == true;
     }
 
     private IActionResult OAuthError(GithubOAuthException exception)

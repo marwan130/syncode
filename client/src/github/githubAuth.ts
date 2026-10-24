@@ -2,6 +2,8 @@ export interface GithubAccount {
   id: number;
   login: string;
   avatarUrl: string;
+  canPushPublicRepositories: boolean;
+  canPushPrivateRepositories: boolean;
 }
 
 interface GithubSessionResponse {
@@ -22,6 +24,7 @@ const POPUP_KEY = 'syncode.github.oauth.popup';
 const SESSION_CHANNEL = 'syncode.github.session';
 const CLIENT_ID = import.meta.env.VITE_GITHUB_CLIENT_ID?.trim() ?? '';
 const CALLBACK_PATH = '/github/callback';
+const GITHUB_AUTHORIZATION_ENDPOINT = 'https://github.com/login/oauth/authorize';
 
 export function isGithubOAuthConfigured(): boolean {
   return Boolean(CLIENT_ID);
@@ -32,8 +35,8 @@ export function getGithubAccount(): GithubAccount | null {
     clearLegacyGithubTokens();
     const raw = sessionStorage.getItem(ACCOUNT_KEY);
     if (!raw) return null;
-    const account = JSON.parse(raw) as GithubAccount;
-    return Number.isSafeInteger(account.id) && account.login ? account : null;
+    const account: unknown = JSON.parse(raw);
+    return isGithubAccount(account) ? account : null;
   } catch {
     return null;
   }
@@ -128,18 +131,10 @@ export function subscribeToGithubSessionChanges(
   return () => channel.close();
 }
 
-export function getPendingGithubReturnTo(): string {
-  try {
-    const returnTo = sessionStorage.getItem(RETURN_TO_KEY) ?? '/';
-    return isSafeReturnPath(returnTo) ? returnTo : '/';
-  } catch {
-    return '/';
-  }
-}
-
 export async function startGithubLogin(
   returnTo: string,
-  popup?: Window | null
+  popup?: Window | null,
+  pushScope?: 'public_repo' | 'repo'
 ): Promise<void> {
   if (!isGithubOAuthConfigured())
     throw new Error('GitHub sign-in is not configured yet.');
@@ -148,32 +143,8 @@ export async function startGithubLogin(
   const verifier = randomBase64Url(48);
   const challenge = await createCodeChallenge(verifier);
   const safeReturnTo = isSafeReturnPath(returnTo) ? returnTo : '/';
-  sessionStorage.setItem(STATE_KEY, state);
-  sessionStorage.setItem(VERIFIER_KEY, verifier);
-  sessionStorage.setItem(RETURN_TO_KEY, safeReturnTo);
-  if (popup && !popup.closed) {
-    popup.sessionStorage.setItem(STATE_KEY, state);
-    popup.sessionStorage.setItem(VERIFIER_KEY, verifier);
-    popup.sessionStorage.setItem(RETURN_TO_KEY, safeReturnTo);
-    popup.sessionStorage.setItem(POPUP_KEY, '1');
-  }
-
-  const authorize = new URL('https://github.com/login/oauth/authorize');
-  authorize.searchParams.set('client_id', CLIENT_ID);
-  authorize.searchParams.set(
-    'redirect_uri',
-    `${window.location.origin}${CALLBACK_PATH}`
-  );
-  authorize.searchParams.set('scope', 'read:user offline_access');
-  authorize.searchParams.set('state', state);
-  authorize.searchParams.set('code_challenge', challenge);
-  authorize.searchParams.set('code_challenge_method', 'S256');
-  if (popup && !popup.closed) {
-    popup.opener = null;
-    popup.location.assign(authorize.toString());
-  } else {
-    window.location.assign(authorize.toString());
-  }
+  saveLoginAttempt(state, verifier, safeReturnTo, popup);
+  navigateToGithub(createGithubAuthorizationUrl(state, challenge, pushScope), popup);
 }
 
 export async function completeGithubLogin(
@@ -181,56 +152,164 @@ export async function completeGithubLogin(
   receivedState: string
 ): Promise<{ account: GithubAccount; returnTo: string }> {
   const { verifier, returnTo } = consumeLoginAttempt(receivedState);
+  validateAuthorizationCode(code);
+  const result = await exchangeGithubCode(code, verifier);
+  const account = requireGithubAccount(result.account);
+  storeAccount(account);
+  return {
+    account,
+    returnTo: isSafeReturnPath(returnTo) ? returnTo : '/',
+  };
+}
+
+function validateAuthorizationCode(code: string): void {
   if (!code || code.length > 512)
     throw new Error('GitHub sign-in returned an invalid code.');
+}
 
+function requireGithubAccount(value: unknown): GithubAccount {
+  if (!isGithubAccount(value))
+    throw new Error('GitHub sign-in returned an invalid account.');
+  return value;
+}
+
+async function exchangeGithubCode(
+  code: string,
+  codeVerifier: string
+): Promise<GithubSessionResponse> {
   const response = await fetch('/api/github/oauth/exchange', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       code,
-      codeVerifier: verifier,
+      codeVerifier,
       redirectUri: `${window.location.origin}${CALLBACK_PATH}`,
     }),
     cache: 'no-store',
     credentials: 'include',
     redirect: 'error',
   });
-  if (!response.ok) {
-    const message =
-      response.status === 400
-        ? 'GitHub returned an invalid sign-in request. Start sign-in again.'
-        : response.status === 403
-          ? 'GitHub sign-in was rejected. Check that you opened the registered local URL.'
-          : response.status === 502
-            ? 'GitHub could not complete authorization. Check the OAuth app credentials and callback URL.'
-            : response.status === 503
-              ? 'GitHub sign-in is not configured on the room server. Contact the server administrator.'
-              : 'GitHub sign-in could not be completed. Check that the room server is running and try again.';
-    throw new Error(message);
-  }
+  if (!response.ok) throw new Error(githubExchangeError(response.status));
+  return (await response.json()) as GithubSessionResponse;
+}
 
-  const result = (await response.json()) as GithubSessionResponse;
-  if (!isGithubAccount(result.account))
-    throw new Error('GitHub sign-in returned an invalid account.');
-  storeAccount(result.account);
-  return {
-    account: result.account,
-    returnTo: isSafeReturnPath(returnTo) ? returnTo : '/',
+function githubExchangeError(status: number): string {
+  const errors: Record<number, string> = {
+    400: 'GitHub returned an invalid sign-in request. Start sign-in again.',
+    403: 'GitHub sign-in was rejected. Check that you opened the registered local URL.',
+    502: 'GitHub could not complete authorization. Check the OAuth app credentials and callback URL.',
+    503: 'GitHub sign-in is not configured on the room server. Contact the server administrator.',
   };
+  return errors[status] ??
+    'GitHub sign-in could not be completed. Check that the room server is running and try again.';
+}
+
+function saveLoginAttempt(
+  state: string,
+  verifier: string,
+  returnTo: string,
+  popup?: Window | null
+): void {
+  storeLoginAttempt(sessionStorage, state, verifier, returnTo);
+  if (popup && !popup.closed) {
+    storeLoginAttempt(popup.sessionStorage, state, verifier, returnTo);
+    popup.sessionStorage.setItem(POPUP_KEY, '1');
+  }
+}
+
+function storeLoginAttempt(
+  storage: Storage,
+  state: string,
+  verifier: string,
+  returnTo: string
+): void {
+  storage.setItem(STATE_KEY, state);
+  storage.setItem(VERIFIER_KEY, verifier);
+  storage.setItem(RETURN_TO_KEY, returnTo);
+}
+
+function createGithubAuthorizationUrl(
+  state: string,
+  challenge: string,
+  pushScope?: 'public_repo' | 'repo'
+): URL {
+  const authorize = new URL(GITHUB_AUTHORIZATION_ENDPOINT);
+  authorize.searchParams.set('client_id', CLIENT_ID);
+  authorize.searchParams.set(
+    'redirect_uri',
+    `${window.location.origin}${CALLBACK_PATH}`
+  );
+  authorize.searchParams.set(
+    'scope',
+    ['read:user', 'offline_access', pushScope].filter(Boolean).join(' ')
+  );
+  authorize.searchParams.set('state', state);
+  authorize.searchParams.set('code_challenge', challenge);
+  authorize.searchParams.set('code_challenge_method', 'S256');
+  getTrustedGithubAuthorizationUrl(authorize);
+  return authorize;
+}
+
+export function getTrustedGithubAuthorizationUrl(authorize: URL): string {
+  if (
+    authorize.protocol !== 'https:' ||
+    authorize.origin !== 'https://github.com' ||
+    authorize.pathname !== '/login/oauth/authorize'
+  )
+    throw new Error('GitHub sign-in could not be started.');
+  return authorize.href;
+}
+
+function navigateToGithub(authorize: URL, popup?: Window | null): void {
+  const target = new URL(getTrustedGithubAuthorizationUrl(authorize));
+  const destination = popup && !popup.closed ? popup : window;
+  const destinationDocument = destination.document;
+  if (destination !== window) destination.opener = null;
+
+  const form = destinationDocument.createElement('form');
+  form.method = 'get';
+  form.action = GITHUB_AUTHORIZATION_ENDPOINT;
+  form.hidden = true;
+  target.searchParams.forEach((value, name) => {
+    const input = destinationDocument.createElement('input');
+    input.type = 'hidden';
+    input.name = name;
+    input.value = value;
+    form.append(input);
+  });
+  destinationDocument.body.append(form);
+  form.submit();
 }
 
 function consumeLoginAttempt(receivedState: string): {
   verifier: string;
   returnTo: string;
 } {
-  const expectedState = sessionStorage.getItem(STATE_KEY);
-  const verifier = sessionStorage.getItem(VERIFIER_KEY);
-  const returnTo = sessionStorage.getItem(RETURN_TO_KEY) ?? '/';
+  const attempt = {
+    expectedState: sessionStorage.getItem(STATE_KEY),
+    verifier: sessionStorage.getItem(VERIFIER_KEY),
+    returnTo: sessionStorage.getItem(RETURN_TO_KEY) ?? '/',
+    receivedState,
+  };
   clearPendingGithubLogin();
-  if (!expectedState || receivedState !== expectedState || !verifier)
+  if (!isValidLoginAttempt(attempt))
     throw new Error('GitHub sign-in could not be verified. Try again.');
-  return { verifier, returnTo };
+  return { verifier: attempt.verifier, returnTo: attempt.returnTo };
+}
+
+function isValidLoginAttempt(
+  attempt: {
+    expectedState: string | null;
+    receivedState: string;
+    verifier: string | null;
+    returnTo: string;
+  }
+): attempt is typeof attempt & { expectedState: string; verifier: string } {
+  return Boolean(
+    attempt.expectedState &&
+      attempt.expectedState === attempt.receivedState &&
+      attempt.verifier
+  );
 }
 
 export async function revokeGithubLogin(): Promise<void> {
@@ -267,14 +346,35 @@ function storeAccount(account: GithubAccount): void {
 
 function isGithubAccount(value: unknown): value is GithubAccount {
   if (!value || typeof value !== 'object') return false;
-  const account = value as GithubAccount;
+  const account = value as Partial<GithubAccount>;
+  return hasValidGithubIdentity(account) && hasRepositoryPermissions(account);
+}
+
+function hasValidGithubIdentity(account: Partial<GithubAccount>): boolean {
+  return [
+    isValidGithubAccountId(account.id),
+    isValidGithubLogin(account.login),
+    isValidGithubAvatarUrl(account.avatarUrl),
+  ].every(Boolean);
+}
+
+function hasRepositoryPermissions(account: Partial<GithubAccount>): boolean {
+  return typeof account.canPushPublicRepositories === 'boolean' &&
+    typeof account.canPushPrivateRepositories === 'boolean';
+}
+
+function isValidGithubAccountId(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value);
+}
+
+function isValidGithubLogin(value: unknown): value is string {
+  return typeof value === 'string' && /^[A-Za-z0-9-]{1,39}$/.test(value);
+}
+
+function isValidGithubAvatarUrl(value: unknown): value is string {
   return (
-    Number.isSafeInteger(account.id) &&
-    typeof account.login === 'string' &&
-    /^[A-Za-z0-9-]{1,39}$/.test(account.login) &&
-    typeof account.avatarUrl === 'string' &&
-    (account.avatarUrl === '' ||
-      account.avatarUrl.startsWith('https://avatars.githubusercontent.com/'))
+    typeof value === 'string' &&
+    (value === '' || value.startsWith('https://avatars.githubusercontent.com/'))
   );
 }
 

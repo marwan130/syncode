@@ -51,7 +51,7 @@ export function GithubLoginButton({ returnTo }: GithubLoginButtonProps) {
 
   return (
     <button
-      className="github-auth-button"
+      className={`github-auth-button${account ? '' : ' is-sign-in'}`}
       type="button"
       title={
         !configured
@@ -68,7 +68,12 @@ export function GithubLoginButton({ returnTo }: GithubLoginButtonProps) {
       disabled={!configured || busy}
       onClick={() => void handleClick()}
     >
-      {account ? `@${account.login}` : 'Sign in with GitHub'}
+      {!account && (
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M12 .9C5.87.9.9 5.87.9 12c0 4.9 3.18 9.06 7.59 10.53.56.1.77-.24.77-.54v-2.1c-3.09.67-3.74-1.31-3.74-1.31-.51-1.29-1.24-1.64-1.24-1.64-1.01-.69.08-.68.08-.68 1.12.08 1.71 1.16 1.71 1.16.99 1.7 2.6 1.21 3.23.92.1-.72.39-1.21.71-1.49-2.47-.28-5.06-1.24-5.06-5.51 0-1.22.44-2.22 1.16-3-.12-.28-.5-1.42.11-2.96 0 0 .95-.3 3.12 1.15a10.9 10.9 0 0 1 5.68 0c2.16-1.45 3.11-1.15 3.11-1.15.62 1.54.23 2.68.12 2.96.72.78 1.15 1.78 1.15 3 0 4.28-2.6 5.22-5.08 5.5.4.35.76 1.02.76 2.06v3.05c0 .3.2.65.78.54A11.1 11.1 0 0 0 23.1 12C23.1 5.87 18.13.9 12 .9Z" />
+        </svg>
+      )}
+      {account ? `@${account.login}` : null}
     </button>
   );
 }

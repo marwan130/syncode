@@ -8,7 +8,9 @@ public sealed record GithubOAuthExchangeRequest(
 public sealed record GithubAccountResponse(
     long Id,
     string Login,
-    Uri AvatarUrl);
+    Uri AvatarUrl,
+    bool CanPushPublicRepositories,
+    bool CanPushPrivateRepositories);
 
 public sealed record GithubSessionResponse(GithubAccountResponse Account);
 
