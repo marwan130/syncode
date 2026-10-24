@@ -20,6 +20,13 @@ public sealed class RoomAuthorizationService(
             throw new HubOperationException("The room admin has locked your editing access.");
     }
 
+    public async Task EnsureAdminAsync(string roomId, string connectionId)
+    {
+        await EnsureParticipantAsync(roomId, connectionId);
+        if (await participants.GetParticipantAsync(roomId, connectionId) is not { IsAdmin: true })
+            throw new HubOperationException("Only a room admin can manage join requests.");
+    }
+
     public async Task EnsureFileParticipantAsync(string roomId, string fileId, string connectionId)
     {
         await EnsureCanEditAsync(roomId, connectionId);

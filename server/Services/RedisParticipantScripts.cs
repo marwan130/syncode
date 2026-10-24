@@ -17,20 +17,22 @@ internal static class RedisParticipantScripts
             participant.IsAdmin = previous.IsAdmin or previous.isAdmin or false
             participant.IsLocked = previous.IsLocked or previous.isLocked or false
         else
-            local hasCreatorToken = redis.call('HEXISTS', KEYS[2], 'creatorTokenHash') == 1
+            local hasAdmin = false
+            for _, value in ipairs(redis.call('HVALS', KEYS[1])) do
+                local existing = cjson.decode(value)
+                if existing.IsAdmin or existing.isAdmin then
+                    hasAdmin = true
+                    break
+                end
+            end
             if ARGV[8] == '1' then
                 participant.IsAdmin = true
                 participant.IsLocked = false
-            elseif not hasCreatorToken then
-                local hasAdmin = false
-                for _, value in ipairs(redis.call('HVALS', KEYS[1])) do
-                    local existing = cjson.decode(value)
-                    if existing.IsAdmin or existing.isAdmin then
-                        hasAdmin = true
-                        break
-                    end
-                end
-                if not hasAdmin then participant.IsAdmin = true end
+                redis.call('HSET', KEYS[2], 'hasHadAdmin', '1')
+            elseif hasAdmin then
+                redis.call('HSET', KEYS[2], 'hasHadAdmin', '1')
+            elseif redis.call('HGET', KEYS[2], 'hasHadAdmin') == '1' then
+                participant.IsAdmin = true
             end
         end
         redis.call('HSET', KEYS[1], ARGV[1], cjson.encode(participant))
