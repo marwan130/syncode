@@ -107,19 +107,31 @@ public sealed class RedisProjectTreeStore
             entryParents[entryId] = parents[entryId] and parents[entryId].value or create.value.parentId
         end
         local activeCount = 0
+        local depthRoot = nil
+        if operation.type == 'create' then depthRoot = operation.entry.id end
+        if operation.type == 'move' then depthRoot = operation.entryId end
         for entryId, parent in pairs(entryParents) do
             local hidden = deleted[entryId] ~= nil
             local visited = {}
+            local depth = 1
+            local containsDepthRoot = entryId == depthRoot
+            local cycle = false
+            local tooDeep = false
             while not hidden and parent and parent ~= cjson.null do
                 if deleted[parent] then
                     hidden = true
                 elseif visited[parent] then
+                    cycle = true
                     break
                 else
                     visited[parent] = true
+                    if parent == depthRoot then containsDepthRoot = true end
+                    depth = depth + 1
+                    if depth > 32 then tooDeep = true end
                     parent = entryParents[parent]
                 end
             end
+            if not hidden and containsDepthRoot and tooDeep and not cycle then return -6 end
             if not hidden then activeCount = activeCount + 1 end
         end
         if operation.type == 'create' and activeCount > 500 then return -5 end

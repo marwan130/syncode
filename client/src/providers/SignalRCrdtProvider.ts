@@ -11,8 +11,19 @@ import { PendingBuffer } from '../crdt/PendingBuffer';
 import type { CursorAnchor } from '../crdt/CursorAnchor';
 import { ProjectTree } from '../crdt/ProjectTree';
 import type { ProjectTreeOperation } from '../crdt/ProjectTree';
+import {
+  listPendingProjectTreeOperations,
+  migratePendingProjectTreeOperations,
+  removePendingProjectTreeOperation,
+  savePendingProjectTreeOperation,
+  validatePendingProjectTreeOperations,
+} from '../crdt/pendingProjectTreeOutbox';
 import type { ImportedFileContent } from '../import/folderImport';
-import { prepareProjectImport } from '../import/folderImport';
+import {
+  prepareProjectImport,
+} from '../import/folderImport';
+import { compressCrdtSnapshot, decompressCrdtSnapshot } from '../crdt/snapshotCompression';
+import type { GithubRepositoryBaseline } from '../github/githubTypes';
 import {
   normalizeChatMessage,
   normalizeParticipant,
@@ -25,7 +36,19 @@ function errorMessage(err: unknown): string {
 }
 
 export type ConnectionStatus =
-  'disconnected' | 'connecting' | 'connected' | 'reconnecting';
+  | 'disconnected'
+  | 'connecting'
+  | 'connected'
+  | 'reconnecting'
+  | 'awaiting-approval'
+  | 'join-rejected';
+
+export interface RoomJoinRequest {
+  requestId: string;
+  displayName: string;
+  color: string;
+  avatarUrl?: string;
+}
 
 export interface AwarenessState {
   cursor: CursorAnchor | null;
@@ -110,8 +133,10 @@ export class SignalRCrdtProvider {
   private files: RoomEntry[] = [];
   private projectTree: ProjectTree;
   private pendingTreeOperations: ProjectTreeOperation[] = [];
+  private readonly pendingTreeReady: Promise<void>;
   private treeFlushPromise: Promise<void> | null = null;
   private roomParticipants: ParticipantInfo[] = [];
+  private githubRepositoryBaseline: GithubRepositoryBaseline | null = null;
   private localEditLocked = false;
   private fileListeners = new Set<(files: RoomEntry[]) => void>();
   private activeFileListeners = new Set<(file: RoomEntry) => void>();
@@ -130,13 +155,13 @@ export class SignalRCrdtProvider {
     if (this.connection.state === HubConnectionState.Connected) {
       this.connection
         .invoke('UpdateParticipantColor', this.roomId, color)
-        .catch(() => {});
+        .catch(() => { });
     }
     this.sendAwareness({
       cursor: null,
       name: this.displayName,
       color,
-    }).catch(() => {});
+    }).catch(() => { });
   }
 
   public setLocalAvatarUrl(avatarUrl?: string): void {
@@ -145,7 +170,7 @@ export class SignalRCrdtProvider {
     if (this.connection.state === HubConnectionState.Connected)
       this.connection
         .invoke('UpdateParticipantAvatar', avatarUrl ?? null)
-        .catch(() => {});
+        .catch(() => { });
   }
   public getFileContent(fileId: string): string {
     return this.documentFor(fileId).toVisibleString();
@@ -167,6 +192,7 @@ export class SignalRCrdtProvider {
     (peerId: string, state: AwarenessState) => void
   > = new Set();
   private snapshotSaveTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private snapshotLoadQueue = Promise.resolve();
   private roomParticipantsListeners: Set<
     (participants: ParticipantInfo[]) => void
   > = new Set();
@@ -174,6 +200,13 @@ export class SignalRCrdtProvider {
   private chatHistoryListeners = new Set<(messages: ChatMessage[]) => void>();
   private executionEventListeners = new Set<(event: ExecutionEvent) => void>();
   private roomKickedListeners = new Set<() => void>();
+  private roomJoinRequests: RoomJoinRequest[] = [];
+  private roomJoinRequestsListeners = new Set<(requests: RoomJoinRequest[]) => void>();
+  private joinRejected = false;
+  private roomJoined = false;
+  private githubRepositoryListeners = new Set<
+    (baseline: GithubRepositoryBaseline | null) => void
+  >();
 
   constructor(
     siteId: string,
@@ -191,15 +224,7 @@ export class SignalRCrdtProvider {
     this.displayName = displayName;
     this.color = color;
     this.projectTree = ProjectTree.fromEntries(siteId, this.files);
-    this.pendingTreeOperations = this.readPendingTreeOperations();
-    for (const operation of this.pendingTreeOperations) {
-      try {
-        this.projectTree.applyOperation(operation);
-      } catch {
-        continue;
-      }
-    }
-    this.files = this.projectTree.getEntries();
+    this.pendingTreeReady = this.loadPendingTreeOperations();
 
     this.connection = new HubConnectionBuilder()
       .withUrl(`${serverUrl}/collabhub`)
@@ -217,12 +242,13 @@ export class SignalRCrdtProvider {
   public async connect(): Promise<void> {
     this.emitStatus('connecting');
     try {
+      await this.pendingTreeReady;
       await this.connection.start();
-      await this.joinCurrentRoom();
-      this.emitStatus('connected');
+      const joined = await this.joinCurrentRoom();
+      this.emitStatus(this.roomJoined || joined ? 'connected' : 'awaiting-approval');
     } catch (err) {
       if (this.connection.state !== HubConnectionState.Disconnected) {
-        await this.connection.stop().catch(() => {});
+        await this.connection.stop().catch(() => { });
       }
       this.emitStatus('disconnected');
       throw err;
@@ -235,16 +261,7 @@ export class SignalRCrdtProvider {
     this.snapshotSaveTimers.clear();
     if (this.connection.state === HubConnectionState.Connected) {
       await Promise.all(
-        pendingFiles.map((fileId) =>
-          this.connection
-            .invoke(
-              'SaveFileSnapshot',
-              this.roomId,
-              fileId,
-              this.documentFor(fileId).toSnapshot()
-            )
-            .catch(() => {})
-        )
+        pendingFiles.map((fileId) => this.saveFileSnapshot(fileId).catch(() => { }))
       );
     }
     if (this.connection.state !== HubConnectionState.Disconnected) {
@@ -260,7 +277,7 @@ export class SignalRCrdtProvider {
   ): InsertOp {
     const op = this.documentFor(fileId).localInsert(originId, value);
     this.emitChange();
-    this.sendOp(fileId, op).catch(() => {});
+    this.sendOp(fileId, op).catch(() => { });
     this.scheduleSnapshotSave(fileId);
     return op;
   }
@@ -330,13 +347,11 @@ export class SignalRCrdtProvider {
     await this.submitTreeOperation(operation);
   }
 
-  public async importProjectFiles(files: ImportedFileContent[]): Promise<void> {
-    if (!this.creatorToken)
-      throw new Error('Only the room creator can import a folder.');
-    if (this.localEditLocked)
-      throw new Error('The room admin has locked your editing access.');
-    if (this.connection.state !== HubConnectionState.Connected)
-      throw new Error('Connect to the room before importing a folder.');
+  public async importProjectFiles(
+    files: ImportedFileContent[],
+    repositoryBaseline: GithubRepositoryBaseline | null = null
+  ): Promise<void> {
+    this.validateProjectImportAccess();
     await this.flushTreeOperations();
     const importedFiles = await prepareProjectImport(files, this.siteId);
 
@@ -344,23 +359,46 @@ export class SignalRCrdtProvider {
     const operations = await this.connection.invoke<ProjectTreeOperation[]>(
       'ImportProject',
       this.roomId,
-      this.creatorToken,
       importId,
       importedFiles.map(({ path, id, compressedSnapshot }) => ({
         path,
         id,
         compressedSnapshot,
-      }))
+      })),
+      repositoryBaseline
     );
 
     for (const operation of operations) this.applyTreeOperation(operation);
     for (const file of importedFiles) {
       const document = this.documentFor(file.id);
-      document.fromSnapshot(file.snapshot);
+      document.fromSnapshot(await decompressCrdtSnapshot(file.compressedSnapshot));
       this.buffers.get(file.id)?.processPending();
     }
     if (importedFiles[0]) this.setActiveFile(importedFiles[0].id);
     this.emitChange();
+  }
+
+  private validateProjectImportAccess(): void {
+    if (this.localEditLocked)
+      throw new Error('The room admin has locked your editing access.');
+    const participant = this.roomParticipants.find(
+      (candidate) =>
+        candidate.connectionId === this.connection.connectionId &&
+        candidate.isAdmin
+    );
+    if (!participant)
+      throw new Error('Only room admins can import a folder.');
+    if (this.connection.state !== HubConnectionState.Connected)
+      throw new Error('Connect to the room before importing a folder.');
+  }
+
+  public async createGithubRepositoryAdminGrant(): Promise<string> {
+    if (this.connection.state !== HubConnectionState.Connected)
+      throw new Error('Connect to the room before importing a repository.');
+    return this.connection.invoke<string>(
+      'CreateGithubRepositoryAdminGrant',
+      this.roomId
+    );
   }
   public async toggleParticipantEditLock(connectionId: string): Promise<void> {
     await this.connection.invoke(
@@ -435,7 +473,7 @@ export class SignalRCrdtProvider {
   private async submitTreeOperation(
     operation: ProjectTreeOperation
   ): Promise<void> {
-    this.applyTreeOperation(operation);
+    await this.pendingTreeReady;
     if (
       !this.pendingTreeOperations.some(
         (pending) =>
@@ -443,9 +481,10 @@ export class SignalRCrdtProvider {
           pending.opId.counter === operation.opId.counter
       )
     ) {
+      await savePendingProjectTreeOperation(this.roomId, operation);
       this.pendingTreeOperations.push(operation);
-      this.savePendingTreeOperations();
     }
+    this.applyTreeOperation(operation);
     await this.flushTreeOperations();
   }
 
@@ -464,75 +503,69 @@ export class SignalRCrdtProvider {
       this.pendingTreeOperations.length > 0 &&
       this.connection.state === HubConnectionState.Connected
     ) {
-      const operation = this.pendingTreeOperations[0];
-      try {
-        await this.connection.invoke(
-          'ApplyProjectTreeOperation',
-          this.roomId,
-          operation
-        );
-        this.pendingTreeOperations = this.pendingTreeOperations.filter(
-          (pending) =>
-            pending.opId.siteId !== operation.opId.siteId ||
-            pending.opId.counter !== operation.opId.counter
-        );
-        this.savePendingTreeOperations();
-      } catch (error) {
-        this.projectTree.removeOperation(operation.opId);
-        this.pendingTreeOperations = this.pendingTreeOperations.filter(
-          (pending) =>
-            pending.opId.siteId !== operation.opId.siteId ||
-            pending.opId.counter !== operation.opId.counter
-        );
-        this.updateFiles(this.projectTree.getEntries());
-        this.savePendingTreeOperations();
-        console.error(
-          '[SignalRCrdtProvider] Failed to sync project tree operation:',
-          errorMessage(error)
-        );
-        throw error;
-      }
+      await this.syncPendingTreeOperation(this.pendingTreeOperations[0]);
     }
+  }
+
+  private async syncPendingTreeOperation(
+    operation: ProjectTreeOperation
+  ): Promise<void> {
+    try {
+      await this.connection.invoke(
+        'ApplyProjectTreeOperation',
+        this.roomId,
+        operation
+      );
+    } catch (error) {
+      if (this.connection.state === HubConnectionState.Connected)
+        await this.discardPendingTreeOperation(operation, true);
+      console.error(
+        '[SignalRCrdtProvider] Failed to sync project tree operation:',
+        errorMessage(error)
+      );
+      throw error;
+    }
+    await this.discardPendingTreeOperation(operation);
+  }
+
+  private async discardPendingTreeOperation(
+    operation: ProjectTreeOperation,
+    rollback = false
+  ): Promise<void> {
+    if (rollback) this.projectTree.removeOperation(operation.opId);
+    this.pendingTreeOperations = this.pendingTreeOperations.filter(
+      (pending) =>
+        pending.opId.siteId !== operation.opId.siteId ||
+        pending.opId.counter !== operation.opId.counter
+    );
+    await removePendingProjectTreeOperation(this.roomId, operation).catch(
+      () => { }
+    );
+    if (rollback) this.updateFiles(this.projectTree.getEntries());
   }
 
   private pendingTreeStorageKey(): string {
     return `syncode:project-tree-pending:${this.roomId}`;
   }
 
-  private readPendingTreeOperations(): ProjectTreeOperation[] {
-    try {
-      const value = localStorage.getItem(this.pendingTreeStorageKey());
-      if (!value) return [];
-      const parsed = JSON.parse(value);
-      return Array.isArray(parsed) ? (parsed as ProjectTreeOperation[]) : [];
-    } catch {
-      try {
-        localStorage.removeItem(this.pendingTreeStorageKey());
-      } catch {
-        return [];
-      }
-      return [];
-    }
-  }
-
-  private savePendingTreeOperations(): void {
-    try {
-      if (this.pendingTreeOperations.length === 0)
-        localStorage.removeItem(this.pendingTreeStorageKey());
-      else
-        localStorage.setItem(
-          this.pendingTreeStorageKey(),
-          JSON.stringify(this.pendingTreeOperations)
-        );
-    } catch {
-      return;
-    }
+  private async loadPendingTreeOperations(): Promise<void> {
+    await migratePendingProjectTreeOperations(
+      this.roomId,
+      this.pendingTreeStorageKey()
+    );
+    const storedOperations = await listPendingProjectTreeOperations(this.roomId);
+    this.pendingTreeOperations = validatePendingProjectTreeOperations(
+      storedOperations
+    );
+    for (const operation of this.pendingTreeOperations)
+      this.projectTree.applyOperation(operation);
+    this.updateFiles(this.projectTree.getEntries());
   }
 
   public localDelete(id: CrdtId, fileId = this.activeFile): DeleteOp {
     const op = this.documentFor(fileId).localDelete(id);
     this.emitChange();
-    this.sendOp(fileId, op).catch(() => {});
+    this.sendOp(fileId, op).catch(() => { });
     this.scheduleSnapshotSave(fileId);
     return op;
   }
@@ -542,18 +575,23 @@ export class SignalRCrdtProvider {
     if (existingTimer) clearTimeout(existingTimer);
     const timer = setTimeout(() => {
       this.snapshotSaveTimers.delete(fileId);
-      if (this.connection.state === HubConnectionState.Connected) {
-        this.connection
-          .invoke(
-            'SaveFileSnapshot',
-            this.roomId,
-            fileId,
-            this.documentFor(fileId).toSnapshot()
-          )
-          .catch(() => {});
-      }
+      this.saveFileSnapshot(fileId).catch(() => { });
     }, 1000);
     this.snapshotSaveTimers.set(fileId, timer);
+  }
+
+  private async saveFileSnapshot(fileId: string): Promise<void> {
+    if (this.connection.state !== HubConnectionState.Connected) return;
+    const snapshot = await compressCrdtSnapshot(
+      this.documentFor(fileId).toSnapshot()
+    );
+    if (this.connection.state !== HubConnectionState.Connected) return;
+    await this.connection.invoke(
+      'SaveFileSnapshot',
+      this.roomId,
+      fileId,
+      snapshot.value
+    );
   }
 
   public async sendAwareness(state: AwarenessState): Promise<void> {
@@ -672,9 +710,59 @@ export class SignalRCrdtProvider {
     return () => this.roomKickedListeners.delete(listener);
   }
 
+  public onRoomJoinRequestsChanged(
+    listener: (requests: RoomJoinRequest[]) => void
+  ): () => void {
+    this.roomJoinRequestsListeners.add(listener);
+    listener([...this.roomJoinRequests]);
+    return () => this.roomJoinRequestsListeners.delete(listener);
+  }
+
+  public approveRoomJoinRequest(requestId: string): Promise<void> {
+    return this.connection.invoke('ApproveRoomJoinRequest', this.roomId, requestId);
+  }
+
+  public rejectRoomJoinRequest(requestId: string): Promise<void> {
+    return this.connection.invoke('RejectRoomJoinRequest', this.roomId, requestId);
+  }
+
+  public onGithubRepositoryChange(
+    listener: (baseline: GithubRepositoryBaseline | null) => void
+  ): () => void {
+    this.githubRepositoryListeners.add(listener);
+    listener(this.githubRepositoryBaseline);
+    return () => this.githubRepositoryListeners.delete(listener);
+  }
+
   private registerHubHandlers(): void {
     this.connection.on('KickedFromRoom', () => {
+      this.roomJoined = false;
       this.roomKickedListeners.forEach((listener) => listener());
+      void this.connection.stop();
+    });
+
+    this.connection.on(
+      'RoomJoinRequestsChanged',
+      (requests: RoomJoinRequest[]) => {
+        this.roomJoinRequests = requests ?? [];
+        const current = [...this.roomJoinRequests];
+        this.roomJoinRequestsListeners.forEach((listener) => listener(current));
+      }
+    );
+    this.connection.on('RoomJoinApproved', async () => {
+      try {
+        if (await this.joinCurrentRoom()) {
+          await this.flushTreeOperations();
+          this.emitStatus('connected');
+        }
+      } catch {
+        this.emitStatus('disconnected');
+      }
+    });
+    this.connection.on('RoomJoinRejected', () => {
+      this.roomJoined = false;
+      this.joinRejected = true;
+      this.emitStatus('join-rejected');
       void this.connection.stop();
     });
 
@@ -690,6 +778,14 @@ export class SignalRCrdtProvider {
         listener(normalizeChatMessage(raw))
       );
     });
+
+    this.connection.on(
+      'GithubRepositoryBaseline',
+      (baseline: GithubRepositoryBaseline | null) => {
+        this.githubRepositoryBaseline = baseline;
+        this.githubRepositoryListeners.forEach((listener) => listener(baseline));
+      }
+    );
 
     this.connection.on(
       'ChatHistory',
@@ -716,7 +812,7 @@ export class SignalRCrdtProvider {
       (operations: ProjectTreeOperation[]) => {
         for (const operation of operations ?? [])
           this.applyTreeOperation(operation);
-        void this.flushTreeOperations().catch(() => {});
+        void this.flushTreeOperations().catch(() => { });
       }
     );
     this.connection.on('ProjectTreeSnapshot', (snapshot: string) => {
@@ -737,17 +833,19 @@ export class SignalRCrdtProvider {
     this.connection.on(
       'LoadFileSnapshot',
       (fileId: string, snapshotJson: string) => {
-        try {
-          this.documentFor(fileId).fromSnapshot(snapshotJson);
-          this.buffers.get(fileId)?.processPending();
-          this.emitChange();
-          this.scheduleSnapshotSave(fileId);
-        } catch (err) {
-          console.error(
-            '[SignalRCrdtProvider] Failed to load snapshot:',
-            errorMessage(err)
-          );
-        }
+        this.snapshotLoadQueue = this.snapshotLoadQueue
+          .then(async () => {
+            const snapshot = await decompressCrdtSnapshot(snapshotJson);
+            this.documentFor(fileId).fromSnapshot(snapshot);
+            this.buffers.get(fileId)?.processPending();
+            this.emitChange();
+          })
+          .catch((err) => {
+            console.error(
+              '[SignalRCrdtProvider] Failed to load snapshot:',
+              errorMessage(err)
+            );
+          });
       }
     );
 
@@ -761,13 +859,15 @@ export class SignalRCrdtProvider {
       'RequestFileSnapshot',
       (fileId: string, targetConnectionId: string) => {
         if (this.connection.state !== HubConnectionState.Connected) return;
-        this.connection
-          .invoke(
-            'SendFileSnapshotToPeer',
-            this.roomId,
-            fileId,
-            targetConnectionId,
-            this.documentFor(fileId).toSnapshot()
+        compressCrdtSnapshot(this.documentFor(fileId).toSnapshot())
+          .then(({ value }) =>
+            this.connection.invoke(
+              'SendFileSnapshotToPeer',
+              this.roomId,
+              fileId,
+              targetConnectionId,
+              value
+            )
           )
           .catch((err) => {
             console.error(
@@ -841,26 +941,27 @@ export class SignalRCrdtProvider {
     });
 
     this.connection.onreconnecting(() => {
+      this.roomJoined = false;
       this.emitStatus('reconnecting');
     });
 
     this.connection.onreconnected(async () => {
       try {
-        await this.joinCurrentRoom();
-        await this.flushTreeOperations();
-        this.emitStatus('connected');
+        const joined = await this.joinCurrentRoom();
+        if (joined) await this.flushTreeOperations();
+        this.emitStatus(this.roomJoined || joined ? 'connected' : 'awaiting-approval');
       } catch (err) {
         this.emitStatus('disconnected');
         console.error(
           '[SignalRCrdtProvider] Failed to rejoin room after reconnect:',
           errorMessage(err)
         );
-        await this.connection.stop().catch(() => {});
+        await this.connection.stop().catch(() => { });
       }
     });
 
     this.connection.onclose(() => {
-      this.emitStatus('disconnected');
+      if (!this.joinRejected) this.emitStatus('disconnected');
     });
   }
 
@@ -893,8 +994,8 @@ export class SignalRCrdtProvider {
       participant?.connectionId === this.connection.connectionId
         ? participant
         : this.roomParticipants.find(
-            (current) => current.connectionId === this.connection.connectionId
-          );
+          (current) => current.connectionId === this.connection.connectionId
+        );
     this.localEditLocked = Boolean(localParticipant?.isLocked);
   }
 
@@ -905,8 +1006,8 @@ export class SignalRCrdtProvider {
     );
   }
 
-  private async joinCurrentRoom(): Promise<void> {
-    await this.connection.invoke(
+  private async joinCurrentRoom(): Promise<boolean> {
+    const result = await this.connection.invoke<{ status: string }>(
       'JoinRoom',
       this.roomId,
       this.accessKey,
@@ -915,6 +1016,8 @@ export class SignalRCrdtProvider {
       this.creatorToken,
       this.avatarUrl
     );
+    this.roomJoined = this.roomJoined || result?.status === 'joined';
+    return this.roomJoined;
   }
 
   private async sendOp(fileId: string, op: CrdtOp): Promise<void> {

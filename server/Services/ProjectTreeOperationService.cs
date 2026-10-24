@@ -62,14 +62,20 @@ public sealed class ProjectTreeOperationService(
             throw new HubOperationException("Invalid project tree entry.");
         var entry = JsonSerializer.Deserialize<ProjectEntry>(value.GetRawText(), JsonOptions);
         if (entry is null || !IsSafeIdentifier(entry.Id) ||
-            entry.ParentId is { } parentId && !IsSafeIdentifier(parentId))
+            entry.ParentId is { } entryParentId && !IsSafeIdentifier(entryParentId))
             throw new HubOperationException("Invalid project tree entry.");
         ValidateNormalizedName(entry.Name);
         var entries = await state.GetEntriesAsync(roomId);
         if (entries.ContainsKey(entry.Id)) throw new HubOperationException("That project entry already exists.");
         if (entries.Count >= 500) throw new HubOperationException("A room can contain up to 500 files and folders.");
-        if (entry.ParentId is not null && !await state.IsKnownFolderAsync(roomId, entry.ParentId))
-            throw new HubOperationException("Parent folder no longer exists.");
+        if (entry.ParentId is { } parentId)
+        {
+            if (!entries.TryGetValue(parentId, out var parent) || !parent.IsFolder)
+                throw new HubOperationException("Parent folder no longer exists.");
+            var parentPath = ProjectTreeStateService.GetEntryPath(parent, entries);
+            if (parentPath is null || parentPath.Split('/').Length >= ProjectPathRules.MaximumDepth)
+                throw new HubOperationException("The project folder depth limit was reached.");
+        }
     }
 
     private async Task ValidateRenameAsync(string roomId, JsonElement operation)
@@ -84,17 +90,35 @@ public sealed class ProjectTreeOperationService(
     private async Task ValidateMoveAsync(string roomId, JsonElement operation)
     {
         var id = ReadEntryId(operation, "Invalid project tree parent.");
-        if (!operation.TryGetProperty("parentId", out var parent) ||
-            parent.ValueKind != JsonValueKind.Null &&
-            (parent.ValueKind != JsonValueKind.String || !IsSafeIdentifier(parent.GetString()!)))
+        if (!operation.TryGetProperty("parentId", out var parentValue) ||
+            parentValue.ValueKind != JsonValueKind.Null &&
+            (parentValue.ValueKind != JsonValueKind.String || !IsSafeIdentifier(parentValue.GetString()!)))
             throw new HubOperationException("Invalid project tree parent.");
-        var parentId = parent.ValueKind == JsonValueKind.String ? parent.GetString() : null;
-        if (parentId is not null && !await state.IsKnownFolderAsync(roomId, parentId))
-            throw new HubOperationException("Parent folder no longer exists.");
-        if (!await state.IsKnownEntryAsync(roomId, id))
+        var parentId = parentValue.ValueKind == JsonValueKind.String ? parentValue.GetString() : null;
+        var entries = await state.GetEntriesAsync(roomId);
+        if (!entries.TryGetValue(id, out var entry))
             throw new HubOperationException("File or folder no longer exists.");
+        ProjectEntry? parentEntry = null;
+        if (parentId is not null &&
+            (!entries.TryGetValue(parentId, out parentEntry) || !parentEntry.IsFolder))
+            throw new HubOperationException("Parent folder no longer exists.");
         if (parentId is not null && await state.WouldCreateParentCycleAsync(roomId, id, parentId))
             throw new HubOperationException("That move would create a folder cycle.");
+
+        var entryPath = ProjectTreeStateService.GetEntryPath(entry, entries);
+        var parentPath = parentEntry is null ? null : ProjectTreeStateService.GetEntryPath(parentEntry, entries);
+        if (entryPath is null || parentEntry is not null && parentPath is null)
+            throw new HubOperationException("The project tree is invalid.");
+        var entryDepth = entryPath.Split('/').Length;
+        var maximumRelativeDepth = entries.Values
+            .Select(candidate => ProjectTreeStateService.GetEntryPath(candidate, entries))
+            .Where(path => path is not null && path.StartsWith(entryPath + "/", StringComparison.Ordinal))
+            .Select(path => path!.Split('/').Length - entryDepth)
+            .DefaultIfEmpty(0)
+            .Max();
+        var newDepth = (parentPath?.Split('/').Length ?? 0) + 1;
+        if (newDepth + maximumRelativeDepth > ProjectPathRules.MaximumDepth)
+            throw new HubOperationException("The project folder depth limit was reached.");
     }
 
     private async Task ValidateDeleteAsync(string roomId, JsonElement operation)
@@ -190,5 +214,6 @@ public sealed class ProjectTreeOperationService(
         if (result == -3) throw new HubOperationException("That project entry already exists.");
         if (result == -2) throw new HubOperationException("Invalid project tree update.");
         if (result == -5) throw new HubOperationException("A room can contain up to 500 files and folders.");
+        if (result == -6) throw new HubOperationException("The project folder depth limit was reached.");
     }
 }

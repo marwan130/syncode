@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { CrdtDocument } from '../CrdtDocument';
+import type { CrdtOp } from '../CrdtDocument';
+import type { CrdtId } from '../CrdtId';
 import { PendingBuffer } from '../PendingBuffer';
 
 describe('CrdtDocument (RGA)', () => {
@@ -112,6 +114,18 @@ describe('CrdtDocument (RGA)', () => {
     expect(restoredDoc.chars[1].isDeleted).toBe(false);
   });
 
+  it('builds imported text with the same CRDT state without repeated insertion scans', () => {
+    const inserted = new CrdtDocument('site-1');
+    let originId: CrdtId | null = null;
+    for (const character of 'fast import') {
+      const operation = inserted.localInsert(originId, character);
+      originId = operation.char.id;
+    }
+
+    const imported = CrdtDocument.fromText('site-1', 'fast import');
+    expect(imported.toSnapshot()).toBe(inserted.toSnapshot());
+  });
+
   it('places a child immediately after its parent even when the parent lost a sibling tiebreak', () => {
     const docA = new CrdtDocument('site-A');
     const docB = new CrdtDocument('site-B');
@@ -163,85 +177,63 @@ describe('CrdtDocument (RGA)', () => {
   });
 
   it('guarantees convergence across 3+ sites with randomized operation interleavings (fuzz test)', () => {
-    for (let seed = 1; seed <= 25; seed++) {
-      let pseudoRand = seed;
-      const nextRand = () => {
-        pseudoRand = (pseudoRand * 9301 + 49297) % 233280;
-        return pseudoRand / 233280;
-      };
-
-      const docA = new CrdtDocument('site-A');
-      const docB = new CrdtDocument('site-B');
-      const docC = new CrdtDocument('site-C');
-      const bufA = new PendingBuffer(docA);
-      const bufB = new PendingBuffer(docB);
-      const bufC = new PendingBuffer(docC);
-
-      const allOps: Array<
-        | { type: 'insert'; char: import('../CrdtChar').CrdtChar }
-        | { type: 'delete'; id: import('../CrdtId').CrdtId }
-      > = [];
-
-      const opA1 = docA.localInsert(null, 'A');
-      const opA2 = docA.localInsert(opA1.char.id, 'a');
-      allOps.push(opA1, opA2);
-
-      const opB1 = docB.localInsert(null, 'B');
-      const opB2 = docB.localInsert(opB1.char.id, 'b');
-      allOps.push(opB1, opB2);
-
-      const opC1 = docC.localInsert(null, 'C');
-      const opC2 = docC.localInsert(opC1.char.id, 'c');
-      allOps.push(opC1, opC2);
-
-      const shuffle = <T>(arr: T[]): T[] => {
-        const copy = [...arr];
-        for (let i = copy.length - 1; i > 0; i--) {
-          const j = Math.floor(nextRand() * (i + 1));
-          [copy[i], copy[j]] = [copy[j], copy[i]];
-        }
-        return copy;
-      };
-
-      const orderA = shuffle(allOps);
-      const orderB = shuffle(allOps);
-      const orderC = shuffle(allOps);
-
-      for (const op of orderA) {
-        if (
-          op.type === 'insert'
-            ? op.char.id.siteId !== 'site-A'
-            : op.id.siteId !== 'site-A'
-        ) {
-          bufA.process(op);
-        }
-      }
-
-      for (const op of orderB) {
-        if (
-          op.type === 'insert'
-            ? op.char.id.siteId !== 'site-B'
-            : op.id.siteId !== 'site-B'
-        ) {
-          bufB.process(op);
-        }
-      }
-
-      for (const op of orderC) {
-        if (
-          op.type === 'insert'
-            ? op.char.id.siteId !== 'site-C'
-            : op.id.siteId !== 'site-C'
-        ) {
-          bufC.process(op);
-        }
-      }
-
-      expect(bufA.size).toBe(0);
-      expect(bufB.size).toBe(0);
-      expect(bufC.size).toBe(0);
-      expect(docA.toVisibleString()).toBe(docB.toVisibleString());
-      expect(docB.toVisibleString()).toBe(docC.toVisibleString());
-    }
+    for (let seed = 1; seed <= 25; seed++) assertSeedConverges(seed);
   });
 });
+
+function assertSeedConverges(seed: number): void {
+  const peers = ['site-A', 'site-B', 'site-C'].map((siteId) => ({
+    siteId,
+    document: new CrdtDocument(siteId),
+  }));
+  const buffers = peers.map(({ document }) => new PendingBuffer(document));
+  const operations = createInitialOperations(peers);
+  peers.forEach((peer, index) => {
+    const order = shuffleOperations(operations, seed + index);
+    deliverRemoteOperations(buffers[index], order, peer.siteId);
+  });
+
+  buffers.forEach((buffer) => expect(buffer.size).toBe(0));
+  const visibleText = peers.map(({ document }) => document.toVisibleString());
+  expect(new Set(visibleText).size).toBe(1);
+}
+
+function createInitialOperations(
+  peers: Array<{ siteId: string; document: CrdtDocument }>
+): CrdtOp[] {
+  return peers.flatMap(({ document, siteId }) => {
+    const first = document.localInsert(null, siteId.slice(-1));
+    const second = document.localInsert(first.char.id, siteId.slice(-1).toLowerCase());
+    return [first, second];
+  });
+}
+
+function createRandom(seed: number): () => number {
+  let value = seed;
+  return () => {
+    value = (value * 9301 + 49297) % 233280;
+    return value / 233280;
+  };
+}
+
+function shuffleOperations<T>(items: T[], seed: number): T[] {
+  const nextRandom = createRandom(seed);
+  const shuffled = [...items];
+  for (let index = shuffled.length - 1; index > 0; index--) {
+    const swapIndex = Math.floor(nextRandom() * (index + 1));
+    [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
+  }
+  return shuffled;
+}
+
+function deliverRemoteOperations(
+  buffer: PendingBuffer,
+  operations: CrdtOp[],
+  localSiteId: string
+): void {
+  for (const operation of operations) {
+    const operationSiteId =
+      operation.type === 'insert' ? operation.char.id.siteId : operation.id.siteId;
+    if (operationSiteId !== localSiteId) buffer.process(operation);
+  }
+}

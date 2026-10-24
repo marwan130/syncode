@@ -43,6 +43,17 @@ export class CrdtDocument {
     this.chars = [];
   }
 
+  public static fromText(siteId: string, text: string): CrdtDocument {
+    const document = new CrdtDocument(siteId);
+    let originId: CrdtId | null = null;
+    for (const value of text) {
+      const id = { siteId, counter: ++document.clock };
+      document.chars.push(createChar(id, value, originId));
+      originId = id;
+    }
+    return document;
+  }
+
   private findCharIndex(id: CrdtId): number {
     for (let i = 0; i < this.chars.length; i++) {
       if (crdtIdsEqual(this.chars[i].id, id)) {
