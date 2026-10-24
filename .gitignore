@@ -8,6 +8,7 @@ obj/
 node_modules/
 dist/
 .vite/
+client/coverage/
 **/.fallow/
 
 # IDE / OS
@@ -19,3 +20,7 @@ dist/
 .env
 .dev.vars*
 NDependOut/
+.vibe-wise/
+.agents/
+graphify-out/
+skills-lock.json
