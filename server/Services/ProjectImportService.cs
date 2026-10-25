@@ -63,7 +63,7 @@ public sealed class ProjectImportService(
         long totalStoredBytes = 0;
         foreach (var file in files)
         {
-            if (file is null || !ProjectPathRules.IsSafePath(file.Path) ||
+            if (file is null || !ProjectPathRules.IsSharedPath(file.Path) ||
                 file.Id is null || !ProjectPathRules.IsSafeIdentifier(file.Id) ||
                 !fileIds.Add(file.Id) || !paths.Add(file.Path) ||
                 file.CompressedSnapshot is null ||

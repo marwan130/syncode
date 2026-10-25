@@ -76,6 +76,12 @@ public sealed class ProjectTreeOperationService(
             if (parentPath is null || parentPath.Split('/').Length >= ProjectPathRules.MaximumDepth)
                 throw new HubOperationException("The project folder depth limit was reached.");
         }
+        var resolvedParentPath = entry.ParentId is { } folderId
+            ? ProjectTreeStateService.GetEntryPath(entries[folderId], entries)
+            : null;
+        var path = resolvedParentPath is null ? entry.Name : $"{resolvedParentPath}/{entry.Name}";
+        if (!ProjectPathRules.IsSharedPath(path))
+            throw new HubOperationException("Generated files and dependency folders are not shared project files.");
     }
 
     private async Task ValidateRenameAsync(string roomId, JsonElement operation)
@@ -83,8 +89,15 @@ public sealed class ProjectTreeOperationService(
         var id = ReadEntryId(operation, "Invalid project tree entry name.");
         var name = ReadString(operation, "name", "Invalid project tree entry name.");
         ValidateNormalizedName(name);
-        if (!await state.IsKnownEntryAsync(roomId, id))
+        var entries = await state.GetEntriesAsync(roomId);
+        if (!entries.TryGetValue(id, out var entry))
             throw new HubOperationException("File or folder no longer exists.");
+        var parentPath = entry.ParentId is { } parentId && entries.TryGetValue(parentId, out var parent)
+            ? ProjectTreeStateService.GetEntryPath(parent, entries)
+            : null;
+        var path = parentPath is null ? name : $"{parentPath}/{name}";
+        if (!ProjectPathRules.IsSharedPath(path))
+            throw new HubOperationException("Generated files and dependency folders are not shared project files.");
     }
 
     private async Task ValidateMoveAsync(string roomId, JsonElement operation)
@@ -109,6 +122,9 @@ public sealed class ProjectTreeOperationService(
         var parentPath = parentEntry is null ? null : ProjectTreeStateService.GetEntryPath(parentEntry, entries);
         if (entryPath is null || parentEntry is not null && parentPath is null)
             throw new HubOperationException("The project tree is invalid.");
+        var movedPath = parentPath is null ? entry.Name : $"{parentPath}/{entry.Name}";
+        if (!ProjectPathRules.IsSharedPath(movedPath))
+            throw new HubOperationException("Generated files and dependency folders are not shared project files.");
         var entryDepth = entryPath.Split('/').Length;
         var maximumRelativeDepth = entries.Values
             .Select(candidate => ProjectTreeStateService.GetEntryPath(candidate, entries))
