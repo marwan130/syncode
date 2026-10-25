@@ -6,12 +6,15 @@ export type ExplorerActionKind =
   | 'rename'
   | 'delete'
   | 'import-folder'
+  | 'github-repository'
   | 'save-project';
 
 export interface ExplorerActionButtonProps {
   kind: ExplorerActionKind;
   label: string;
   disabled?: boolean;
+  className?: string;
+  children?: ReactNode;
   onClick: () => void;
 }
 
@@ -32,6 +35,12 @@ const PATHS: Record<ExplorerActionKind, ReactNode> = {
     <>
       <path d="M2.75 5A1.75 1.75 0 0 1 4.5 3.25h4l1.75 2h5.25A1.75 1.75 0 0 1 17.25 7v7.5a1.75 1.75 0 0 1-1.75 1.75h-11a1.75 1.75 0 0 1-1.75-1.75z" />
       <path d="M10 13V7m-2 2 2-2 2 2" />
+    </>
+  ),
+  'github-repository': (
+    <>
+      <path d="M4.25 3.25h8.5l3 3v10.5H4.25z" />
+      <path d="M12.5 3.5v3h3M7 9.5h6m-6 3h6" />
     </>
   ),
   'save-project': (
@@ -57,11 +66,13 @@ export const ExplorerActionButton: FC<ExplorerActionButtonProps> = ({
   kind,
   label,
   disabled,
+  className,
+  children,
   onClick,
 }) => (
   <button
     type="button"
-    className="file-explorer-action"
+    className={className ? `file-explorer-action ${className}` : 'file-explorer-action'}
     title={label}
     aria-label={label}
     disabled={disabled}
@@ -78,5 +89,6 @@ export const ExplorerActionButton: FC<ExplorerActionButtonProps> = ({
     >
       {PATHS[kind]}
     </svg>
+    {children}
   </button>
 );

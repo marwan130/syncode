@@ -1,6 +1,6 @@
 import type { FC } from 'react';
 import { Icon } from '@iconify/react';
-import { getFileIcon } from './fileExplorerUtils';
+import { getFileExplorerIndent, getFileIcon } from './fileExplorerUtils';
 import type { FileExplorerTreeNodeProps } from './fileExplorerTypes';
 import { FileExplorerTreeItem } from './FileExplorerTreeItem';
 
@@ -15,11 +15,13 @@ export const FileExplorerTree: FC<FileExplorerTreeNodeProps> = (props) => {
     canEdit: props.canEdit,
     expandedFolders: props.expandedFolders,
     diagnosticsByEntry: props.diagnosticsByEntry,
+    gitStatusByEntry: props.gitStatusByEntry,
     editing,
     draftName,
     editError,
     renderNameInput,
     onToggleFolder: props.onToggleFolder,
+    onContextMenuSelect: props.onContextMenuSelect,
     onStartCreate: props.onStartCreate,
     onStartRename: props.onStartRename,
     onDelete: props.onDelete,
@@ -33,7 +35,7 @@ export const FileExplorerTree: FC<FileExplorerTreeNodeProps> = (props) => {
         <li key={`new-${parentId ?? 'root'}`} role="treeitem">
           <div
             className="file-explorer-row is-editing"
-            style={{ paddingLeft: 14 + depth * 14 }}
+            style={{ paddingLeft: getFileExplorerIndent(depth) }}
           >
             <Icon
               className="file-explorer-icon"

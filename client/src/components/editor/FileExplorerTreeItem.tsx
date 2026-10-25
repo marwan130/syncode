@@ -1,8 +1,13 @@
-import type { FC } from 'react';
+import { useState } from 'react';
+import type { FC, MouseEvent } from 'react';
 import { Icon } from '@iconify/react';
-import { ExplorerActionButton } from './ExplorerActionButton';
-import { getFileIcon, getMovableEntry } from './fileExplorerUtils';
+import {
+  getFileExplorerIndent,
+  getFileIcon,
+  getMovableEntry,
+} from './fileExplorerUtils';
 import { FileExplorerEntryButton } from './FileExplorerEntryButton';
+import { FileExplorerContextMenu } from './FileExplorerContextMenu';
 import type { FileExplorerTreeItemProps } from './fileExplorerTypes';
 
 export const FileExplorerTreeItem: FC<FileExplorerTreeItemProps> = ({
@@ -18,10 +23,12 @@ export const FileExplorerTreeItem: FC<FileExplorerTreeItemProps> = ({
     canEdit,
     expandedFolders,
     diagnosticsByEntry,
+    gitStatusByEntry,
     editing,
     editError,
     renderNameInput,
     onToggleFolder,
+    onContextMenuSelect,
     onStartCreate,
     onStartRename,
     onDelete,
@@ -40,6 +47,18 @@ export const FileExplorerTreeItem: FC<FileExplorerTreeItemProps> = ({
     : undefined;
   const isRenaming =
     editing?.kind === 'rename' && editing.entry.id === entry.id;
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+  } | null>(null);
+
+  const openContextMenu = (event: MouseEvent<HTMLElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (isRenaming) return;
+    onContextMenuSelect(entry.id);
+    setContextMenu({ x: event.clientX, y: event.clientY });
+  };
 
   return (
     <li
@@ -66,11 +85,12 @@ export const FileExplorerTreeItem: FC<FileExplorerTreeItemProps> = ({
     >
       <div
         className={`file-explorer-row${entry.id === selectedEntryId ? ' is-active' : ''}`}
+        onContextMenu={openContextMenu}
       >
         {isRenaming ? (
           <div
             className="file-explorer-editing-content"
-            style={{ paddingLeft: 8 + depth * 14 }}
+            style={{ paddingLeft: getFileExplorerIndent(depth) }}
           >
             <Icon
               className="file-explorer-icon"
@@ -86,41 +106,14 @@ export const FileExplorerTreeItem: FC<FileExplorerTreeItemProps> = ({
             isExpanded={isExpanded}
             diagnostic={diagnostic}
             diagnosticHint={diagnosticHint}
+            gitStatus={gitStatusByEntry.get(entry.id)}
             onToggleFolder={onToggleFolder}
             onSelect={onSelect}
+            onOpenContextMenu={(x, y) => {
+              onContextMenuSelect(entry.id);
+              setContextMenu({ x, y });
+            }}
           />
-        )}
-        {!isRenaming && (
-          <div className="file-explorer-actions">
-            {entry.isFolder && (
-              <>
-                <ExplorerActionButton
-                  kind="new-file"
-                  label="New file"
-                  disabled={!canEdit}
-                  onClick={() => onStartCreate(entry.id, false)}
-                />
-                <ExplorerActionButton
-                  kind="new-folder"
-                  label="New folder"
-                  disabled={!canEdit}
-                  onClick={() => onStartCreate(entry.id, true)}
-                />
-              </>
-            )}
-            <ExplorerActionButton
-              kind="rename"
-              label={`Rename ${entry.name}`}
-              disabled={!canEdit}
-              onClick={() => onStartRename(entry)}
-            />
-            <ExplorerActionButton
-              kind="delete"
-              label={`Delete ${entry.name}`}
-              disabled={!canEdit}
-              onClick={() => onDelete(entry)}
-            />
-          </div>
         )}
       </div>
       {isRenaming && editError && (
@@ -129,6 +122,23 @@ export const FileExplorerTreeItem: FC<FileExplorerTreeItemProps> = ({
         </div>
       )}
       {nestedChildren}
+      {contextMenu && !isRenaming && (
+        <FileExplorerContextMenu
+          entry={entry}
+          x={contextMenu.x}
+          y={contextMenu.y}
+          canEdit={canEdit}
+          onOpen={() =>
+            entry.isFolder ? onToggleFolder(entry.id) : onSelect(entry.id)
+          }
+          onCreate={(isFolder) =>
+            onStartCreate(entry.id, isFolder)
+          }
+          onRename={() => onStartRename(entry)}
+          onDelete={() => onDelete(entry)}
+          onDismiss={() => setContextMenu(null)}
+        />
+      )}
     </li>
   );
 };
