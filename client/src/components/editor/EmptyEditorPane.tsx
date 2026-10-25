@@ -1,7 +1,10 @@
 import { useState } from 'react';
 import type { FC } from 'react';
+import { Icon } from '@iconify/react';
 import type { RoomEntry } from '../../providers/SignalRCrdtProvider';
 import { getEntryPath } from './editorLayoutStorage';
+import { getFileIcon } from './fileExplorerUtils';
+import { ScrollbarPanel } from '../shared/ScrollbarPanel';
 
 export interface EmptyEditorPaneProps {
   entries: RoomEntry[];
@@ -40,6 +43,7 @@ export const EmptyEditorPane: FC<EmptyEditorPaneProps> = ({
         >
           <div
             className="editor-file-picker"
+            style={{ height: Math.min(420, files.length * 30 + 52) }}
             role="dialog"
             aria-modal="true"
             aria-label="Select a file to open"
@@ -54,26 +58,46 @@ export const EmptyEditorPane: FC<EmptyEditorPaneProps> = ({
                 Close
               </button>
             </div>
-            <div className="editor-file-picker-list">
+            <ScrollbarPanel className="editor-file-picker-list">
               {files.length ? (
-                files.map((entry) => (
-                  <button
-                    key={entry.id}
-                    type="button"
-                    onClick={() => {
-                      onOpenFile(entry.id, group);
-                      setFilePickerOpen(false);
-                    }}
-                  >
-                    {getEntryPath(entry, entries)}
-                  </button>
-                ))
+                files.map((entry) => {
+                  const path = getEntryPath(entry, entries);
+                  const parentPath = path.slice(0, path.lastIndexOf('/'));
+                  return (
+                    <button
+                      key={entry.id}
+                      type="button"
+                      title={path}
+                      onClick={() => {
+                        onOpenFile(entry.id, group);
+                        setFilePickerOpen(false);
+                      }}
+                    >
+                      <span
+                        className="editor-file-picker-icon"
+                        aria-hidden="true"
+                      >
+                        <Icon icon={getFileIcon(entry, false)} />
+                      </span>
+                      <span className="editor-file-picker-entry">
+                        <span className="editor-file-picker-name">
+                          {entry.name}
+                        </span>
+                        {parentPath && (
+                          <span className="editor-file-picker-path">
+                            {parentPath}
+                          </span>
+                        )}
+                      </span>
+                    </button>
+                  );
+                })
               ) : (
                 <span className="editor-file-picker-empty">
                   No files are available.
                 </span>
               )}
-            </div>
+            </ScrollbarPanel>
           </div>
         </div>
       )}
