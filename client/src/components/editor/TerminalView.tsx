@@ -52,6 +52,9 @@ export function TerminalView({
     const fit = new FitAddon();
     terminal.loadAddon(fit);
     terminal.open(hostRef.current);
+    terminal.element
+      ?.querySelector('.xterm-viewport')
+      ?.classList.add('syncode-xterm-viewport');
     const themeObserver = new MutationObserver(() => {
       terminal.options.theme = readTerminalTheme(
         getComputedStyle(document.documentElement)

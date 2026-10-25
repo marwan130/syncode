@@ -1,3 +1,4 @@
+import type { KeyboardEvent } from 'react';
 import type { TerminalTab } from './terminalTypes';
 
 export interface TerminalToolbarProps {
@@ -35,32 +36,14 @@ export function TerminalToolbar({
             key={tab.id}
           >
             <button
+              className="terminal-tab-select"
               id={`terminal-tab-${tab.id}`}
               role="tab"
               aria-controls={`terminal-panel-${tab.id}`}
               aria-selected={activeId === tab.id}
               tabIndex={activeId === tab.id ? 0 : -1}
               onClick={() => onSelectTab(tab)}
-              onKeyDown={(event) => {
-                if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight')
-                  return;
-                event.preventDefault();
-                const buttons = Array.from(
-                  event.currentTarget
-                    .closest('[role="tablist"]')
-                    ?.querySelectorAll<HTMLButtonElement>('[role="tab"]') ?? []
-                );
-                const index = buttons.indexOf(event.currentTarget);
-                const next =
-                  buttons[
-                    (index +
-                      (event.key === 'ArrowRight' ? 1 : -1) +
-                      buttons.length) %
-                      buttons.length
-                  ];
-                next?.focus();
-                next?.click();
-              }}
+              onKeyDown={focusAdjacentTerminalTab}
             >
               {tab.label}
             </button>
@@ -103,4 +86,37 @@ export function TerminalToolbar({
       </div>
     </div>
   );
+}
+
+function focusAdjacentTerminalTab(
+  event: KeyboardEvent<HTMLButtonElement>
+): void {
+  if (!isArrowKey(event.key)) return;
+  event.preventDefault();
+  const buttons = getTerminalTabButtons(event.currentTarget);
+  const next = getAdjacentTab(buttons, event.currentTarget, event.key);
+  next?.focus();
+  next?.click();
+}
+
+function isArrowKey(key: string): key is 'ArrowLeft' | 'ArrowRight' {
+  return key === 'ArrowLeft' || key === 'ArrowRight';
+}
+
+function getTerminalTabButtons(current: HTMLButtonElement): HTMLButtonElement[] {
+  const tabList = current.closest('[role="tablist"]');
+  return Array.from(
+    tabList?.querySelectorAll<HTMLButtonElement>('[role="tab"]') ?? []
+  );
+}
+
+function getAdjacentTab(
+  buttons: HTMLButtonElement[],
+  current: HTMLButtonElement,
+  key: 'ArrowLeft' | 'ArrowRight'
+): HTMLButtonElement | undefined {
+  if (buttons.length === 0) return undefined;
+  const direction = key === 'ArrowRight' ? 1 : -1;
+  const index = buttons.indexOf(current);
+  return buttons[(index + direction + buttons.length) % buttons.length];
 }

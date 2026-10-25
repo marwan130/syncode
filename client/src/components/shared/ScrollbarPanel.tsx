@@ -238,7 +238,7 @@ export function ScrollbarPanel({
           <div className="syncode-scrollbar-content">{children}</div>
         </div>
         <div
-          className={`scrollbar vertical ${scrollbarClass}`}
+          className={`scrollbar vertical syncode-scrollbar-track ${scrollbarClass}`}
           role="scrollbar"
           aria-label="Scroll content"
           aria-controls={id}
