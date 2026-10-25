@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import type { CSSProperties, KeyboardEvent } from 'react';
 import type { Monaco } from '@monaco-editor/react';
 import {
   getThemeBase,
@@ -7,6 +8,7 @@ import {
   getStoredThemeName,
   type ThemeEntry,
 } from './themeUtils';
+import { ScrollbarPanel } from '../shared/ScrollbarPanel';
 
 interface BuiltInPalette {
   background: string;
@@ -196,37 +198,162 @@ function applyCssTheme(theme: ThemeEntry['value']) {
 
 export function ThemePicker({ monaco }: { monaco: Monaco | null }) {
   const [selected, setSelected] = useState(readSaved);
+  const [isOpen, setIsOpen] = useState(false);
+  const pickerRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     applyTheme(selected, monaco);
   }, [monaco, selected]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    menuRef.current
+      ?.querySelector<HTMLButtonElement>('[aria-checked="true"]')
+      ?.focus();
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const dismiss = (event: PointerEvent) => {
+      if (!pickerRef.current?.contains(event.target as Node)) {
+        applyTheme(selected, monaco);
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener('pointerdown', dismiss);
+    return () => document.removeEventListener('pointerdown', dismiss);
+  }, [isOpen, monaco, selected]);
+
   const choose = (entry: ThemeEntry) => {
     setSelected(entry);
+    applyTheme(entry, monaco);
+    setIsOpen(false);
+    triggerRef.current?.focus();
     try {
       localStorage.setItem(STORAGE_KEY, entry.name);
     } catch {
       return;
     }
   };
+
+  const handleMenuKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      applyTheme(selected, monaco);
+      setIsOpen(false);
+      triggerRef.current?.focus();
+      return;
+    }
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+    event.preventDefault();
+    const options = Array.from(
+      menuRef.current?.querySelectorAll<HTMLButtonElement>(
+        '[role="menuitemradio"]'
+      ) ?? []
+    );
+    const current = options.indexOf(document.activeElement as HTMLButtonElement);
+    const offset = event.key === 'ArrowDown' ? 1 : -1;
+    options[(current + offset + options.length) % options.length]?.focus();
+  };
+
+  const toggleMenu = () => {
+    if (isOpen) applyTheme(selected, monaco);
+    setIsOpen((open) => !open);
+  };
+
   return (
-    <div className="theme-picker">
-      <select
-        aria-label="Color theme"
-        value={selected.name}
-        onChange={(event) => {
-          const entry = BUILT_INS.find(
-            (theme) => theme.name === event.target.value
-          );
-          if (entry) choose(entry);
-        }}
+    <div className="theme-picker" ref={pickerRef}>
+      <button
+        ref={triggerRef}
+        className="theme-picker-trigger"
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={isOpen}
+        aria-label={`Color theme: ${selected.name}`}
+        onClick={toggleMenu}
       >
-        {BUILT_INS.map((theme) => (
-          <option key={theme.name} value={theme.name}>
-            {theme.name}
-          </option>
-        ))}
-      </select>
+        <span>{selected.name}</span>
+      </button>
+      {isOpen && (
+        <div
+          ref={menuRef}
+          className="theme-picker-menu"
+          role="menu"
+          aria-label="Color themes"
+          onKeyDown={handleMenuKeyDown}
+        >
+          <ScrollbarPanel className="theme-picker-scroll">
+            {BUILT_INS.map((theme) => (
+              <ThemeMenuItem
+                key={theme.name}
+                theme={theme}
+                selected={theme.name === selected.name}
+                onPreview={() => applyTheme(theme, monaco)}
+                onChoose={() => choose(theme)}
+              />
+            ))}
+          </ScrollbarPanel>
+        </div>
+      )}
     </div>
   );
+}
+
+function ThemeMenuItem({
+  theme,
+  selected,
+  onPreview,
+  onChoose,
+}: {
+  theme: ThemeEntry;
+  selected: boolean;
+  onPreview: () => void;
+  onChoose: () => void;
+}) {
+  const colors = theme.value.colors ?? {};
+  const previewStyle = {
+    '--theme-preview-background': colors['editor.background'] ?? '#1e1e1e',
+    '--theme-preview-comment': getTokenColor(theme, 'comment', '#6a9955'),
+    '--theme-preview-keyword': getTokenColor(theme, 'keyword', '#569cd6'),
+    '--theme-preview-string': getTokenColor(theme, 'string', '#ce9178'),
+  } as CSSProperties;
+
+  return (
+    <button
+      className={`theme-picker-item${selected ? ' is-selected' : ''}`}
+      type="button"
+      role="menuitemradio"
+      aria-checked={selected}
+      onFocus={onPreview}
+      onMouseEnter={onPreview}
+      onClick={onChoose}
+    >
+      <span
+        className="theme-picker-preview"
+        style={previewStyle}
+        aria-hidden="true"
+      >
+        <span className="theme-preview-code">
+          {Array.from({ length: 9 }, (_, index) => (
+            <i key={index} />
+          ))}
+        </span>
+      </span>
+      <span className="theme-picker-label">{theme.name}</span>
+    </button>
+  );
+}
+
+function getTokenColor(theme: ThemeEntry, scope: string, fallback: string) {
+  const token = theme.value.tokenColors?.find((entry) => {
+    const scopes = Array.isArray(entry.scope)
+      ? entry.scope
+      : (entry.scope ?? '').split(',').map((value) => value.trim());
+    return scopes.some((value) => value.includes(scope));
+  });
+  return token?.settings?.foreground ?? fallback;
 }
 
 export function ThemeInitializer() {
