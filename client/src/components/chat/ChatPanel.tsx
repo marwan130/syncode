@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
 import type { CSSProperties } from 'react';
 import { IoSend } from 'react-icons/io5';
 import type { ChatMessage as ChatMessageData } from '../../providers/SignalRCrdtProvider';
 import { ScrollbarPanel } from '../shared/ScrollbarPanel';
 import { ChatMessage } from './ChatMessage';
+import { useChatComposer } from './useChatComposer';
 
 export interface ChatPanelProps {
   messages: ChatMessageData[];
@@ -18,49 +18,15 @@ export function ChatPanel({
   disabled = false,
   style,
 }: ChatPanelProps) {
-  const [draft, setDraft] = useState('');
-  const [sendError, setSendError] = useState('');
-  const [isSending, setIsSending] = useState(false);
-  const sendingRef = useRef(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-
-  function handleInputChange(event: React.ChangeEvent<HTMLTextAreaElement>) {
-    const textarea = event.currentTarget;
-    setDraft(textarea.value);
-    textarea.style.height = 'auto';
-
-    if (textarea.scrollHeight > 36 && textarea.scrollHeight <= 150) {
-      textarea.style.height = `${textarea.scrollHeight}px`;
-    } else if (textarea.scrollHeight <= 36) {
-      textarea.style.height = '36px';
-    } else {
-      textarea.style.height = '150px';
-    }
-  }
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
-
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const content = draft.trim();
-    if (!content || disabled || sendingRef.current) return;
-    sendingRef.current = true;
-    setIsSending(true);
-    setSendError('');
-    try {
-      await onSendMessage(content);
-      setDraft('');
-      if (textareaRef.current) textareaRef.current.style.height = '36px';
-    } catch {
-      setSendError('Message could not be sent. Wait a moment and try again.');
-    } finally {
-      sendingRef.current = false;
-      setIsSending(false);
-    }
-  }
+  const {
+    draft,
+    sendError,
+    isSending,
+    messagesEndRef,
+    textareaRef,
+    handleInputChange,
+    handleSubmit,
+  } = useChatComposer(messages, onSendMessage, disabled);
 
   return (
     <aside className="chat-panel" style={style} aria-label="Room chat">
@@ -69,21 +35,11 @@ export function ChatPanel({
         className="conversation-scroll-area chat-messages"
         aria-live="polite"
       >
-        {messages.length === 0 ? (
-          <p className="chat-empty">No messages yet.</p>
-        ) : (
-          messages.map((message) => (
-            <ChatMessage key={message.id} message={message} />
-          ))
-        )}
+        <ChatMessageList messages={messages} />
         <div ref={messagesEndRef} />
       </ScrollbarPanel>
       <form className="chat-form" onSubmit={handleSubmit}>
-        {sendError && (
-          <p className="chat-error" role="alert">
-            {sendError}
-          </p>
-        )}
+        <ChatSendError message={sendError} />
         <div className="chat-composer">
           <textarea
             ref={textareaRef}
@@ -104,15 +60,41 @@ export function ChatPanel({
             }}
           />
           <button
+            className="chat-send-button"
             type="submit"
             aria-label="Send message"
             title="Send message"
-            disabled={disabled || isSending || !draft.trim()}
+            disabled={isChatSendDisabled(disabled, isSending, draft)}
           >
-            <IoSend aria-hidden="true" />
+            <IoSend className="chat-send-icon" aria-hidden="true" />
           </button>
         </div>
       </form>
     </aside>
   );
+}
+
+function ChatMessageList({ messages }: { messages: ChatMessageData[] }) {
+  if (messages.length === 0)
+    return <p className="chat-empty">No messages yet.</p>;
+  return messages.map((message) => (
+    <ChatMessage key={message.id} message={message} />
+  ));
+}
+
+function ChatSendError({ message }: { message: string }) {
+  if (!message) return null;
+  return (
+    <p className="chat-error" role="alert">
+      {message}
+    </p>
+  );
+}
+
+function isChatSendDisabled(
+  disabled: boolean,
+  isSending: boolean,
+  draft: string
+): boolean {
+  return disabled || isSending || !draft.trim();
 }
