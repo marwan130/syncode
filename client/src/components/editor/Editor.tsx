@@ -1,39 +1,20 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
 import type { Monaco, OnMount } from '@monaco-editor/react';
 import type * as monaco from 'monaco-editor';
-import { useNavigate, useParams } from 'react-router-dom';
-import { useCrdtSync } from '../../hooks/useCrdtSync';
-import { useChat } from '../../hooks/useChat';
-import { useDebouncedPreview } from '../../hooks/useDebouncedPreview';
-import { useExecutionStream } from '../../hooks/useExecutionStream';
-import { useFileDiagnostics } from '../../hooks/useFileDiagnostics';
 import { useAutocompletePreference } from '../../hooks/useAutocompletePreference';
-import { useEditorShortcuts } from '../../hooks/useEditorShortcuts';
-import { useExecutionEligibility } from '../../hooks/useExecutionEligibility';
-import { useEditorRunAction } from '../../hooks/useEditorRunAction';
-import { useEditorCollaboration } from '../../hooks/useEditorCollaboration';
-import { useEditorPanelActions } from '../../hooks/useEditorPanelActions';
-import { useEditorRoomIdentity } from '../../hooks/useEditorRoomIdentity';
-import { useRoomParticipantActions } from '../../hooks/useRoomParticipantActions';
-import { useEditorProjectState } from '../../hooks/useEditorProjectState';
-import {
-  createSiteId,
-  getStoredRoomCreatorToken,
-} from '../../utils/userStorage';
 import {
   isPreviewLanguage,
   languageForFileName,
   type LanguageMode,
 } from './languageModes';
-import {
-  DEFAULT_CHAT_WIDTH,
-  getStoredExplorerWidth,
-  getStoredPreviewWidth,
-  getStoredTerminalHeight,
-} from './editorLayoutStorage';
 import { EditorRoomLayout } from './EditorRoomLayout';
 import { configureMonacoEditor } from '../../utils/configureMonacoEditor';
-import { useGithubAuth } from '../../github/useGithubAuth';
+import { useEditorRoomSession } from './useEditorRoomSession';
+import { useEditorWorkspaceState } from './useEditorWorkspaceState';
+import { useEditorPanelState } from './useEditorPanelState';
+import { useEditorActivityState } from './useEditorActivityState';
+import { useEditorCollaborationState } from './useEditorCollaborationState';
+import { useRoomJoinRequests } from '../../hooks/useRoomJoinRequests';
 
 export interface EditorProps {
   roomId?: string;
@@ -41,17 +22,14 @@ export interface EditorProps {
 }
 
 function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
-  const params = useParams<{ roomId: string }>();
-  const navigate = useNavigate();
-  const roomId = propRoomId ?? params.roomId ?? '';
-
-  const roomIdentity = useEditorRoomIdentity(roomId);
-  const { account } = useGithubAuth();
+  const {
+    roomId,
+    identity: roomIdentity,
+    account,
+    ...connection
+  } = useEditorRoomSession(propRoomId, accessKey);
   const { displayName, localColor, participantId, setLocalColor } =
     roomIdentity;
-  const [isExplorerOpen, setExplorerOpen] = useState(true);
-  const [explorerWidth, setExplorerWidth] = useState(getStoredExplorerWidth);
-  const [siteId] = useState(createSiteId);
   const [monacoApi, setMonacoApi] = useState<Monaco | null>(null);
   const [autocompleteEnabled, setAutocompleteEnabled] =
     useAutocompletePreference();
@@ -59,35 +37,16 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
     useState<monaco.editor.IStandaloneCodeEditor | null>(null);
   const [splitMonacoEditor, setSplitMonacoEditor] =
     useState<monaco.editor.IStandaloneCodeEditor | null>(null);
-  const roomCreatorToken = getStoredRoomCreatorToken(roomId);
-
-  const { status, connectionError, wasKicked, providerRef } = useCrdtSync({
-    siteId,
-    roomId,
-    accessKey,
-    displayName: displayName || undefined,
-    color: localColor,
-    creatorToken: roomCreatorToken,
-    enabled: Boolean(roomId && accessKey && displayName),
-  });
-
-  useEffect(() => {
-    providerRef.current?.setLocalAvatarUrl(account?.avatarUrl);
-  }, [account?.avatarUrl, providerRef]);
-
-  useEffect(() => {
-    if (wasKicked) navigate('/', { replace: true });
-  }, [navigate, wasKicked]);
-
+  const { status, connectionError, providerRef } = connection;
+  const joinRequests = useRoomJoinRequests(providerRef, status);
+  const workspace = useEditorWorkspaceState(roomId, providerRef, status);
+  const panels = useEditorPanelState(workspace);
   const {
     entries,
     activeFileId,
     openFileIds,
     splitFileId,
-    setSplitFileId,
     isSplitWorkspaceOpen,
-    setSplitWorkspaceOpen,
-    setActiveEditorGroup,
     splitWidth,
     setSplitWidth,
     openFile,
@@ -100,131 +59,86 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
     splitFile,
     splitFilePath,
     transfer,
-  } = useEditorProjectState({ roomId, providerRef, status });
-  const canSplitWorkspace = entries.some((entry) => !entry.isFolder);
-
-  useEffect(() => {
-    if (canSplitWorkspace) return;
-    setSplitWorkspaceOpen(false);
-    setSplitFileId(null);
-  }, [canSplitWorkspace, setSplitFileId, setSplitWorkspaceOpen]);
-
-  const splitWorkspace = useCallback(() => {
-    if (canSplitWorkspace) setSplitWorkspaceOpen(true);
-  }, [canSplitWorkspace, setSplitWorkspaceOpen]);
-
-  const participantActions = useRoomParticipantActions(providerRef);
-
+    canSplitWorkspace,
+    splitWorkspace,
+    previewWidth,
+    setPreviewWidth,
+    isPreviewOpen,
+    setPreviewOpen,
+  } = workspace;
+  const {
+    isExplorerOpen,
+    setExplorerOpen,
+    activeSidebarView,
+    setActiveSidebarView,
+    explorerWidth,
+    setExplorerWidth,
+    chatWidth,
+    setChatOpen,
+    isChatOpen,
+    setChatWidth,
+    terminalHeight,
+    setTerminalHeight,
+    isShortcutGuideOpen,
+    setShortcutGuideOpen,
+    newTerminalRequest,
+    startBashOnTerminalOpen,
+    terminalPanelMounted,
+    isTerminalOpen,
+    actions: panelActions,
+  } = panels;
   const language: LanguageMode = languageForFileName(activeFilePath);
-
-  const { executionLanguage, canRunCode, runDisabledReason } =
-    useExecutionEligibility({
-      activeFile,
-      activeFilePath,
-      language,
-      status,
-      monacoEditor,
-      monacoApi,
-    });
-
-  const [isChatOpen, setChatOpen] = useState(false);
-  const [chatWidth, setChatWidth] = useState(DEFAULT_CHAT_WIDTH);
-  const [previewWidth, setPreviewWidth] = useState(getStoredPreviewWidth);
-  const [isPreviewOpen, setPreviewOpen] = useState(true);
-  const [terminalHeight, setTerminalHeight] = useState(getStoredTerminalHeight);
-  const [isShortcutGuideOpen, setShortcutGuideOpen] = useState(false);
-  const [newTerminalRequest, setNewTerminalRequest] = useState(0);
-  const [startBashOnTerminalOpen, setStartBashOnTerminalOpen] = useState(false);
-  const [terminalPanelMounted, setTerminalPanelMounted] = useState(false);
-
-  const { messages, sendMessage } = useChat({ providerRef, status });
+  const activity = useEditorActivityState({
+    providerRef,
+    status,
+    activeFile,
+    activeFilePath,
+    entries,
+    language,
+    monacoEditor,
+    monacoApi,
+    canSplitWorkspace,
+    splitWorkspace,
+    panels,
+  });
+  const {
+    canRunCode,
+    runDisabledReason,
+    messages,
+    sendMessage,
+    execution,
+    handleRunCode,
+  } = activity;
   const {
     chunks: executionChunks,
     outputRevision: executionOutputRevision,
     isRunning: isExecutionRunning,
     message: executionMessage,
     jobId: executionJobId,
-    runCode,
-  } = useExecutionStream({ providerRef, status });
-
-  const [isTerminalOpen, setTerminalOpen] = useState(false);
-
-  const revealTerminalPanel = useCallback(() => {
-    setTerminalPanelMounted(true);
-    setTerminalOpen(true);
-  }, [setTerminalPanelMounted, setTerminalOpen]);
-  const panelActions = useEditorPanelActions({
-    isTerminalOpen,
-    setExplorerOpen,
-    setChatOpen,
-    setPreviewOpen,
-    setTerminalOpen,
-    setNewTerminalRequest,
-    setStartBashOnTerminalOpen,
-    setSplitWorkspaceOpen,
-    setSplitFileId,
-    setActiveEditorGroup,
-    revealTerminalPanel,
-  });
-  const handleRunCode = useEditorRunAction({
-    canRunCode,
-    isRunning: isExecutionRunning,
-    executionLanguage,
-    editor: monacoEditor,
-    activeFile,
-    activeFilePath,
-    entries,
+  } = execution;
+  const collaboration = useEditorCollaborationState({
     providerRef,
-    runCode,
-    revealTerminalPanel,
-    setStartBashOnTerminalOpen,
-  });
-
-  useEditorShortcuts({
-    isShortcutGuideOpen,
-    setShortcutGuideOpen,
-    isTerminalOpen,
-    canSplitWorkspace,
-    onSplitWorkspace: splitWorkspace,
-    setTerminalOpen,
-    setPreviewOpen,
-    setExplorerOpen,
-    setChatOpen,
-    setNewTerminalRequest,
-    setStartBashOnTerminalOpen,
-    revealTerminalPanel,
-    language,
-    canRunCode,
-    executionLanguage,
-    monacoEditor,
-    handleRunCode,
-  });
-
-  const { peers, localParticipant, isEditLocked } = useEditorCollaboration({
-    providerRef,
+    roomId,
     status,
-    localName: displayName || 'Anonymous',
+    displayName,
     localColor,
-    entries,
-    openFileIds,
-    primaryEditor: monacoEditor,
-    secondaryEditor: splitMonacoEditor,
-    activeFileId,
-    splitFileId,
+    workspace,
+    monacoEditor,
+    splitMonacoEditor,
     monacoApi,
+    accessKey,
+    setPreviewOpen,
+    language,
   });
-
-  const previewSource = useDebouncedPreview({
-    providerRef,
-    status,
-    enabled: Boolean(activeFile && isPreviewLanguage(language)),
-    activeFileId,
-  });
-
-  const fileDiagnostics = useFileDiagnostics({
-    monacoApi,
-    entries,
-  });
+  const {
+    peers,
+    localParticipant,
+    isEditLocked,
+    participantActions,
+    githubExplorer,
+    previewSource,
+    fileDiagnostics,
+  } = collaboration;
 
   const handleEditorMount: OnMount = (editor, monacoInstance) => {
     configureMonacoEditor(monacoInstance);
@@ -237,7 +151,6 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
       roomHeader={{
         roomId,
         participantId,
-        status,
         localName: displayName,
         localColor,
         localAvatarUrl: account?.avatarUrl,
@@ -248,21 +161,14 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
         onToggleParticipantLock: participantActions.toggleEditLock,
         onSetParticipantAdmin: participantActions.setAdminRole,
         onKickParticipant: participantActions.kickParticipant,
-        editor: monacoEditor,
+        joinRequests: joinRequests.requests,
+        onApproveJoinRequest: joinRequests.approve,
+        onRejectJoinRequest: joinRequests.reject,
         monaco: monacoApi,
         autocompleteEnabled,
         onAutocompleteChange: setAutocompleteEnabled,
-        explorerOpen: isExplorerOpen,
-        onToggleExplorer: panelActions.toggleExplorer,
-        isChatOpen,
-        onToggleChat: panelActions.toggleChat,
         showPreviewButton: isPreviewLanguage(language),
         onShowPreview: panelActions.togglePreview,
-        canRunCode,
-        runDisabledReason,
-        isRunningCode: isExecutionRunning,
-        onOpenTerminal: panelActions.openTerminal,
-        onRunCode: handleRunCode,
       }}
       connectionError={connectionError}
       fileExplorer={{
@@ -270,18 +176,25 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
         width: explorerWidth,
         entries,
         activeFileId,
-        canEdit: !isEditLocked,
+        canEdit: status === 'connected' && !isEditLocked,
         fileDiagnostics,
         onWidthChange: setExplorerWidth,
         onClose: () => setExplorerOpen(false),
-        onSelect: openFile,
-        onCreateEntry: createEntry,
-        onRename: explorerActions.renameEntry,
-        onDelete: explorerActions.deleteEntry,
-        onMove: explorerActions.moveEntry,
-        canImportFolder: Boolean(roomCreatorToken),
-        onImportFolder: transfer.importProjectFiles,
-        onSaveProject: transfer.saveProjectFiles,
+        actions: {
+          onSelect: openFile,
+          onCreateEntry: createEntry,
+          onRename: explorerActions.renameEntry,
+          onDelete: explorerActions.deleteEntry,
+          onMove: explorerActions.moveEntry,
+        },
+        projectActions: {
+          canImportFolder: Boolean(localParticipant?.isAdmin),
+          onImportFolder: async (files) => {
+            setPreviewOpen(false);
+            await transfer.importProjectFiles(files);
+          },
+          onSaveProject: transfer.saveProjectFiles,
+        },
       }}
       chat={{
         isOpen: isChatOpen,
@@ -319,7 +232,7 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
         onSplitWorkspace: splitWorkspace,
         onCloseSplitGroup: panelActions.closeSplitGroup,
         onSplitWidthChange: setSplitWidth,
-        onSetActiveGroup: setActiveEditorGroup,
+        onSetActiveGroup: workspace.setActiveEditorGroup,
         onDropFile: handleDropFile,
       }}
       preview={{
@@ -351,6 +264,34 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
       }}
       isShortcutGuideOpen={isShortcutGuideOpen}
       setShortcutGuideOpen={setShortcutGuideOpen}
+      activeSidebarView={activeSidebarView}
+      onSelectSidebarView={(view) =>
+        setActiveSidebarView((current) => (current === view ? null : view))
+      }
+      onCloseSidebarView={() => setActiveSidebarView(null)}
+      sidebarWidth={explorerWidth}
+      onSidebarWidthChange={setExplorerWidth}
+      onToggleChat={panelActions.toggleChat}
+      activity={{
+        entries,
+        activeFileId,
+        providerRef,
+        github: githubExplorer,
+        canRunCode,
+        runDisabledReason,
+        isRunningCode: isExecutionRunning,
+        onOpenFile: (fileId, line) => {
+          openFile(fileId);
+          window.setTimeout(() => {
+            if (!monacoEditor) return;
+            monacoEditor.revealLineInCenter(line);
+            monacoEditor.setPosition({ lineNumber: line, column: 1 });
+            monacoEditor.focus();
+          }, 50);
+        },
+        onRunCode: handleRunCode,
+        onOpenTerminal: panelActions.openTerminal,
+      }}
     />
   );
 }

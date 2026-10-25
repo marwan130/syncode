@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import type { AwarenessState } from '../../providers/SignalRCrdtProvider';
+import type { AwarenessState, RoomJoinRequest } from '../../providers/SignalRCrdtProvider';
 import { useLocation } from 'react-router-dom';
 import { GithubLoginButton } from '../github/GithubLoginButton';
 import { JoinRoomModal } from './JoinRoomModal';
@@ -20,6 +20,9 @@ export interface RoomHeaderActionsProps {
     isAdmin: boolean
   ) => Promise<void>;
   onKickParticipant: (connectionId: string) => Promise<void>;
+  joinRequests: RoomJoinRequest[];
+  onApproveJoinRequest: (requestId: string) => Promise<void>;
+  onRejectJoinRequest: (requestId: string) => Promise<void>;
   onJoinProfile: (info: { displayName: string; color: string }) => void;
   onColorChange: (color: string) => void;
 }
@@ -35,6 +38,9 @@ export function RoomHeaderActions({
   onToggleParticipantLock,
   onSetParticipantAdmin,
   onKickParticipant,
+  joinRequests,
+  onApproveJoinRequest,
+  onRejectJoinRequest,
   onJoinProfile,
   onColorChange,
 }: RoomHeaderActionsProps) {
@@ -53,18 +59,17 @@ export function RoomHeaderActions({
           aria-expanded={isJoinModalOpen}
         >
           <svg
-            width="12"
-            height="12"
+            width="14"
+            height="14"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
-            strokeWidth="2.2"
+            strokeWidth="1.8"
             strokeLinecap="round"
             strokeLinejoin="round"
           >
-            <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
-            <polyline points="10 17 15 12 10 7" />
-            <line x1="15" y1="12" x2="3" y2="12" />
+            <path d="M14 3h5v18h-5" />
+            <path d="M3 12h12m-5-5 5 5-5 5" />
           </svg>
           <span>Join</span>
         </button>
@@ -85,18 +90,25 @@ export function RoomHeaderActions({
       />
 
       <ParticipantList
-        roomId={roomId}
-        participantId={participantId}
-        localName={localName}
-        localColor={localColor}
-        localAvatarUrl={localAvatarUrl}
+        profile={{
+          roomId,
+          participantId,
+          localName,
+          localColor,
+          localAvatarUrl,
+          onJoinProfile,
+          onColorChange,
+        }}
         peers={peers}
-        isAdmin={isAdmin}
-        onToggleLock={onToggleParticipantLock}
-        onSetAdmin={onSetParticipantAdmin}
-        onKick={onKickParticipant}
-        onJoinProfile={onJoinProfile}
-        onColorChange={onColorChange}
+        management={{
+          isAdmin,
+          onToggleLock: onToggleParticipantLock,
+          onSetAdmin: onSetParticipantAdmin,
+          onKick: onKickParticipant,
+        }}
+        joinRequests={joinRequests}
+        onApproveJoinRequest={onApproveJoinRequest}
+        onRejectJoinRequest={onRejectJoinRequest}
       />
     </>
   );

@@ -1,16 +1,11 @@
-import type * as monaco from 'monaco-editor';
-import type {
-  ConnectionStatus,
-  AwarenessState,
-} from '../../providers/SignalRCrdtProvider';
-import { RoomHeaderToolbar } from './RoomHeaderToolbar';
+import type { AwarenessState, RoomJoinRequest } from '../../providers/SignalRCrdtProvider';
 import type { Monaco } from '@monaco-editor/react';
+import { RoomHeaderToolbar } from './RoomHeaderToolbar';
 import { RoomHeaderActions } from './RoomHeaderActions';
 
 export interface RoomHeaderProps {
   roomId: string;
   participantId: string;
-  status: ConnectionStatus;
   localName: string;
   localColor: string;
   localAvatarUrl?: string;
@@ -24,27 +19,19 @@ export interface RoomHeaderProps {
     isAdmin: boolean
   ) => Promise<void>;
   onKickParticipant: (connectionId: string) => Promise<void>;
-  editor: monaco.editor.IStandaloneCodeEditor | null;
+  joinRequests: RoomJoinRequest[];
+  onApproveJoinRequest: (requestId: string) => Promise<void>;
+  onRejectJoinRequest: (requestId: string) => Promise<void>;
   monaco: Monaco | null;
   autocompleteEnabled: boolean;
   onAutocompleteChange: (enabled: boolean) => void;
-  explorerOpen: boolean;
-  onToggleExplorer: () => void;
-  isChatOpen: boolean;
-  onToggleChat: () => void;
   showPreviewButton: boolean;
   onShowPreview: () => void;
-  canRunCode: boolean;
-  runDisabledReason?: string;
-  isRunningCode: boolean;
-  onRunCode: () => void;
-  onOpenTerminal: () => void;
 }
 
 export function RoomHeader({
   roomId,
   participantId,
-  status,
   localName,
   localColor,
   localAvatarUrl,
@@ -55,44 +42,25 @@ export function RoomHeader({
   onToggleParticipantLock,
   onSetParticipantAdmin,
   onKickParticipant,
-  editor,
+  joinRequests,
+  onApproveJoinRequest,
+  onRejectJoinRequest,
   monaco,
   autocompleteEnabled,
   onAutocompleteChange,
-  explorerOpen,
-  onToggleExplorer,
-  isChatOpen,
-  onToggleChat,
   showPreviewButton,
   onShowPreview,
-  canRunCode,
-  runDisabledReason,
-  isRunningCode,
-  onRunCode,
-  onOpenTerminal,
 }: RoomHeaderProps) {
   return (
     <header className="room-header">
-      <RoomHeaderLeft
-        explorerOpen={explorerOpen}
-        onToggleExplorer={onToggleExplorer}
-        isChatOpen={isChatOpen}
-        onToggleChat={onToggleChat}
-      />
+      <RoomHeaderLeft />
       <div className="room-header-right">
         <RoomHeaderToolbar
-          status={status}
-          editor={editor}
           monaco={monaco}
           autocompleteEnabled={autocompleteEnabled}
           onAutocompleteChange={onAutocompleteChange}
           showPreviewButton={showPreviewButton}
           onShowPreview={onShowPreview}
-          canRunCode={canRunCode}
-          runDisabledReason={runDisabledReason}
-          isRunningCode={isRunningCode}
-          onRunCode={onRunCode}
-          onOpenTerminal={onOpenTerminal}
         />
         <RoomHeaderActions
           roomId={roomId}
@@ -105,6 +73,9 @@ export function RoomHeader({
           onToggleParticipantLock={onToggleParticipantLock}
           onSetParticipantAdmin={onSetParticipantAdmin}
           onKickParticipant={onKickParticipant}
+          joinRequests={joinRequests}
+          onApproveJoinRequest={onApproveJoinRequest}
+          onRejectJoinRequest={onRejectJoinRequest}
           onJoinProfile={onJoinProfile}
           onColorChange={onColorChange}
         />
@@ -113,39 +84,12 @@ export function RoomHeader({
   );
 }
 
-function RoomHeaderLeft({
-  explorerOpen,
-  onToggleExplorer,
-  isChatOpen,
-  onToggleChat,
-}: {
-  explorerOpen: boolean;
-  onToggleExplorer: () => void;
-  isChatOpen: boolean;
-  onToggleChat: () => void;
-}) {
+function RoomHeaderLeft() {
   return (
     <div className="room-header-left">
-      <button
-        className="syncode-brand-toggle"
-        type="button"
-        title={explorerOpen ? 'Hide file explorer' : 'Show file explorer'}
-        aria-label={explorerOpen ? 'Hide file explorer' : 'Show file explorer'}
-        aria-expanded={explorerOpen}
-        aria-keyshortcuts="Control+Alt+E"
-        onClick={onToggleExplorer}
-      >
+      <span className="syncode-brand" aria-label="Syncode">
         syncode
-      </button>
-      <button
-        className={`chat-toggle${isChatOpen ? ' is-active' : ''}`}
-        type="button"
-        aria-pressed={isChatOpen}
-        aria-keyshortcuts="Control+Alt+C"
-        onClick={onToggleChat}
-      >
-        Chat
-      </button>
+      </span>
     </div>
   );
 }

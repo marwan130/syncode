@@ -11,7 +11,10 @@ const SHORTCUTS: Array<{ label: string; keys: string[] }> = [
   { label: 'Open a new Bash terminal', keys: ['Ctrl', 'Alt', 'N'] },
   { label: 'Close the active terminal tab', keys: ['Ctrl', 'Alt', 'Q'] },
   { label: 'Run the active file', keys: ['Ctrl', 'Alt', 'R'] },
-  { label: 'Toggle file explorer', keys: ['Ctrl', 'Alt', 'E'] },
+  { label: 'Toggle Explorer', keys: ['Ctrl', 'Alt', 'E'] },
+  { label: 'Toggle Search', keys: ['Ctrl', 'Alt', 'F'] },
+  { label: 'Toggle Source Control', keys: ['Ctrl', 'Alt', 'G'] },
+  { label: 'Toggle Run', keys: ['Ctrl', 'Alt', 'D'] },
   { label: 'Toggle chat', keys: ['Ctrl', 'Alt', 'C'] },
   { label: 'Toggle preview', keys: ['Ctrl', 'Alt', 'P'] },
   {
@@ -29,13 +32,13 @@ const SHORTCUTS: Array<{ label: string; keys: string[] }> = [
   { label: 'Indent / outdent line', keys: ['Tab', '/', 'Shift', '+', 'Tab'] },
   {
     label: 'Navigate file explorer items',
-    keys: ['↑', '/', '↓', 'Home', 'End'],
+    keys: ['Home', 'End'],
   },
   { label: 'Expand / collapse folders', keys: ['→', '/', '←'] },
   { label: 'Switch terminal tabs', keys: ['←', '/', '→'] },
   {
     label: 'Edit Bash command or history',
-    keys: ['←', '→', '↑', '↓', 'Home', 'End', 'Backspace', 'Delete'],
+    keys: ['←', '→', 'Home', 'End', 'Backspace', 'Delete'],
   },
   { label: 'Run Bash command', keys: ['Enter'] },
   { label: 'Close this guide', keys: ['Esc'] },
@@ -56,29 +59,8 @@ export const ShortcutGuideDialog: FC<ShortcutGuideDialogProps> = ({
     const dialog = dialogRef.current;
     dialog?.querySelector<HTMLElement>('button')?.focus();
 
-    const trapFocus = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        onClose();
-        return;
-      }
-      if (event.key !== 'Tab' || !dialog) return;
-      const focusable = Array.from(
-        dialog.querySelectorAll<HTMLElement>(
-          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-        )
-      ).filter((item) => !item.hasAttribute('disabled'));
-      if (focusable.length === 0) return;
-      const first = focusable[0];
-      const last = focusable.at(-1)!;
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
+    const trapFocus = (event: KeyboardEvent) =>
+      handleShortcutDialogKeyDown(event, dialog, onClose);
 
     window.addEventListener('keydown', trapFocus);
     return () => {
@@ -104,12 +86,14 @@ export const ShortcutGuideDialog: FC<ShortcutGuideDialogProps> = ({
         aria-labelledby="shortcut-dialog-title"
         tabIndex={-1}
       >
-        <header>
-          <h2 id="shortcut-dialog-title">Keyboard shortcuts</h2>
+        <header className="shortcut-dialog-header">
+          <h2 className="shortcut-dialog-title" id="shortcut-dialog-title">
+            Keyboard shortcuts
+          </h2>
         </header>
         <dl>
           {SHORTCUTS.map((item) => (
-            <div key={item.label}>
+            <div className="shortcut-dialog-row" key={item.label}>
               <dt>{item.label}</dt>
               <dd>
                 {item.keys.map((key, index) =>
@@ -123,7 +107,7 @@ export const ShortcutGuideDialog: FC<ShortcutGuideDialogProps> = ({
             </div>
           ))}
         </dl>
-        <footer>
+        <footer className="shortcut-dialog-footer">
           <span>
             Use <kbd>Tab</kbd> and <kbd>Shift</kbd> + <kbd>Tab</kbd> to move
             between controls.
@@ -133,3 +117,51 @@ export const ShortcutGuideDialog: FC<ShortcutGuideDialogProps> = ({
     </div>
   );
 };
+
+function handleShortcutDialogKeyDown(
+  event: KeyboardEvent,
+  dialog: HTMLElement | null,
+  onClose: () => void
+): void {
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    onClose();
+    return;
+  }
+  if (event.key !== 'Tab' || !dialog) return;
+  cycleShortcutDialogFocus(event, dialog);
+}
+
+function cycleShortcutDialogFocus(
+  event: KeyboardEvent,
+  dialog: HTMLElement
+): void {
+  const focusable = Array.from(
+    dialog.querySelectorAll<HTMLElement>(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    )
+  ).filter((item) => !item.hasAttribute('disabled'));
+  if (focusable.length === 0) return;
+  const first = focusable[0];
+  const last = focusable.at(-1)!;
+  if (!isAtFocusBoundary(event, first, last)) return;
+  event.preventDefault();
+  getWrappedFocusTarget(event.shiftKey, first, last).focus();
+}
+
+function isAtFocusBoundary(
+  event: KeyboardEvent,
+  first: HTMLElement,
+  last: HTMLElement
+): boolean {
+  const boundary = event.shiftKey ? first : last;
+  return document.activeElement === boundary;
+}
+
+function getWrappedFocusTarget(
+  shiftKey: boolean,
+  first: HTMLElement,
+  last: HTMLElement
+): HTMLElement {
+  return shiftKey ? last : first;
+}

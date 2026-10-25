@@ -1,37 +1,19 @@
-import type { Monaco } from '@monaco-editor/react';
-import type * as monaco from 'monaco-editor';
-import type { ConnectionStatus } from '../../providers/SignalRCrdtProvider';
-import { SearchReplace } from '../editor/SearchReplace';
 import { ThemePicker } from '../editor/ThemePicker';
 
 export interface RoomHeaderToolbarProps {
-  status: ConnectionStatus;
-  editor: monaco.editor.IStandaloneCodeEditor | null;
-  monaco: Monaco | null;
+  monaco: import('@monaco-editor/react').Monaco | null;
   autocompleteEnabled: boolean;
   onAutocompleteChange: (enabled: boolean) => void;
   showPreviewButton: boolean;
   onShowPreview: () => void;
-  canRunCode: boolean;
-  runDisabledReason?: string;
-  isRunningCode: boolean;
-  onRunCode: () => void;
-  onOpenTerminal: () => void;
 }
 
 export function RoomHeaderToolbar({
-  status,
-  editor,
   monaco,
   autocompleteEnabled,
   onAutocompleteChange,
   showPreviewButton,
   onShowPreview,
-  canRunCode,
-  runDisabledReason,
-  isRunningCode,
-  onRunCode,
-  onOpenTerminal,
 }: RoomHeaderToolbarProps) {
   return (
     <>
@@ -48,45 +30,6 @@ export function RoomHeaderToolbar({
       </button>
 
       <ThemePicker monaco={monaco} />
-      <SearchReplace editor={editor} />
-
-      <button
-        className="execution-run-button"
-        type="button"
-        onClick={onRunCode}
-        disabled={!canRunCode || isRunningCode}
-        aria-keyshortcuts="Control+Alt+R"
-        title={
-          isRunningCode
-            ? 'Execution in progress…'
-            : canRunCode
-              ? 'Compile and run the active file (Ctrl+Alt+R)'
-              : runDisabledReason || 'Cannot run code'
-        }
-      >
-        {isRunningCode ? (
-          'Running…'
-        ) : (
-          <>
-            <svg className="run-icon" viewBox="0 0 16 16" aria-hidden="true">
-              <path d="M4 2.8v10.4L13 8z" fill="currentColor" />
-            </svg>
-            <span className="visually-hidden">Run</span>
-          </>
-        )}
-      </button>
-
-      <button
-        className="execution-run-button"
-        type="button"
-        onClick={onOpenTerminal}
-        disabled={status !== 'connected'}
-        title="Open a Bash terminal (Ctrl+Alt+T)"
-        aria-keyshortcuts="Control+Alt+T"
-      >
-        Terminal
-      </button>
-
       {showPreviewButton && (
         <button
           className="preview-view-button"

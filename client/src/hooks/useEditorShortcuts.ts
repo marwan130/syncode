@@ -3,6 +3,7 @@ import type * as monaco from 'monaco-editor';
 import type { ExecutionLanguage } from '../providers/SignalRCrdtProvider';
 import type { LanguageMode } from '../components/editor/languageModes';
 import { isPreviewLanguage } from '../components/editor/languageModes';
+import type { ActivityView } from '../components/editor/ActivityBar';
 
 export interface EditorShortcutOptions {
   isShortcutGuideOpen: boolean;
@@ -13,6 +14,7 @@ export interface EditorShortcutOptions {
   setTerminalOpen: Dispatch<SetStateAction<boolean>>;
   setPreviewOpen: Dispatch<SetStateAction<boolean>>;
   setExplorerOpen: Dispatch<SetStateAction<boolean>>;
+  setActiveSidebarView: Dispatch<SetStateAction<ActivityView | null>>;
   setChatOpen: Dispatch<SetStateAction<boolean>>;
   setNewTerminalRequest: Dispatch<SetStateAction<number>>;
   setStartBashOnTerminalOpen: Dispatch<SetStateAction<boolean>>;
@@ -33,6 +35,7 @@ export function useEditorShortcuts({
   setTerminalOpen,
   setPreviewOpen,
   setExplorerOpen,
+  setActiveSidebarView,
   setChatOpen,
   setNewTerminalRequest,
   setStartBashOnTerminalOpen,
@@ -67,6 +70,7 @@ export function useEditorShortcuts({
         setTerminalOpen,
         setPreviewOpen,
         setExplorerOpen,
+        setActiveSidebarView,
         setChatOpen,
         setNewTerminalRequest,
         setStartBashOnTerminalOpen,
@@ -88,6 +92,7 @@ export function useEditorShortcuts({
     revealTerminalPanel,
     setChatOpen,
     setExplorerOpen,
+    setActiveSidebarView,
     setNewTerminalRequest,
     setPreviewOpen,
     setShortcutGuideOpen,
@@ -102,6 +107,8 @@ function focusWorkspaceRegion(
   reverse: boolean
 ): void {
   const regions = [
+    '.activity-bar',
+    '.activity-view',
     '.file-explorer',
     '.room-code-editor',
     '.chat-panel',
@@ -147,6 +154,7 @@ function handleCommandShortcut(
     | 'setTerminalOpen'
     | 'setPreviewOpen'
     | 'setExplorerOpen'
+    | 'setActiveSidebarView'
     | 'setChatOpen'
     | 'setNewTerminalRequest'
     | 'setStartBashOnTerminalOpen'
@@ -194,6 +202,24 @@ function handleCommandShortcut(
     e: () => {
       event.preventDefault();
       options.setExplorerOpen((open) => !open);
+    },
+    f: () => {
+      event.preventDefault();
+      options.setActiveSidebarView((view) =>
+        view === 'search' ? null : 'search'
+      );
+    },
+    g: () => {
+      event.preventDefault();
+      options.setActiveSidebarView((view) =>
+        view === 'source-control' ? null : 'source-control'
+      );
+    },
+    d: () => {
+      event.preventDefault();
+      options.setActiveSidebarView((view) =>
+        view === 'run' ? null : 'run'
+      );
     },
     c: () => {
       event.preventDefault();
