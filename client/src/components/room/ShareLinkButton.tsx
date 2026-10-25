@@ -29,8 +29,8 @@ export function ShareLinkButton() {
       {copied ? (
         <>
           <svg
-            width="13"
-            height="13"
+            width="14"
+            height="14"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
@@ -45,8 +45,8 @@ export function ShareLinkButton() {
       ) : (
         <>
           <svg
-            width="13"
-            height="13"
+            width="14"
+            height="14"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
@@ -54,8 +54,10 @@ export function ShareLinkButton() {
             strokeLinecap="round"
             strokeLinejoin="round"
           >
-            <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-            <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+            <circle cx="18" cy="5" r="3" />
+            <circle cx="6" cy="12" r="3" />
+            <circle cx="18" cy="19" r="3" />
+            <path d="m8.6 10.5 6.8-4m-6.8 7 6.8 4" />
           </svg>
           <span>Share</span>
         </>
