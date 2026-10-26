@@ -46,9 +46,9 @@ public sealed class TerminalSessionRegistry
         }
     }
 
-    public void RemoveExecution(string jobId)
+    public bool RemoveExecution(string jobId)
     {
-        lock (_gate) _executions.Remove(jobId);
+        lock (_gate) return _executions.Remove(jobId);
     }
 
     public string[] RemoveExecutions(string connectionId)
@@ -58,6 +58,23 @@ public sealed class TerminalSessionRegistry
             var ids = _executions.Where(pair => pair.Value.ConnectionId == connectionId).Select(pair => pair.Key).ToArray();
             foreach (var id in ids) _executions.Remove(id);
             return ids;
+        }
+    }
+
+    public (string[] SessionIds, string[] ExecutionIds) RemoveRoom(string roomId)
+    {
+        lock (_gate)
+        {
+            var sessionIds = _sessions.Where(pair => pair.Value.RoomId == roomId).Select(pair => pair.Key).ToArray();
+            var executionIds = _executions.Where(pair => pair.Value.RoomId == roomId).Select(pair => pair.Key).ToArray();
+            foreach (var id in sessionIds)
+            {
+                _sessions.Remove(id);
+                _commandTimes.Remove(id);
+                _pollTimes.Remove(id);
+            }
+            foreach (var id in executionIds) _executions.Remove(id);
+            return (sessionIds, executionIds);
         }
     }
 

@@ -77,9 +77,15 @@ public sealed class TerminalSessionService(
                 requestGuid.ToString("N"),
                 request.SourcePath,
                 projectFiles),
-            cancellationToken);
-        if (!sessions.TryAddExecution(connectionId, roomId, submission.JobId))
+            CancellationToken.None);
+        if (cancellationToken.IsCancellationRequested || !sessions.TryAddExecution(connectionId, roomId, submission.JobId))
+        {
+            await executionService.CancelExecutionAsync(submission.JobId, CancellationToken.None);
+            cancellationToken.ThrowIfCancellationRequested();
             throw new HubOperationException("Could not attach an interactive terminal to this run.");
+        }
+        if (cancellationToken.IsCancellationRequested && sessions.RemoveExecution(submission.JobId))
+            await executionService.CancelExecutionAsync(submission.JobId, CancellationToken.None);
         return submission;
     }
 

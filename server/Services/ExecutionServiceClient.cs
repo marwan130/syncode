@@ -103,6 +103,14 @@ public sealed class ExecutionServiceClient(HttpClient httpClient, IConfiguration
         if (!response.IsSuccessStatusCode) throw await TerminalErrorAsync(response, cancellationToken);
     }
 
+    public async Task CancelExecutionAsync(string jobId, CancellationToken cancellationToken)
+    {
+        using var request = CreateTerminalRequest(HttpMethod.Delete, $"api/executions/{Uri.EscapeDataString(jobId)}");
+        using var response = await SendTerminalRequestAsync(request, cancellationToken);
+        if (response.StatusCode is not HttpStatusCode.NotFound && !response.IsSuccessStatusCode)
+            throw await TerminalErrorAsync(response, cancellationToken);
+    }
+
     private async Task<T?> SendTerminalAsync<T>(HttpMethod method, string path, HttpContent? content, CancellationToken cancellationToken)
     {
         using var request = CreateTerminalRequest(method, path);

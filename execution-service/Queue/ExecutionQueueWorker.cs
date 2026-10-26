@@ -36,6 +36,8 @@ public sealed class ExecutionQueueWorker : BackgroundService
         {
             ExecutionJob? job = null;
             long? executionStartedAt = null;
+            CancellationTokenSource? executionCancellation = null;
+            string? roomLeaseToken = null;
             try
             {
                 job = await _queue.DequeueAsync(stoppingToken);
@@ -45,6 +47,15 @@ public sealed class ExecutionQueueWorker : BackgroundService
                     continue;
                 }
 
+                roomLeaseToken = $"{Environment.MachineName}:{Guid.NewGuid():N}";
+                if (!await _queue.TryAcquireRoomSlotAsync(job.RoomId, roomLeaseToken, TimeSpan.FromMinutes(2)))
+                {
+                    if (!await _queue.RequeueAsync(job)) await _queue.MarkCancelledAsync(job);
+                    await Task.Delay(TimeSpan.FromMilliseconds(250), stoppingToken);
+                    continue;
+                }
+
+                executionCancellation = await _queue.BeginExecutionAsync(job.Id, stoppingToken);
                 await _queue.MarkRunningAsync(job);
                 executionStartedAt = Stopwatch.GetTimestamp();
 
@@ -55,7 +66,7 @@ public sealed class ExecutionQueueWorker : BackgroundService
                         await _queue.AppendOutputAsync(job.Id, chunk);
                         await _outputPublisher.PublishOutputAsync(job, chunk);
                     },
-                    stoppingToken);
+                    executionCancellation.Token);
 
                 await _queue.MarkCompletedAsync(job, result);
                 await _outputPublisher.PublishCompletedAsync(job, result);
@@ -72,7 +83,7 @@ public sealed class ExecutionQueueWorker : BackgroundService
                         result.OutputLimitExceeded);
                 }
             }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested || executionCancellation?.IsCancellationRequested == true)
             {
                 if (job is not null)
                 {
@@ -120,6 +131,16 @@ public sealed class ExecutionQueueWorker : BackgroundService
                     }
                 }
                 await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken);
+            }
+            finally
+            {
+                if (job is not null && executionCancellation is not null)
+                    _queue.EndExecution(job.Id, executionCancellation);
+                if (job is not null && roomLeaseToken is not null)
+                {
+                    try { await _queue.ReleaseRoomSlotAsync(job.RoomId, roomLeaseToken); }
+                    catch (Exception exception) { _logger.LogWarning(exception, "Could not release execution room capacity"); }
+                }
             }
         }
     }

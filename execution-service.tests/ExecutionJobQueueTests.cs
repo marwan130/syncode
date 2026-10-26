@@ -90,6 +90,73 @@ public sealed class ExecutionJobQueueTests
         }
     }
 
+    [RedisQueueIntegrationFact]
+    [Trait("Category", "RedisIntegration")]
+    public async Task Queue_CancelsPendingAndRunningJobs()
+    {
+        var connectionString = Environment.GetEnvironmentVariable("SYNCODE_REDIS_CONNECTION")!;
+        using var redis = await ConnectionMultiplexer.ConnectAsync(connectionString);
+        var database = redis.GetDatabase();
+        var prefix = $"syncode:test:{Guid.NewGuid():N}";
+        var queue = new ExecutionJobQueue(redis, keyPrefix: prefix);
+        var pending = CreateJob();
+        var running = CreateJob();
+
+        try
+        {
+            await queue.EnqueueOrGetAsync(pending);
+            Assert.True(await queue.CancelAsync(pending.Id, CancellationToken.None));
+            Assert.Null(await queue.DequeueAsync(CancellationToken.None));
+            Assert.Equal("cancelled", (await queue.GetStatusAsync(pending.Id, CancellationToken.None))!["state"]);
+
+            await queue.EnqueueOrGetAsync(running);
+            var dequeued = await queue.DequeueAsync(CancellationToken.None);
+            using var stopping = new CancellationTokenSource();
+            using var execution = await queue.BeginExecutionAsync(running.Id, stopping.Token);
+            await queue.MarkRunningAsync(dequeued!);
+            Assert.True(await queue.CancelAsync(running.Id, CancellationToken.None));
+            Assert.True(execution.IsCancellationRequested);
+            await queue.MarkCancelledAsync(running);
+            Assert.Equal("cancelled", (await queue.GetStatusAsync(running.Id, CancellationToken.None))!["state"]);
+            queue.EndExecution(running.Id, execution);
+        }
+        finally
+        {
+            await database.KeyDeleteAsync($"{prefix}:queue");
+            foreach (var job in new[] { pending, running })
+            {
+                await database.KeyDeleteAsync($"{prefix}:status:{job.Id}");
+                await database.KeyDeleteAsync($"{prefix}:job:{job.Id}");
+                await database.KeyDeleteAsync($"{prefix}:output:{job.Id}");
+                await database.KeyDeleteAsync($"{prefix}:cancel:{job.Id}");
+            }
+        }
+    }
+
+    [RedisQueueIntegrationFact]
+    [Trait("Category", "RedisIntegration")]
+    public async Task Queue_EnforcesOneConcurrentExecutionPerRoom()
+    {
+        var connectionString = Environment.GetEnvironmentVariable("SYNCODE_REDIS_CONNECTION")!;
+        using var redis = await ConnectionMultiplexer.ConnectAsync(connectionString);
+        var prefix = $"syncode:test:{Guid.NewGuid():N}";
+        var queue = new ExecutionJobQueue(redis, keyPrefix: prefix);
+        var token = Guid.NewGuid().ToString("N");
+        try
+        {
+            Assert.True(await queue.TryAcquireRoomSlotAsync("room-a", token, TimeSpan.FromSeconds(30)));
+            Assert.False(await queue.TryAcquireRoomSlotAsync("room-a", "other", TimeSpan.FromSeconds(30)));
+            Assert.True(await queue.TryAcquireRoomSlotAsync("room-b", "other", TimeSpan.FromSeconds(30)));
+            await queue.ReleaseRoomSlotAsync("room-a", token);
+            Assert.True(await queue.TryAcquireRoomSlotAsync("room-a", "other", TimeSpan.FromSeconds(30)));
+        }
+        finally
+        {
+            await redis.GetDatabase().KeyDeleteAsync($"{prefix}:queue:room:{Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes("room-a"))).ToLowerInvariant()}");
+            await redis.GetDatabase().KeyDeleteAsync($"{prefix}:queue:room:{Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes("room-b"))).ToLowerInvariant()}");
+        }
+    }
+
     private static ExecutionJob CreateJob() => new(
         Guid.NewGuid().ToString("N"),
         "queue-test-room",

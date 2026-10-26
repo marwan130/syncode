@@ -136,6 +136,19 @@ internal static class ExecutionEndpoints
             return status is null ? Results.NotFound() : Results.Ok(status);
         });
 
+        app.MapDelete("/api/executions/{jobId}", async (
+            HttpContext context,
+            string jobId,
+            ExecutionJobQueue queue,
+            CancellationToken cancellationToken) =>
+        {
+            if (!HasValidApiKey(context, apiKey)) return Results.Unauthorized();
+            if (!IsValidJobId(jobId)) return Results.BadRequest(new { error = "Invalid execution id." });
+            return await queue.CancelAsync(jobId, cancellationToken)
+                ? Results.NoContent()
+                : Results.NotFound();
+        });
+
         app.MapPost("/api/executions/{jobId}/input", async (
             HttpContext context,
             string jobId,

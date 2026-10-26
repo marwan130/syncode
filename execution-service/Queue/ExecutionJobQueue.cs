@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Collections.Concurrent;
 using StackExchange.Redis;
 using Syncode.ExecutionService.Runner;
 
@@ -19,14 +20,45 @@ public sealed class ExecutionJobQueue
         return {1, ARGV[2], length + 1}
         """;
 
+    private const string CancelScript = """
+        local state = redis.call('HGET', KEYS[2], 'state')
+        if not state or state == 'completed' or state == 'failed' or state == 'cancelled' then return 0 end
+        redis.call('SET', KEYS[3], '1', 'EX', ARGV[2])
+        if state == 'pending' then
+          local removed = redis.call('LREM', KEYS[1], 1, ARGV[1])
+          if removed > 0 then
+            redis.call('DEL', KEYS[4])
+            redis.call('HSET', KEYS[2], 'state', 'cancelled', 'completedAt', ARGV[3])
+            redis.call('HDEL', KEYS[2], 'queuePosition')
+            return 1
+          end
+        end
+        return 1
+        """;
+
+    private const string RequeueScript = """
+        if redis.call('EXISTS', KEYS[3]) == 1 then return 0 end
+        local length = redis.call('LLEN', KEYS[1])
+        redis.call('RPUSH', KEYS[1], ARGV[1])
+        redis.call('SET', KEYS[2], ARGV[2], 'EX', ARGV[3])
+        redis.call('HSET', KEYS[4], 'state', 'pending', 'queuePosition', length + 1)
+        redis.call('EXPIRE', KEYS[4], ARGV[3])
+        return 1
+        """;
+
     private static readonly TimeSpan StatusLifetime = TimeSpan.FromDays(1);
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+    };
     private readonly IDatabase _database;
     private readonly int _maxPendingJobs;
     private readonly RedisKey _queueKey;
     private readonly string _statusPrefix;
     private readonly string _outputPrefix;
     private readonly string _payloadPrefix;
+    private readonly string _cancelPrefix;
+    private readonly ConcurrentDictionary<string, CancellationTokenSource> _active = new(StringComparer.Ordinal);
 
     public ExecutionJobQueue(IConnectionMultiplexer redis, int maxPendingJobs = 50, string keyPrefix = "syncode:execution")
     {
@@ -40,6 +72,7 @@ public sealed class ExecutionJobQueue
         _statusPrefix = $"{keyPrefix}:status:";
         _outputPrefix = $"{keyPrefix}:output:";
         _payloadPrefix = $"{keyPrefix}:job:";
+        _cancelPrefix = $"{keyPrefix}:cancel:";
     }
 
     public async Task<ExecutionEnqueueResult> EnqueueOrGetAsync(ExecutionJob job, CancellationToken cancellationToken = default)
@@ -97,6 +130,60 @@ public sealed class ExecutionJobQueue
         await _database.KeyExpireAsync(key, StatusLifetime);
     }
 
+    public async Task<CancellationTokenSource> BeginExecutionAsync(string jobId, CancellationToken stoppingToken)
+    {
+        var cancellation = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+        if (!_active.TryAdd(jobId, cancellation))
+        {
+            cancellation.Dispose();
+            throw new InvalidOperationException("Execution job is already active.");
+        }
+        if (await _database.KeyExistsAsync(CancellationKey(jobId))) cancellation.Cancel();
+        return cancellation;
+    }
+
+    public Task<bool> TryAcquireRoomSlotAsync(string roomId, string leaseToken, TimeSpan leaseDuration)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(roomId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(leaseToken);
+        if (leaseDuration <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(leaseDuration));
+        return _database.LockTakeAsync(RoomLeaseKey(roomId), leaseToken, leaseDuration);
+    }
+
+    public Task ReleaseRoomSlotAsync(string roomId, string leaseToken) =>
+        _database.LockReleaseAsync(RoomLeaseKey(roomId), leaseToken);
+
+    public async Task<bool> RequeueAsync(ExecutionJob job)
+    {
+        var result = (long)await _database.ScriptEvaluateAsync(
+            RequeueScript,
+            [_queueKey, PayloadKey(job.Id), CancellationKey(job.Id), StatusKey(job.Id)],
+            [job.Id, JsonSerializer.Serialize(job, JsonOptions), (long)StatusLifetime.TotalSeconds]);
+        return result == 1;
+    }
+
+    public void EndExecution(string jobId, CancellationTokenSource cancellation)
+    {
+        _active.TryRemove(new KeyValuePair<string, CancellationTokenSource>(jobId, cancellation));
+        cancellation.Dispose();
+    }
+
+    public async Task<bool> CancelAsync(string jobId, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var result = (long)await _database.ScriptEvaluateAsync(
+            CancelScript,
+            [_queueKey, StatusKey(jobId), CancellationKey(jobId), PayloadKey(jobId)],
+            [jobId, (long)StatusLifetime.TotalSeconds, DateTimeOffset.UtcNow.ToString("O")]);
+        if (result == 0) return false;
+        if (_active.TryGetValue(jobId, out var active))
+        {
+            try { await active.CancelAsync(); }
+            catch (ObjectDisposedException) { }
+        }
+        return true;
+    }
+
     public Task MarkCompletedAsync(ExecutionJob job, ExecutionResult result) =>
         UpdateStatusAsync(job.Id,
         [
@@ -152,6 +239,9 @@ public sealed class ExecutionJobQueue
     private RedisKey StatusKey(string jobId) => $"{_statusPrefix}{jobId}";
     private RedisKey OutputKey(string jobId) => $"{_outputPrefix}{jobId}";
     private RedisKey PayloadKey(string jobId) => $"{_payloadPrefix}{jobId}";
+    private RedisKey CancellationKey(string jobId) => $"{_cancelPrefix}{jobId}";
+    private RedisKey RoomLeaseKey(string roomId) =>
+        $"{_queueKey}:room:{Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(roomId))).ToLowerInvariant()}";
     private RedisKey IdempotencyKey(string roomId, string requestId)
     {
         var bytes = System.Text.Encoding.UTF8.GetBytes($"{roomId}\n{requestId}");
