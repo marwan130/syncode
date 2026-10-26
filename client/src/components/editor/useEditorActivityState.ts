@@ -19,7 +19,6 @@ export function useEditorActivityState({
   status,
   activeFile,
   activeFilePath,
-  entries,
   language,
   monacoEditor,
   monacoApi,
@@ -31,7 +30,6 @@ export function useEditorActivityState({
   status: ConnectionStatus;
   activeFile?: RoomEntry;
   activeFilePath: string;
-  entries: RoomEntry[];
   language: LanguageMode;
   monacoEditor: monaco.editor.IStandaloneCodeEditor | null;
   monacoApi: import('@monaco-editor/react').Monaco | null;
@@ -55,10 +53,7 @@ export function useEditorActivityState({
     isRunning: execution.isRunning,
     executionLanguage,
     editor: monacoEditor,
-    activeFile,
     activeFilePath,
-    entries,
-    providerRef,
     runCode: execution.runCode,
     revealTerminalPanel: panels.revealTerminalPanel,
     setStartBashOnTerminalOpen: panels.setStartBashOnTerminalOpen,

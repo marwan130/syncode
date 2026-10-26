@@ -14,17 +14,20 @@ public sealed class ContainerRunner
     private readonly ActiveContainerRegistry _activeContainers;
     private readonly ResourceLimits _limits;
     private readonly ILogger<ContainerRunner> _logger;
+    private readonly string _containerRuntime;
 
     public ContainerRunner(
         IDockerCli docker,
         ActiveContainerRegistry activeContainers,
         ILogger<ContainerRunner> logger,
-        ResourceLimits? limits = null)
+        ResourceLimits? limits = null,
+        string containerRuntime = "runc")
     {
         _docker = docker;
         _activeContainers = activeContainers;
         _logger = logger;
         _limits = limits ?? ResourceLimits.Default;
+        _containerRuntime = containerRuntime;
     }
 
     public async Task<ExecutionResult> RunAsync(
@@ -42,18 +45,27 @@ public sealed class ContainerRunner
         if (job.ProjectFiles is { } projectFiles)
             ValidateProjectFiles(job, projectFiles, sourceBytes);
 
-        var (image, sourceName) = job.Language switch
+        var (image, sourceName, runnerRuntime) = job.Language switch
         {
-            ExecutionLanguage.JavaScript => ("syncode-runner-node", "main.js"),
-            ExecutionLanguage.TypeScript => ("syncode-runner-node", "main.ts"),
-            ExecutionLanguage.Python => ("syncode-runner-python", "main.py"),
-            ExecutionLanguage.CSharp => ("syncode-runner-dotnet", "Program.cs"),
-            ExecutionLanguage.C => ("syncode-runner-c", "main.c"),
-            ExecutionLanguage.Cpp => ("syncode-runner-cpp", "main.cpp"),
-            ExecutionLanguage.Rust => ("syncode-runner-rust", "main.rs"),
-            ExecutionLanguage.Java => ("syncode-runner-java", "Main.java"),
+            ExecutionLanguage.JavaScript => ("syncode-runner-node", "main.js", "node"),
+            ExecutionLanguage.TypeScript => ("syncode-runner-node", "main.ts", "typescript"),
+            ExecutionLanguage.Python => ("syncode-runner-python", "main.py", "python"),
+            ExecutionLanguage.CSharp => ("syncode-runner-dotnet", "Program.cs", "csharp"),
+            ExecutionLanguage.C => ("syncode-runner-c", "main.c", "c"),
+            ExecutionLanguage.Cpp => ("syncode-runner-cpp", "main.cpp", "cpp"),
+            ExecutionLanguage.Rust => ("syncode-runner-rust", "main.rs", "rust"),
+            ExecutionLanguage.Java => ("syncode-runner-java", "Main.java", "java"),
             _ => throw new ArgumentOutOfRangeException(nameof(job), "Unsupported execution language.")
         };
+        var memoryBytes = job.Language == ExecutionLanguage.CSharp
+            ? _limits.CSharpMemoryBytes
+            : _limits.MemoryBytes;
+        var processLimit = job.Language == ExecutionLanguage.CSharp
+            ? _limits.CSharpProcessLimit
+            : _limits.ProcessLimit;
+        var maxFileBytes = job.Language == ExecutionLanguage.CSharp
+            ? _limits.CSharpMaxFileBytes
+            : 16L * 1024 * 1024;
 
         var containerName = $"syncode-exec-{Guid.NewGuid():N}";
         var sourceDirectory = Path.Combine(Path.GetTempPath(), containerName);
@@ -93,8 +105,8 @@ public sealed class ContainerRunner
             using var timeout = new CancellationTokenSource(_limits.Timeout);
             using var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
 
-            var arguments = BuildRunArguments(containerName, image, sourcePath, sourceName,
-                job.ProjectFiles is { Count: > 0 }, job.SourcePath, sourceDirectory);
+            var arguments = BuildRunArguments(containerName, image, runnerRuntime, memoryBytes, sourcePath, sourceName,
+                processLimit, maxFileBytes, job.ProjectFiles is { Count: > 0 }, job.SourcePath, sourceDirectory);
             int exitCode;
             try
             {
@@ -145,8 +157,12 @@ public sealed class ContainerRunner
     private List<string> BuildRunArguments(
         string name,
         string image,
+        string runnerRuntime,
+        long memoryBytes,
         string sourcePath,
         string sourceName,
+        int processLimit,
+        long maxFileBytes,
         bool mountProjectDirectory,
         string projectSourcePath,
         string sourceDirectory)
@@ -156,18 +172,22 @@ public sealed class ContainerRunner
         "run", "--name", name,
         "--interactive",
         "--pull=never",
+        ContainerRuntimePolicy.DockerArgument(_containerRuntime),
         "--label", ContainerLabel,
         "--network=none",
-        "--memory", $"{_limits.MemoryBytes}b",
-        "--memory-swap", $"{_limits.MemoryBytes}b",
+        "--memory", $"{memoryBytes}b",
+        "--memory-swap", $"{memoryBytes}b",
         "--cpus", _limits.CpuCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
-        "--pids-limit", _limits.ProcessLimit.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        "--pids-limit", processLimit.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        "--ulimit", $"nofile={_limits.OpenFileLimit}:{_limits.OpenFileLimit}",
+        "--ulimit", $"fsize={maxFileBytes}:{maxFileBytes}",
         "--read-only",
         "--tmpfs", $"/tmp:rw,noexec,nosuid,nodev,size={_limits.TemporaryStorageMegabytes}m,uid={RunnerUserId},gid={RunnerUserId}",
         "--tmpfs", $"/runner:rw,exec,nosuid,nodev,size={_limits.BuildStorageMegabytes}m,uid={RunnerUserId},gid={RunnerUserId}",
         "--cap-drop=ALL",
         "--security-opt=no-new-privileges",
         "--user", $"{RunnerUserId}:{RunnerUserId}",
+        "--env", $"RUNNER_RUNTIME={runnerRuntime}",
         "--env", $"SYNCODE_SOURCE_PATH={projectSourcePath}",
         "--mount", BuildMountSpecification(mountProjectDirectory ? sourceDirectory : sourcePath,
             mountProjectDirectory ? "/workspace" : $"/workspace/{sourceName}"),

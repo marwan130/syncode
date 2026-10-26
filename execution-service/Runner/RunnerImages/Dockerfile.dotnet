@@ -1,17 +1,24 @@
-FROM mcr.microsoft.com/dotnet/sdk:10.0-alpine
+FROM mcr.microsoft.com/dotnet/sdk:10.0
 
 ENV RUNNER_RUNTIME=csharp \
     DOTNET_CLI_TELEMETRY_OPTOUT=1 \
     DOTNET_SKIP_FIRST_TIME_EXPERIENCE=1 \
+    DOTNET_PROCESSOR_COUNT=1 \
+    DOTNET_SKIP_WORKLOAD_INTEGRITY_CHECK=true \
+    DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE=true \
+    DOTNET_gcServer=0 \
+    DOTNET_GCHeapHardLimit=0xA0000000 \
+    DOTNET_EnableDiagnostics=0 \
     DOTNET_NOLOGO=1 \
     DOTNET_CLI_HOME=/runner/dotnet \
+    XDG_RUNTIME_DIR=/runner/runtime \
     NUGET_PACKAGES=/runner/nuget \
     TMPDIR=/runner/tmp \
     TMP=/runner/tmp \
     TEMP=/runner/tmp
 
-RUN addgroup -S -g 10001 runner \
-    && adduser -S -D -H -u 10001 -G runner runner \
+RUN groupadd --system --gid 10001 runner \
+    && useradd --system --uid 10001 --gid runner --no-create-home runner \
     && mkdir -p /workspace \
     && chown runner:runner /workspace
 

@@ -47,13 +47,11 @@ public class CollabHub : Hub
 
     public Task<ExecutionSubmissionResult> RunExecution(
         string language,
-        string source,
         string requestId,
-        string sourcePath,
-        IReadOnlyList<ExecutionProjectFileInput>? projectFiles = null) =>
+        string sourcePath) =>
         _services.Terminal.RunAsync(
             Context.ConnectionId,
-            new RunExecutionRequest(language, source, requestId, sourcePath, projectFiles),
+            new RunExecutionRequest(language, requestId, sourcePath),
             Context.ConnectionAborted);
 
     public Task WriteExecutionInput(string jobId, string input) =>
@@ -121,7 +119,12 @@ public class CollabHub : Hub
             foreach (var sessionId in TerminalSessions.RemoveAll(Context.ConnectionId))
             {
                 try { await ExecutionService.CloseTerminalAsync(sessionId, CancellationToken.None); }
-                catch (HubException) { }
+                catch (Exception exception) when (exception is HubException or HubOperationException) { }
+            }
+            foreach (var jobId in TerminalSessions.RemoveExecutions(Context.ConnectionId))
+            {
+                try { await ExecutionService.CancelExecutionAsync(jobId, CancellationToken.None); }
+                catch (Exception exception) when (exception is HubException or HubOperationException) { }
             }
             await Groups.RemoveFromGroupAsync(Context.ConnectionId, oldRoomId);
             await Participants.RemoveParticipantAsync(oldRoomId, Context.ConnectionId, _instanceId);
@@ -324,9 +327,13 @@ public class CollabHub : Hub
         foreach (var sessionId in TerminalSessions.RemoveAll(Context.ConnectionId))
         {
             try { await ExecutionService.CloseTerminalAsync(sessionId, CancellationToken.None); }
-            catch (HubException) { }
+            catch (Exception cleanupError) when (cleanupError is HubException or HubOperationException) { }
         }
-        TerminalSessions.RemoveExecutions(Context.ConnectionId);
+        foreach (var jobId in TerminalSessions.RemoveExecutions(Context.ConnectionId))
+        {
+            try { await ExecutionService.CancelExecutionAsync(jobId, CancellationToken.None); }
+            catch (Exception cleanupError) when (cleanupError is HubException or HubOperationException) { }
+        }
         var roomId = await Participants.GetConnectionRoomAsync(Context.ConnectionId);
         if (!string.IsNullOrEmpty(roomId))
         {

@@ -1,0 +1,91 @@
+name: Execution isolation
+
+on:
+  pull_request:
+    paths:
+      - "execution-service/**"
+      - "execution-service.tests/**"
+      - "infra/**"
+      - ".github/workflows/execution-isolation.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: execution-isolation-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - run: dotnet test execution-service.tests/Syncode.ExecutionService.Tests.csproj
+      - name: Check NuGet vulnerability advisories
+        run: |
+          dotnet restore server/Syncode.Server.csproj --source https://api.nuget.org/v3/index.json
+          dotnet restore execution-service.tests/Syncode.ExecutionService.Tests.csproj --source https://api.nuget.org/v3/index.json
+          dotnet list server/Syncode.Server.csproj package --vulnerable --include-transitive --no-restore
+          dotnet list execution-service.tests/Syncode.ExecutionService.Tests.csproj package --vulnerable --include-transitive --no-restore
+
+  gvisor-adversarial:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Install pinned gVisor runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          release=20261005
+          arch="$(uname -m)"
+          archive="gvisor.tar.zstd"
+          base="https://storage.googleapis.com/gvisor/releases/release/${release}/${arch}"
+          curl --fail --location --silent --show-error "$base/$archive" --output "/tmp/$archive"
+          curl --fail --location --silent --show-error "$base/$archive.sha512" --output "/tmp/$archive.sha512"
+          cd /tmp
+          sha512sum --check "$archive.sha512"
+          sudo tar --zstd --extract --file "$archive" --directory /usr/local/bin
+          sudo /usr/local/bin/runsc install
+          sudo systemctl restart docker
+          docker info --format '{{json .Runtimes}}'
+      - name: Build supported runner images
+        run: bash infra/build-runner-images.sh
+      - name: Validate isolated C# SDK startup
+        run: |
+          workspace="$(mktemp -d)"
+          trap 'rm -rf "$workspace"' EXIT
+          printf '%s\n' 'Console.WriteLine("csharp-smoke");' > "$workspace/Program.cs"
+          docker run --rm --interactive --memory=4g --memory-swap=4g --cpus=1 --pids-limit=128 \
+            --ulimit nofile=256:256 --ulimit fsize=134217728:134217728 \
+            --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev,size=10m,uid=10001,gid=10001 \
+            --tmpfs /runner:rw,exec,nosuid,nodev,size=128m,uid=10001,gid=10001 \
+            --cap-drop=ALL --security-opt=no-new-privileges --network=none \
+            --user 10001:10001 --env SYNCODE_SOURCE_PATH=Program.cs \
+            --mount "type=bind,source=$workspace/Program.cs,target=/workspace/Program.cs,readonly" \
+            --entrypoint /bin/sh syncode-runner-dotnet -ec '
+              printf "memory limit: "; cat /sys/fs/cgroup/memory.max
+              printf "memory used: "; cat /sys/fs/cgroup/memory.current
+              printf "open file limit: "; ulimit -n
+              printf "file size limit: "; ulimit -f
+              df -h /runner /tmp
+              exec /usr/local/bin/runner-entrypoint
+            '
+      - name: Run language containers with the default Docker runtime
+        env:
+          SYNCODE_CONTAINER_RUNTIME: runc
+          SYNCODE_RUN_DOCKER_INTEGRATION: "1"
+        run: dotnet test execution-service.tests/Syncode.ExecutionService.Tests.csproj --filter "Category=DockerIntegration"
+      - name: Run the supported languages and adversarial checks with gVisor
+        env:
+          SYNCODE_CONTAINER_RUNTIME: runsc
+          SYNCODE_RUN_DOCKER_INTEGRATION: "1"
+          SYNCODE_RUN_GVISOR_INTEGRATION: "1"
+        run: dotnet test execution-service.tests/Syncode.ExecutionService.Tests.csproj --filter "Category=DockerIntegration|Category=GVisorIntegration"

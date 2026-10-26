@@ -47,12 +47,15 @@ jobs:
         working-directory: client
         run: npm ci
 
+      - name: Build the room server
+        run: dotnet build server/Syncode.Server.csproj --configuration Release
+
       - name: Start the room server
         env:
           ASPNETCORE_ENVIRONMENT: Development
           Redis: 127.0.0.1:6379
         run: |
-          nohup dotnet run --project server/Syncode.Server.csproj --no-launch-profile --urls http://127.0.0.1:5111 > "$RUNNER_TEMP/room-server.log" 2>&1 &
+          nohup dotnet server/bin/Release/net10.0/Syncode.Server.dll --urls http://127.0.0.1:5111 > "$RUNNER_TEMP/room-server.log" 2>&1 &
           for attempt in {1..60}; do
             if curl --fail --silent http://127.0.0.1:5111/openapi/v1.json > /dev/null; then
               exit 0

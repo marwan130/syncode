@@ -1,7 +1,8 @@
 #!/bin/sh
 set -eu
 
-images_dir=/workspace/execution-service/Runner/RunnerImages
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+images_dir=$(dirname "$script_dir")/execution-service/Runner/RunnerImages
 
 docker build -t syncode-runner-node -f "$images_dir/Dockerfile.node" "$images_dir"
 docker build -t syncode-runner-python -f "$images_dir/Dockerfile.python" "$images_dir"

@@ -63,6 +63,7 @@ builder.Services.AddSingleton<RedisRoomMetadataStore>();
 builder.Services.AddSingleton<RedisRoomChatStore>();
 builder.Services.AddSingleton<RedisRoomRateLimitStore>();
 builder.Services.AddSingleton<ProjectTreeStateService>();
+builder.Services.AddSingleton<RoomWorkspaceAdapter>();
 builder.Services.AddSingleton<ProjectTreeOperationService>();
 builder.Services.AddSingleton<ProjectImportService>();
 builder.Services.AddSingleton<GithubRepositoryStore>();

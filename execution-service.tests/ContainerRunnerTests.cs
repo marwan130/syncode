@@ -11,9 +11,11 @@ public sealed class ContainerRunnerTests
     [Trait("Category", "DockerIntegration")]
     public async Task RunAsync_ExecutesLanguagesAndEnforcesContainerBoundaries()
     {
+        var containerRuntime = Environment.GetEnvironmentVariable("SYNCODE_CONTAINER_RUNTIME") ?? "runc";
         var docker = new DockerCli();
         var registry = new ActiveContainerRegistry();
-        var runner = new ContainerRunner(docker, registry, NullLogger<ContainerRunner>.Instance);
+        var runner = new ContainerRunner(
+            docker, registry, NullLogger<ContainerRunner>.Instance, containerRuntime: containerRuntime);
         var programs = new (ExecutionLanguage Language, string Source, string ExpectedOutput)[]
         {
             (ExecutionLanguage.JavaScript, "console.log('javascript-ready')", "javascript-ready"),
@@ -36,7 +38,7 @@ public sealed class ContainerRunnerTests
 
         var timeoutRunner = new ContainerRunner(
             docker, registry, NullLogger<ContainerRunner>.Instance,
-            new ResourceLimits { Timeout = TimeSpan.FromSeconds(1) });
+            new ResourceLimits { Timeout = TimeSpan.FromSeconds(1) }, containerRuntime);
         var timedResult = await timeoutRunner.RunAsync(
             CreateJob("while (true) {}", ExecutionLanguage.JavaScript), _ => ValueTask.CompletedTask);
         Assert.True(timedResult.TimedOut);
@@ -69,6 +71,7 @@ public sealed class ContainerRunnerTests
         Assert.False(result.TimedOut);
         Assert.Equal("hello\n", Assert.Single(received).Text);
         var runArgs = Assert.Single(docker.StreamingArguments);
+        Assert.Contains("--runtime=runc", runArgs);
         Assert.Contains("--interactive", runArgs);
         Assert.DoesNotContain("--tty", runArgs);
         Assert.Contains("--network=none", runArgs);
@@ -78,10 +81,48 @@ public sealed class ContainerRunnerTests
         Assert.Contains("--memory", runArgs);
         Assert.Contains("--cpus", runArgs);
         Assert.Contains("--pids-limit", runArgs);
+        Assert.Contains("--ulimit", runArgs);
+        Assert.Contains("nofile=256:256", runArgs);
+        Assert.Contains("fsize=16777216:16777216", runArgs);
         Assert.Contains(runArgs, arg => arg.StartsWith("/tmp:rw,noexec,nosuid,nodev,size=10m", StringComparison.Ordinal));
         Assert.Contains(runArgs, arg => arg.StartsWith("type=bind,source=", StringComparison.Ordinal) && arg.EndsWith(",readonly", StringComparison.Ordinal));
         Assert.Contains("syncode-runner-node", runArgs);
         Assert.Contains(docker.CleanupArguments, args => args.SequenceEqual(["rm", "-f", Assert.IsType<string>(runArgs[2])]));
+    }
+
+    [Fact]
+    public async Task RunAsync_ConfiguresTypeScriptModeInTheNodeImage()
+    {
+        var docker = new FakeDockerCli();
+        var runner = CreateRunner(docker);
+
+        await runner.RunAsync(CreateJob("console.log('typescript-ready')", ExecutionLanguage.TypeScript),
+            _ => ValueTask.CompletedTask);
+
+        var runArgs = Assert.Single(docker.StreamingArguments);
+        Assert.Contains("syncode-runner-node", runArgs);
+        Assert.Contains("RUNNER_RUNTIME=typescript", runArgs);
+        Assert.Contains(runArgs, arg => arg.EndsWith(",target=/workspace/main.ts,readonly", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task RunAsync_GivesCSharpCompilationItsBoundedMemoryLimit()
+    {
+        var docker = new FakeDockerCli();
+        var runner = CreateRunner(docker);
+
+        await runner.RunAsync(CreateJob("Console.WriteLine(\"ready\");", ExecutionLanguage.CSharp),
+            _ => ValueTask.CompletedTask);
+
+        var runArgs = Assert.Single(docker.StreamingArguments);
+        var memoryIndex = runArgs.ToList().IndexOf("--memory");
+        var memorySwapIndex = runArgs.ToList().IndexOf("--memory-swap");
+        Assert.Equal("4294967296b", runArgs[memoryIndex + 1]);
+        Assert.Equal("4294967296b", runArgs[memorySwapIndex + 1]);
+        var processLimitIndex = runArgs.ToList().IndexOf("--pids-limit");
+        Assert.Equal("128", runArgs[processLimitIndex + 1]);
+        Assert.Contains(runArgs, arg => arg.StartsWith("/runner:rw,exec,nosuid,nodev,size=128m", StringComparison.Ordinal));
+        Assert.Contains("fsize=134217728:134217728", runArgs);
     }
 
     [Fact]
@@ -163,6 +204,19 @@ public sealed class ContainerRunnerTests
         await Assert.ThrowsAsync<ArgumentException>(() => runner.RunAsync(job, _ => ValueTask.CompletedTask));
 
         Assert.Empty(docker.StreamingArguments);
+    }
+
+    [Fact]
+    public async Task RunAsync_UsesConfiguredGvisorRuntime()
+    {
+        var docker = new FakeDockerCli();
+        var runner = new ContainerRunner(
+            docker, new ActiveContainerRegistry(), NullLogger<ContainerRunner>.Instance,
+            containerRuntime: ContainerRuntimePolicy.GvisorRuntime);
+
+        await runner.RunAsync(CreateJob(), _ => ValueTask.CompletedTask);
+
+        Assert.Contains("--runtime=runsc", Assert.Single(docker.StreamingArguments));
     }
 
     private static ContainerRunner CreateRunner(FakeDockerCli docker, ResourceLimits? limits = null) =>

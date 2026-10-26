@@ -7,6 +7,27 @@ using Syncode.ExecutionService.Runner;
 using Syncode.ExecutionService.Security;
 
 var builder = WebApplication.CreateBuilder(args);
+var executionEnabled = builder.Configuration.GetValue<bool?>("ExecutionService:Enabled") ??
+    builder.Environment.IsDevelopment();
+var containerRuntime = ContainerRuntimePolicy.Resolve(
+    builder.Environment.IsDevelopment(), executionEnabled, builder.Configuration["ExecutionService:ContainerRuntime"]);
+
+builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = 64 * 1024 * 1024);
+builder.WebHost.UseUrls(builder.Configuration["ExecutionService:Urls"] ?? "http://127.0.0.1:5112");
+
+if (!executionEnabled)
+{
+    var disabledApp = builder.Build();
+    disabledApp.MapGet("/health", () => Results.Problem(
+        "Execution is disabled until a hardened worker runtime is configured.",
+        statusCode: StatusCodes.Status503ServiceUnavailable));
+    disabledApp.MapMethods("/api/{**path}", ["GET", "POST", "PUT", "PATCH", "DELETE"], () => Results.Problem(
+        "Execution is disabled until a hardened worker runtime is configured.",
+        statusCode: StatusCodes.Status503ServiceUnavailable));
+    await disabledApp.RunAsync();
+    return;
+}
+
 var apiKey = builder.Configuration["ExecutionService:ApiKey"] ??
     Environment.GetEnvironmentVariable("SYNCODE_EXECUTION_API_KEY");
 if (string.IsNullOrWhiteSpace(apiKey))
@@ -25,8 +46,6 @@ if (string.IsNullOrWhiteSpace(redisConnection))
 var redis = await ConnectionMultiplexer.ConnectAsync(redisConnection);
 builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter()));
-builder.WebHost.ConfigureKestrel(options => options.Limits.MaxRequestBodySize = 128 * 1024);
-builder.WebHost.UseUrls(builder.Configuration["ExecutionService:Urls"] ?? "http://127.0.0.1:5112");
 builder.Services.AddSingleton<IConnectionMultiplexer>(redis);
 
 var queuePrefix = builder.Configuration["ExecutionService:QueuePrefix"] ?? "syncode:execution";
@@ -48,7 +67,9 @@ builder.Services.AddSingleton(sp => new ExecutionJobQueue(
     builder.Configuration.GetValue("ExecutionService:MaxPendingJobs", 50), queuePrefix));
 builder.Services.AddSingleton(sp => new ContainerRunner(
     sp.GetRequiredService<DockerCli>(), sp.GetRequiredService<ActiveContainerRegistry>(),
-    sp.GetRequiredService<ILogger<ContainerRunner>>(), sp.GetRequiredService<ResourceLimits>()));
+    sp.GetRequiredService<ILogger<ContainerRunner>>(), sp.GetRequiredService<ResourceLimits>(), containerRuntime));
+if (containerRuntime == ContainerRuntimePolicy.GvisorRuntime)
+    builder.Services.AddHostedService<RunscRuntimeValidator>();
 builder.Services.AddHostedService(sp => new ContainerLifecycle(
     sp.GetRequiredService<DockerCli>(), sp.GetRequiredService<ActiveContainerRegistry>(),
     sp.GetRequiredService<ILogger<ContainerLifecycle>>(), sp.GetRequiredService<ResourceLimits>()));

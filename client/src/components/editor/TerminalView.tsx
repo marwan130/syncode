@@ -94,6 +94,7 @@ export function TerminalView({
     let stopped = false;
     let polling = false;
     let exited = false;
+    const reportedWorkspaceMessages = new Set<string>();
     const poll = async () => {
       if (stopped || polling || exited) return;
       polling = true;
@@ -102,7 +103,8 @@ export function TerminalView({
           providerRef.current,
           tab.sessionId!,
           offsetRef,
-          terminal
+          terminal,
+          reportedWorkspaceMessages
         );
       } finally {
         polling = false;
@@ -207,11 +209,24 @@ function writeBashOutput(terminal: XTerm, result: TerminalOutputResult) {
   return true;
 }
 
+function writeConflictNotice(terminal: XTerm, conflicts: number | undefined, reportedMessages: Set<string>) {
+  if (!conflicts || reportedMessages.has('conflict')) return;
+  terminal.write('\r\nSome terminal changes conflict with newer shared edits and were not applied.\r\n');
+  reportedMessages.add('conflict');
+}
+
+function writeUnsupportedNotice(terminal: XTerm, result: TerminalOutputResult, reportedMessages: Set<string>) {
+  if (!result.unsupportedPaths.length || reportedMessages.has('unsupported')) return;
+  terminal.write('\r\nSome generated, binary, oversized, or unsafe terminal files are not shared with the room.\r\n');
+  reportedMessages.add('unsupported');
+}
+
 async function pollBashOutput(
   provider: SignalRCrdtProvider | null,
   sessionId: string,
   offsetRef: { current: number },
-  terminal: XTerm
+  terminal: XTerm,
+  reportedMessages: Set<string>
 ): Promise<boolean> {
   try {
     const result = await provider?.readTerminalOutput(
@@ -220,6 +235,12 @@ async function pollBashOutput(
     );
     if (!result) return false;
     offsetRef.current = result.offset;
+    const conflicts = await provider?.syncTerminalWorkspace(
+      result.changedEntries,
+      result.deletedEntries
+    );
+    writeConflictNotice(terminal, conflicts, reportedMessages);
+    writeUnsupportedNotice(terminal, result, reportedMessages);
     return writeBashOutput(terminal, result);
   } catch {
     return false;

@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using Microsoft.AspNetCore.SignalR;
 
@@ -7,8 +8,19 @@ namespace server.Services;
 
 public sealed class ExecutionServiceClient(HttpClient httpClient, IConfiguration configuration)
 {
-    public async Task<TerminalSessionStartResult> StartTerminalAsync(CancellationToken cancellationToken) =>
-        await SendTerminalAsync<TerminalSessionStartResult>(HttpMethod.Post, "api/terminals", null, cancellationToken)
+    private static readonly JsonSerializerOptions TerminalJsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+    };
+
+    public async Task<TerminalSessionStartResult> StartTerminalAsync(
+        IReadOnlyList<RoomWorkspaceEntry> entries,
+        CancellationToken cancellationToken) =>
+        await SendTerminalAsync<TerminalSessionStartResult>(
+            HttpMethod.Post,
+            "api/terminals",
+            JsonContent.Create(new { entries }, options: TerminalJsonOptions),
+            cancellationToken)
         ?? throw new HubOperationException("The terminal service returned an invalid response.");
 
     public async Task WriteTerminalInputAsync(string sessionId, string input, CancellationToken cancellationToken)
@@ -46,7 +58,7 @@ public sealed class ExecutionServiceClient(HttpClient httpClient, IConfiguration
             submission.SourcePath,
             submission.ProjectFiles,
             submission.RequestId,
-        });
+        }, options: TerminalJsonOptions);
 
         HttpResponseMessage response;
         try
@@ -89,6 +101,14 @@ public sealed class ExecutionServiceClient(HttpClient httpClient, IConfiguration
         request.Content = JsonContent.Create(new { input });
         using var response = await SendTerminalRequestAsync(request, cancellationToken);
         if (!response.IsSuccessStatusCode) throw await TerminalErrorAsync(response, cancellationToken);
+    }
+
+    public async Task CancelExecutionAsync(string jobId, CancellationToken cancellationToken)
+    {
+        using var request = CreateTerminalRequest(HttpMethod.Delete, $"api/executions/{Uri.EscapeDataString(jobId)}");
+        using var response = await SendTerminalRequestAsync(request, cancellationToken);
+        if (response.StatusCode is not HttpStatusCode.NotFound && !response.IsSuccessStatusCode)
+            throw await TerminalErrorAsync(response, cancellationToken);
     }
 
     private async Task<T?> SendTerminalAsync<T>(HttpMethod method, string path, HttpContent? content, CancellationToken cancellationToken)

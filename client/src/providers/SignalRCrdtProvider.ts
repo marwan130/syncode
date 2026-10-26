@@ -6,11 +6,13 @@ import {
 } from '@microsoft/signalr';
 import { CrdtDocument } from '../crdt/CrdtDocument';
 import type { CrdtId } from '../crdt/CrdtId';
+import type { CrdtChar } from '../crdt/CrdtChar';
 import type { InsertOp, DeleteOp, CrdtOp } from '../crdt/CrdtDocument';
 import { PendingBuffer } from '../crdt/PendingBuffer';
 import type { CursorAnchor } from '../crdt/CursorAnchor';
 import { ProjectTree } from '../crdt/ProjectTree';
 import type { ProjectTreeOperation } from '../crdt/ProjectTree';
+import { getProjectEntryPath, isSharedProjectPath } from '../crdt/projectPathRules';
 import {
   listPendingProjectTreeOperations,
   migratePendingProjectTreeOperations,
@@ -33,6 +35,19 @@ function errorMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
   if (typeof err === 'string') return err;
   return 'Unknown error';
+}
+
+function commonPrefixLength(current: CrdtChar[], next: string[]): number {
+  let length = 0;
+  while (length < current.length && length < next.length && current[length].value === next[length]) length++;
+  return length;
+}
+
+function commonSuffixLength(current: CrdtChar[], next: string[], prefixLength: number): number {
+  let length = 0;
+  while (length < current.length - prefixLength && length < next.length - prefixLength &&
+    current[current.length - length - 1].value === next[next.length - length - 1]) length++;
+  return length;
 }
 
 export type ConnectionStatus =
@@ -98,11 +113,6 @@ export interface ExecutionEvent {
   outputLimitExceeded?: boolean;
 }
 
-export interface ExecutionProjectFile {
-  path: string;
-  content: string;
-}
-
 export interface ExecutionSubmission {
   jobId: string;
   queuePosition: number;
@@ -112,11 +122,21 @@ export interface TerminalSessionStart {
   sessionId: string;
 }
 
+export interface TerminalWorkspaceEntry {
+  path: string;
+  isFolder: boolean;
+  content: string;
+  previousContent?: string | null;
+}
+
 export interface TerminalOutput {
   text: string;
   offset: number;
   exited: boolean;
   exitCode: number | null;
+  changedEntries: TerminalWorkspaceEntry[];
+  deletedEntries: TerminalWorkspaceEntry[];
+  unsupportedPaths: string[];
 }
 
 export interface RoomEntry {
@@ -192,6 +212,7 @@ export class SignalRCrdtProvider {
     (peerId: string, state: AwarenessState) => void
   > = new Set();
   private snapshotSaveTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private terminalSessionIds = new Set<string>();
   private snapshotLoadQueue = Promise.resolve();
   private roomParticipantsListeners: Set<
     (participants: ParticipantInfo[]) => void
@@ -318,7 +339,8 @@ export class SignalRCrdtProvider {
   public async createEntry(
     name: string,
     parentId: string | null,
-    isFolder: boolean
+    isFolder: boolean,
+    activate = true
   ): Promise<string> {
     const id = crypto.randomUUID().replaceAll('-', '');
     const operation = this.projectTree.createEntry({
@@ -328,7 +350,7 @@ export class SignalRCrdtProvider {
       isFolder,
     });
     await this.submitTreeOperation(operation);
-    if (!isFolder) this.setActiveFile(id);
+    if (!isFolder && activate) this.setActiveFile(id);
     return id;
   }
   public async renameEntry(entryId: string, name: string): Promise<void> {
@@ -613,23 +635,187 @@ export class SignalRCrdtProvider {
 
   public async runExecution(
     language: ExecutionLanguage,
-    source: string,
     requestId: string,
-    sourcePath: string,
-    projectFiles: ExecutionProjectFile[]
+    sourcePath: string
   ): Promise<ExecutionSubmission> {
+    await this.flushTerminalWorkspaces();
+    await this.flushRoomWorkspace();
     return this.connection.invoke<ExecutionSubmission>(
       'RunExecution',
       language,
-      source,
       requestId,
-      sourcePath,
-      projectFiles
+      sourcePath
     );
   }
 
   public async startTerminal(): Promise<TerminalSessionStart> {
-    return this.connection.invoke<TerminalSessionStart>('StartTerminal');
+    await this.flushRoomWorkspace();
+    const session = await this.connection.invoke<TerminalSessionStart>('StartTerminal');
+    this.terminalSessionIds.add(session.sessionId);
+    return session;
+  }
+
+  public async syncTerminalWorkspace(
+    changedEntries: TerminalWorkspaceEntry[],
+    deletedEntries: TerminalWorkspaceEntry[]
+  ): Promise<number> {
+    if (this.localEditLocked) throw new Error('The room admin has locked your editing access.');
+    const changedConflicts = await this.syncChangedTerminalEntries(changedEntries);
+    const deletedConflicts = await this.syncDeletedTerminalEntries(deletedEntries);
+    return changedConflicts + deletedConflicts;
+  }
+
+  private async syncChangedTerminalEntries(entries: TerminalWorkspaceEntry[]): Promise<number> {
+    let conflicts = 0;
+    const ordered = [...entries].sort((left, right) =>
+      left.path.split('/').length - right.path.split('/').length || left.path.localeCompare(right.path)
+    );
+    for (const entry of ordered)
+      if (await this.syncTerminalEntry(entry)) conflicts++;
+    return conflicts;
+  }
+
+  private async syncDeletedTerminalEntries(entries: TerminalWorkspaceEntry[]): Promise<number> {
+    let conflicts = 0;
+    const deleted = entries
+      .filter(entry => isSharedProjectPath(entry.path))
+      .sort((left, right) => right.path.split('/').length - left.path.split('/').length);
+    const removedRoots = new Set<string>();
+    for (const item of deleted)
+      if (await this.deleteTerminalEntry(item, deleted, removedRoots)) conflicts++;
+    return conflicts;
+  }
+
+  private async syncTerminalEntry(entry: TerminalWorkspaceEntry): Promise<boolean> {
+    if (!isSharedProjectPath(entry.path)) return false;
+    const current = this.getEntriesByPath().get(entry.path);
+    const updated = current ? this.updateTerminalEntry(entry, current) : null;
+    if (updated !== null) return !updated;
+    return !(await this.createTerminalEntry(entry));
+  }
+
+  private updateTerminalEntry(entry: TerminalWorkspaceEntry, current: RoomEntry): boolean {
+    if (current.isFolder !== entry.isFolder) return false;
+    if (entry.isFolder) return true;
+    return this.updateTerminalFileEntry(entry, current);
+  }
+
+  private updateTerminalFileEntry(entry: TerminalWorkspaceEntry, current: RoomEntry): boolean {
+    const currentContent = this.getFileContent(current.id);
+    if (currentContent === entry.content) return true;
+    if (entry.previousContent !== currentContent) return false;
+    this.replaceFileContent(current.id, entry.content);
+    return true;
+  }
+
+  private async createTerminalEntry(entry: TerminalWorkspaceEntry): Promise<boolean> {
+    if (entry.previousContent !== null && entry.previousContent !== undefined) return false;
+    return this.createTerminalPath(entry);
+  }
+
+  private async createTerminalPath(entry: TerminalWorkspaceEntry): Promise<boolean> {
+    let parentId: string | null = null;
+    const segments = entry.path.split('/');
+    for (let index = 0; index < segments.length; index++) {
+      const isFolder = index < segments.length - 1 || entry.isFolder;
+      parentId = await this.createTerminalPathSegment(
+        segments.slice(0, index + 1).join('/'), segments[index], parentId, isFolder, entry
+      );
+      if (!parentId) return false;
+    }
+    return true;
+  }
+
+  private async createTerminalPathSegment(
+    path: string,
+    name: string,
+    parentId: string | null,
+    isFolder: boolean,
+    entry: TerminalWorkspaceEntry
+  ): Promise<string | null> {
+    const existing = this.getEntriesByPath().get(path);
+    if (existing) return existing.isFolder === isFolder ? existing.id : null;
+    const id = await this.createEntry(name, parentId, isFolder, false);
+    if (!isFolder && entry.content) this.replaceFileContent(id, entry.content);
+    return id;
+  }
+
+  private async deleteTerminalEntry(
+    item: TerminalWorkspaceEntry,
+    deleted: TerminalWorkspaceEntry[],
+    removedRoots: Set<string>
+  ): Promise<boolean> {
+    const path = item.path;
+    if ([...removedRoots].some(root => path.startsWith(`${root}/`))) return false;
+    const entries = this.getEntriesByPath();
+    const entry = entries.get(path);
+    if (!entry) return false;
+    if (this.hasTerminalDeletionConflict(item, entry, deleted, entries)) return true;
+    await this.deleteEntry(entry.id);
+    removedRoots.add(path);
+    return false;
+  }
+
+  private hasTerminalDeletionConflict(
+    item: TerminalWorkspaceEntry,
+    entry: RoomEntry,
+    deleted: TerminalWorkspaceEntry[],
+    entries: Map<string, RoomEntry>
+  ): boolean {
+    if (!entry.isFolder) return this.getFileContent(entry.id) !== item.content;
+    return deleted.some(child => child.path.startsWith(`${item.path}/`) && entries.has(child.path));
+  }
+
+  private async flushRoomWorkspace(): Promise<void> {
+    if (this.connection.state !== HubConnectionState.Connected)
+      throw new Error('Connect to the room before using its workspace.');
+    await this.pendingTreeReady;
+    await this.flushTreeOperations();
+    const timers = [...this.snapshotSaveTimers.entries()];
+    for (const [fileId, timer] of timers) {
+      clearTimeout(timer);
+      this.snapshotSaveTimers.delete(fileId);
+    }
+    for (const fileId of this.documents.keys()) await this.saveFileSnapshot(fileId);
+  }
+
+  private async flushTerminalWorkspaces(): Promise<void> {
+    for (const sessionId of this.terminalSessionIds)
+      await this.syncTerminalSessionWorkspace(sessionId);
+  }
+
+  private async syncTerminalSessionWorkspace(sessionId: string): Promise<void> {
+    const output = await this.readTerminalOutput(sessionId, 2_147_483_647);
+    await this.syncTerminalWorkspace(output.changedEntries, output.deletedEntries);
+  }
+
+  private getEntriesByPath(): Map<string, RoomEntry> {
+    const paths = new Map<string, RoomEntry>();
+    for (const entry of this.files) {
+      const path = getProjectEntryPath(entry, this.files);
+      if (path) paths.set(path, entry);
+    }
+    return paths;
+  }
+
+  private replaceFileContent(fileId: string, content: string): void {
+    const document = this.documentFor(fileId);
+    const current = document.chars.filter(character => !character.isDeleted);
+    const next = [...content];
+    const prefix = commonPrefixLength(current, next);
+    const suffix = commonSuffixLength(current, next, prefix);
+    this.deleteReplacedCharacters(fileId, current.slice(prefix, current.length - suffix));
+    this.insertReplacementCharacters(fileId, next.slice(prefix, next.length - suffix), current[prefix - 1]?.id ?? null);
+  }
+
+  private deleteReplacedCharacters(fileId: string, characters: CrdtChar[]): void {
+    for (const character of characters) this.localDelete(character.id, fileId);
+  }
+
+  private insertReplacementCharacters(fileId: string, characters: string[], initialOriginId: CrdtId | null): void {
+    let originId = initialOriginId;
+    for (const character of characters)
+      originId = this.localInsert(originId, character, fileId).char.id;
   }
 
   public async writeExecutionInput(
@@ -658,7 +844,12 @@ export class SignalRCrdtProvider {
   }
 
   public async closeTerminal(sessionId: string): Promise<void> {
-    await this.connection.invoke('CloseTerminal', sessionId);
+    try {
+      await this.syncTerminalSessionWorkspace(sessionId);
+    } finally {
+      this.terminalSessionIds.delete(sessionId);
+      await this.connection.invoke('CloseTerminal', sessionId);
+    }
   }
 
   public onExecutionEvent(
