@@ -91,6 +91,21 @@ public sealed class ContainerRunnerTests
     }
 
     [Fact]
+    public async Task RunAsync_ConfiguresTypeScriptModeInTheNodeImage()
+    {
+        var docker = new FakeDockerCli();
+        var runner = CreateRunner(docker);
+
+        await runner.RunAsync(CreateJob("console.log('typescript-ready')", ExecutionLanguage.TypeScript),
+            _ => ValueTask.CompletedTask);
+
+        var runArgs = Assert.Single(docker.StreamingArguments);
+        Assert.Contains("syncode-runner-node", runArgs);
+        Assert.Contains("RUNNER_RUNTIME=typescript", runArgs);
+        Assert.Contains(runArgs, arg => arg.EndsWith(",target=/workspace/main.ts,readonly", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public async Task RunAsync_ReportsTimeoutAndRemovesContainer()
     {
         var docker = new FakeDockerCli { WaitUntilCancelled = true };

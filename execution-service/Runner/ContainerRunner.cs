@@ -45,16 +45,16 @@ public sealed class ContainerRunner
         if (job.ProjectFiles is { } projectFiles)
             ValidateProjectFiles(job, projectFiles, sourceBytes);
 
-        var (image, sourceName) = job.Language switch
+        var (image, sourceName, runnerRuntime) = job.Language switch
         {
-            ExecutionLanguage.JavaScript => ("syncode-runner-node", "main.js"),
-            ExecutionLanguage.TypeScript => ("syncode-runner-node", "main.ts"),
-            ExecutionLanguage.Python => ("syncode-runner-python", "main.py"),
-            ExecutionLanguage.CSharp => ("syncode-runner-dotnet", "Program.cs"),
-            ExecutionLanguage.C => ("syncode-runner-c", "main.c"),
-            ExecutionLanguage.Cpp => ("syncode-runner-cpp", "main.cpp"),
-            ExecutionLanguage.Rust => ("syncode-runner-rust", "main.rs"),
-            ExecutionLanguage.Java => ("syncode-runner-java", "Main.java"),
+            ExecutionLanguage.JavaScript => ("syncode-runner-node", "main.js", "node"),
+            ExecutionLanguage.TypeScript => ("syncode-runner-node", "main.ts", "typescript"),
+            ExecutionLanguage.Python => ("syncode-runner-python", "main.py", "python"),
+            ExecutionLanguage.CSharp => ("syncode-runner-dotnet", "Program.cs", "csharp"),
+            ExecutionLanguage.C => ("syncode-runner-c", "main.c", "c"),
+            ExecutionLanguage.Cpp => ("syncode-runner-cpp", "main.cpp", "cpp"),
+            ExecutionLanguage.Rust => ("syncode-runner-rust", "main.rs", "rust"),
+            ExecutionLanguage.Java => ("syncode-runner-java", "Main.java", "java"),
             _ => throw new ArgumentOutOfRangeException(nameof(job), "Unsupported execution language.")
         };
 
@@ -96,7 +96,7 @@ public sealed class ContainerRunner
             using var timeout = new CancellationTokenSource(_limits.Timeout);
             using var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
 
-            var arguments = BuildRunArguments(containerName, image, sourcePath, sourceName,
+            var arguments = BuildRunArguments(containerName, image, runnerRuntime, sourcePath, sourceName,
                 job.ProjectFiles is { Count: > 0 }, job.SourcePath, sourceDirectory);
             int exitCode;
             try
@@ -148,6 +148,7 @@ public sealed class ContainerRunner
     private List<string> BuildRunArguments(
         string name,
         string image,
+        string runnerRuntime,
         string sourcePath,
         string sourceName,
         bool mountProjectDirectory,
@@ -174,6 +175,7 @@ public sealed class ContainerRunner
         "--cap-drop=ALL",
         "--security-opt=no-new-privileges",
         "--user", $"{RunnerUserId}:{RunnerUserId}",
+        "--env", $"RUNNER_RUNTIME={runnerRuntime}",
         "--env", $"SYNCODE_SOURCE_PATH={projectSourcePath}",
         "--mount", BuildMountSpecification(mountProjectDirectory ? sourceDirectory : sourcePath,
             mountProjectDirectory ? "/workspace" : $"/workspace/{sourceName}"),
