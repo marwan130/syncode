@@ -10,6 +10,7 @@ dist/
 .vite/
 client/coverage/
 **/.fallow/
+**/fallow/
 
 # IDE / OS
 .vscode/
@@ -22,5 +23,6 @@ client/coverage/
 NDependOut/
 .vibe-wise/
 .agents/
+.codex/
 graphify-out/
 skills-lock.json

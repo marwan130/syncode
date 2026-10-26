@@ -1,0 +1,59 @@
+name: Execution isolation
+
+on:
+  pull_request:
+    paths:
+      - "execution-service/**"
+      - "execution-service.tests/**"
+      - "infra/**"
+      - ".github/workflows/execution-isolation.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: execution-isolation-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - run: dotnet test execution-service.tests/Syncode.ExecutionService.Tests.csproj
+
+  gvisor-adversarial:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+      - name: Install pinned gVisor runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          release=20261005
+          arch="$(uname -m)"
+          archive="gvisor.tar.zstd"
+          base="https://storage.googleapis.com/gvisor/releases/release/${release}/${arch}"
+          curl --fail --location --silent --show-error "$base/$archive" --output "/tmp/$archive"
+          curl --fail --location --silent --show-error "$base/$archive.sha512" --output "/tmp/$archive.sha512"
+          cd /tmp
+          sha512sum --check "$archive.sha512"
+          sudo tar --zstd --extract --file "$archive" --directory /usr/local/bin
+          sudo /usr/local/bin/runsc install
+          sudo systemctl restart docker
+          docker info --format '{{json .Runtimes}}'
+      - name: Build supported runner images
+        run: bash infra/build-runner-images.sh
+      - name: Run the supported languages and adversarial checks with gVisor
+        env:
+          SYNCODE_CONTAINER_RUNTIME: runsc
+          SYNCODE_RUN_DOCKER_INTEGRATION: "1"
+          SYNCODE_RUN_GVISOR_INTEGRATION: "1"
+        run: dotnet test execution-service.tests/Syncode.ExecutionService.Tests.csproj --filter "Category=DockerIntegration|Category=GVisorIntegration"

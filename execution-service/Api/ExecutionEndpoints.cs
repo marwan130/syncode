@@ -97,12 +97,19 @@ internal static class ExecutionEndpoints
     {
         app.MapPost("/api/executions", async (
             HttpContext context,
-            QueueExecutionRequest request,
             ExecutionJobQueue queue,
             ExecutionRateLimiter rateLimiter,
             CancellationToken cancellationToken) =>
         {
             if (!HasValidApiKey(context, apiKey)) return Results.Unauthorized();
+            var bodySize = context.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>();
+            if (bodySize is { IsReadOnly: false }) bodySize.MaxRequestBodySize = 64 * 1024 * 1024;
+            if (context.Request.ContentLength > 64 * 1024 * 1024)
+                return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
+            QueueExecutionRequest? request;
+            try { request = await context.Request.ReadFromJsonAsync<QueueExecutionRequest>(cancellationToken); }
+            catch (JsonException) { return Results.BadRequest(new { error = "Invalid execution request." }); }
+            if (request is null) return Results.BadRequest(new { error = "Invalid execution request." });
             if (!IsValidRequest(request)) return Results.BadRequest(new { error = "Invalid execution request." });
 
             var rateLimit = await rateLimiter.TryAcquireAsync(

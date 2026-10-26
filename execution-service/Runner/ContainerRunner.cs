@@ -14,17 +14,20 @@ public sealed class ContainerRunner
     private readonly ActiveContainerRegistry _activeContainers;
     private readonly ResourceLimits _limits;
     private readonly ILogger<ContainerRunner> _logger;
+    private readonly string _containerRuntime;
 
     public ContainerRunner(
         IDockerCli docker,
         ActiveContainerRegistry activeContainers,
         ILogger<ContainerRunner> logger,
-        ResourceLimits? limits = null)
+        ResourceLimits? limits = null,
+        string containerRuntime = "runc")
     {
         _docker = docker;
         _activeContainers = activeContainers;
         _logger = logger;
         _limits = limits ?? ResourceLimits.Default;
+        _containerRuntime = containerRuntime;
     }
 
     public async Task<ExecutionResult> RunAsync(
@@ -156,12 +159,15 @@ public sealed class ContainerRunner
         "run", "--name", name,
         "--interactive",
         "--pull=never",
+        ContainerRuntimePolicy.DockerArgument(_containerRuntime),
         "--label", ContainerLabel,
         "--network=none",
         "--memory", $"{_limits.MemoryBytes}b",
         "--memory-swap", $"{_limits.MemoryBytes}b",
         "--cpus", _limits.CpuCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
         "--pids-limit", _limits.ProcessLimit.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        "--ulimit", $"nofile={_limits.OpenFileLimit}:{_limits.OpenFileLimit}",
+        "--ulimit", "fsize=16777216:16777216",
         "--read-only",
         "--tmpfs", $"/tmp:rw,noexec,nosuid,nodev,size={_limits.TemporaryStorageMegabytes}m,uid={RunnerUserId},gid={RunnerUserId}",
         "--tmpfs", $"/runner:rw,exec,nosuid,nodev,size={_limits.BuildStorageMegabytes}m,uid={RunnerUserId},gid={RunnerUserId}",

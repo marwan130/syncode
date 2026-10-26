@@ -67,6 +67,7 @@ public sealed class ContainerLifecycle : BackgroundService
             .Select(row => row.Split('|', 4))
             .Where(parts => parts.Length == 4 && IsManagedContainer(parts[1], parts[3]))
             .ToArray();
+        var managedNames = managed.Select(parts => parts[1]).ToHashSet(StringComparer.Ordinal);
         var now = DateTimeOffset.UtcNow;
         if (_lastCountLog == DateTimeOffset.MinValue || now - _lastCountLog >= ContainerCountLogInterval)
         {
@@ -108,6 +109,33 @@ public sealed class ContainerLifecycle : BackgroundService
             if (detailParts[0] == "running")
                 await _docker.TryRunAsync(["kill", containerId], cancellationToken);
             await _docker.TryRunAsync(["rm", "-f", containerId], cancellationToken);
+        }
+        CleanupOrphanedWorkspaces(managedNames);
+    }
+
+    private static void CleanupOrphanedWorkspaces(HashSet<string> managedNames)
+    {
+        var temporaryRoot = Path.GetTempPath();
+        foreach (var directory in Directory.EnumerateDirectories(temporaryRoot))
+        {
+            var name = Path.GetFileName(directory);
+            var containerName = name.StartsWith("syncode-terminal-", StringComparison.Ordinal) &&
+                name.EndsWith("-workspace", StringComparison.Ordinal)
+                ? name[..^"-workspace".Length]
+                : name;
+            if (!(name.StartsWith("syncode-exec-", StringComparison.Ordinal) ||
+                  name.StartsWith("syncode-terminal-", StringComparison.Ordinal)) ||
+                managedNames.Contains(containerName))
+                continue;
+
+            try
+            {
+                if (DateTimeOffset.UtcNow - Directory.GetLastWriteTimeUtc(directory) > TimeSpan.FromSeconds(30))
+                    Directory.Delete(directory, recursive: true);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+            }
         }
     }
 
