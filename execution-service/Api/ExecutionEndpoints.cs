@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Syncode.ExecutionService.Queue;
 using Syncode.ExecutionService.Runner;
 using Syncode.ExecutionService.Security;
@@ -8,6 +9,8 @@ namespace Syncode.ExecutionService.Api;
 
 internal static class ExecutionEndpoints
 {
+    private sealed record TerminalStartRequest(IReadOnlyList<TerminalWorkspaceEntry>? Entries);
+
     internal static void Map(WebApplication app, string apiKey)
     {
         MapTerminalEndpoints(app, apiKey);
@@ -22,10 +25,22 @@ internal static class ExecutionEndpoints
             CancellationToken cancellationToken) =>
         {
             if (!HasValidApiKey(context, apiKey)) return Results.Unauthorized();
-            try { return Results.Ok(await terminals.CreateAsync(cancellationToken)); }
+            var bodySize = context.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>();
+            if (bodySize is { IsReadOnly: false }) bodySize.MaxRequestBodySize = 64 * 1024 * 1024;
+            if (context.Request.ContentLength > 64 * 1024 * 1024)
+                return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
+            TerminalStartRequest? request;
+            try { request = await context.Request.ReadFromJsonAsync<TerminalStartRequest>(cancellationToken); }
+            catch (JsonException) { return Results.BadRequest(new { error = "Invalid workspace snapshot." }); }
+            if (request?.Entries is null) return Results.BadRequest(new { error = "Invalid workspace snapshot." });
+            try { return Results.Ok(await terminals.CreateAsync(request.Entries, cancellationToken)); }
             catch (TerminalSessionLimitException exception)
             {
                 return Results.Problem(exception.Message, statusCode: StatusCodes.Status429TooManyRequests);
+            }
+            catch (ArgumentException)
+            {
+                return Results.BadRequest(new { error = "The room workspace is invalid or exceeds its size limit." });
             }
             catch (Exception exception) when (
                 exception is IOException or InvalidOperationException or System.ComponentModel.Win32Exception)
