@@ -41,7 +41,8 @@ case "${RUNNER_RUNTIME:-}" in
       printf '%s\n' 'The mounted source file is missing or unreadable.' >&2
       exit 66
     }
-    mkdir -p /runner/tmp /runner/dotnet
+    mkdir -p /runner/tmp /runner/dotnet /runner/runtime
+    chmod 700 /runner/runtime
     find /workspace -type f -name '*.cs' ! -path "/workspace/$source_path" ! -path /workspace/Program.cs -exec cp --parents {} /runner \;
     cp "/workspace/$source_path" /runner/Program.cs
     cat > /runner/main.csproj <<'EOF'
@@ -58,8 +59,8 @@ EOF
     cat > /runner/NuGet.Config <<'EOF'
 <configuration><packageSources><clear /></packageSources></configuration>
 EOF
-    dotnet restore /runner/main.csproj --configfile /runner/NuGet.Config
-    dotnet build /runner/main.csproj --no-restore --configuration Release --output /runner/out
+    dotnet restore /runner/main.csproj --configfile /runner/NuGet.Config --disable-parallel
+    dotnet build /runner/main.csproj --no-restore --configuration Release --output /runner/out -m:1 -p:UseSharedCompilation=false
     exec dotnet /runner/out/main.dll
     ;;
   c)

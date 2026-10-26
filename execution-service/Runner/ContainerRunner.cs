@@ -57,6 +57,15 @@ public sealed class ContainerRunner
             ExecutionLanguage.Java => ("syncode-runner-java", "Main.java", "java"),
             _ => throw new ArgumentOutOfRangeException(nameof(job), "Unsupported execution language.")
         };
+        var memoryBytes = job.Language == ExecutionLanguage.CSharp
+            ? _limits.CSharpMemoryBytes
+            : _limits.MemoryBytes;
+        var processLimit = job.Language == ExecutionLanguage.CSharp
+            ? _limits.CSharpProcessLimit
+            : _limits.ProcessLimit;
+        var maxFileBytes = job.Language == ExecutionLanguage.CSharp
+            ? _limits.CSharpMaxFileBytes
+            : 16L * 1024 * 1024;
 
         var containerName = $"syncode-exec-{Guid.NewGuid():N}";
         var sourceDirectory = Path.Combine(Path.GetTempPath(), containerName);
@@ -96,8 +105,8 @@ public sealed class ContainerRunner
             using var timeout = new CancellationTokenSource(_limits.Timeout);
             using var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
 
-            var arguments = BuildRunArguments(containerName, image, runnerRuntime, sourcePath, sourceName,
-                job.ProjectFiles is { Count: > 0 }, job.SourcePath, sourceDirectory);
+            var arguments = BuildRunArguments(containerName, image, runnerRuntime, memoryBytes, sourcePath, sourceName,
+                processLimit, maxFileBytes, job.ProjectFiles is { Count: > 0 }, job.SourcePath, sourceDirectory);
             int exitCode;
             try
             {
@@ -149,8 +158,11 @@ public sealed class ContainerRunner
         string name,
         string image,
         string runnerRuntime,
+        long memoryBytes,
         string sourcePath,
         string sourceName,
+        int processLimit,
+        long maxFileBytes,
         bool mountProjectDirectory,
         string projectSourcePath,
         string sourceDirectory)
@@ -163,12 +175,12 @@ public sealed class ContainerRunner
         ContainerRuntimePolicy.DockerArgument(_containerRuntime),
         "--label", ContainerLabel,
         "--network=none",
-        "--memory", $"{_limits.MemoryBytes}b",
-        "--memory-swap", $"{_limits.MemoryBytes}b",
+        "--memory", $"{memoryBytes}b",
+        "--memory-swap", $"{memoryBytes}b",
         "--cpus", _limits.CpuCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
-        "--pids-limit", _limits.ProcessLimit.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        "--pids-limit", processLimit.ToString(System.Globalization.CultureInfo.InvariantCulture),
         "--ulimit", $"nofile={_limits.OpenFileLimit}:{_limits.OpenFileLimit}",
-        "--ulimit", "fsize=16777216:16777216",
+        "--ulimit", $"fsize={maxFileBytes}:{maxFileBytes}",
         "--read-only",
         "--tmpfs", $"/tmp:rw,noexec,nosuid,nodev,size={_limits.TemporaryStorageMegabytes}m,uid={RunnerUserId},gid={RunnerUserId}",
         "--tmpfs", $"/runner:rw,exec,nosuid,nodev,size={_limits.BuildStorageMegabytes}m,uid={RunnerUserId},gid={RunnerUserId}",

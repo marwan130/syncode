@@ -106,6 +106,26 @@ public sealed class ContainerRunnerTests
     }
 
     [Fact]
+    public async Task RunAsync_GivesCSharpCompilationItsBoundedMemoryLimit()
+    {
+        var docker = new FakeDockerCli();
+        var runner = CreateRunner(docker);
+
+        await runner.RunAsync(CreateJob("Console.WriteLine(\"ready\");", ExecutionLanguage.CSharp),
+            _ => ValueTask.CompletedTask);
+
+        var runArgs = Assert.Single(docker.StreamingArguments);
+        var memoryIndex = runArgs.ToList().IndexOf("--memory");
+        var memorySwapIndex = runArgs.ToList().IndexOf("--memory-swap");
+        Assert.Equal("4294967296b", runArgs[memoryIndex + 1]);
+        Assert.Equal("4294967296b", runArgs[memorySwapIndex + 1]);
+        var processLimitIndex = runArgs.ToList().IndexOf("--pids-limit");
+        Assert.Equal("128", runArgs[processLimitIndex + 1]);
+        Assert.Contains(runArgs, arg => arg.StartsWith("/runner:rw,exec,nosuid,nodev,size=128m", StringComparison.Ordinal));
+        Assert.Contains("fsize=134217728:134217728", runArgs);
+    }
+
+    [Fact]
     public async Task RunAsync_ReportsTimeoutAndRemovesContainer()
     {
         var docker = new FakeDockerCli { WaitUntilCancelled = true };
