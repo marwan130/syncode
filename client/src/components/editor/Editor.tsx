@@ -93,7 +93,6 @@ function EditorComponent({ roomId: propRoomId, accessKey }: EditorProps) {
     status,
     activeFile,
     activeFilePath,
-    entries,
     language,
     monacoEditor,
     monacoApi,

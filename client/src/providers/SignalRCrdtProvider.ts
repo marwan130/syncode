@@ -98,11 +98,6 @@ export interface ExecutionEvent {
   outputLimitExceeded?: boolean;
 }
 
-export interface ExecutionProjectFile {
-  path: string;
-  content: string;
-}
-
 export interface ExecutionSubmission {
   jobId: string;
   queuePosition: number;
@@ -613,19 +608,29 @@ export class SignalRCrdtProvider {
 
   public async runExecution(
     language: ExecutionLanguage,
-    source: string,
     requestId: string,
-    sourcePath: string,
-    projectFiles: ExecutionProjectFile[]
+    sourcePath: string
   ): Promise<ExecutionSubmission> {
+    await this.flushRoomWorkspace();
     return this.connection.invoke<ExecutionSubmission>(
       'RunExecution',
       language,
-      source,
       requestId,
-      sourcePath,
-      projectFiles
+      sourcePath
     );
+  }
+
+  private async flushRoomWorkspace(): Promise<void> {
+    if (this.connection.state !== HubConnectionState.Connected)
+      throw new Error('Connect to the room before using its workspace.');
+    await this.pendingTreeReady;
+    await this.flushTreeOperations();
+    const timers = [...this.snapshotSaveTimers.entries()];
+    for (const [fileId, timer] of timers) {
+      clearTimeout(timer);
+      this.snapshotSaveTimers.delete(fileId);
+    }
+    for (const fileId of this.documents.keys()) await this.saveFileSnapshot(fileId);
   }
 
   public async startTerminal(): Promise<TerminalSessionStart> {

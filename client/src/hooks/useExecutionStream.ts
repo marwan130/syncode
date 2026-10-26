@@ -67,9 +67,7 @@ export function useExecutionStream({
   const runCode = useCallback(
     async (
       language: ExecutionLanguage,
-      source: string,
-      sourcePath: string,
-      projectFiles: { path: string; content: string }[]
+      sourcePath: string
     ) => {
       if (runningRef.current) return;
       const provider = providerRef.current;
@@ -90,10 +88,8 @@ export function useExecutionStream({
       try {
         const submission = await provider.runExecution(
           language,
-          source,
           requestId,
-          sourcePath,
-          projectFiles
+          sourcePath
         );
         if (activeRequestId.current !== requestId || !runningRef.current)
           return;

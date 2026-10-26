@@ -7,7 +7,9 @@ namespace server.Services;
 public sealed class TerminalSessionService(
     RedisParticipantStore participants,
     ExecutionServiceClient executionService,
-    TerminalSessionRegistry sessions)
+    TerminalSessionRegistry sessions,
+    RoomAuthorizationService authorization,
+    RoomWorkspaceAdapter workspace)
 {
     public async Task<TerminalSessionStartResult> StartAsync(string connectionId, CancellationToken cancellationToken)
     {
@@ -48,17 +50,26 @@ public sealed class TerminalSessionService(
         var roomId = await GetParticipantRoomAsync(connectionId, "Join a room before running code.");
         if (!Guid.TryParse(request.RequestId, out var requestGuid))
             throw new HubOperationException("Invalid execution request.");
-        ValidateProjectFiles(request);
+        await authorization.EnsureCanEditAsync(roomId, connectionId);
         var language = NormalizeLanguage(request.Language);
         var participant = await participants.GetParticipantAsync(roomId, connectionId)
             ?? throw new HubOperationException("Join a room before running code.");
-        var projectFiles = request.ProjectFiles!;
+        if (!ProjectPathRules.IsSafePath(request.SourcePath))
+            throw new HubOperationException("The active project file is invalid.");
+        var workspaceEntries = await workspace.MaterializeAsync(roomId);
+        var projectFiles = workspaceEntries
+            .Where(entry => !entry.IsFolder)
+            .Select(entry => new ExecutionProjectFileInput(entry.Path, entry.Content))
+            .ToArray();
+        var activeFile = projectFiles.FirstOrDefault(file => file.Path == request.SourcePath)
+            ?? throw new HubOperationException("The active project file no longer exists.");
+        ValidateProjectFiles(request.SourcePath, activeFile.Content, projectFiles);
         var submission = await executionService.SubmitAsync(
             new ExecutionSubmissionRequest(
                 roomId,
                 participant.UserId ?? participant.DisplayName,
                 language,
-                request.Source,
+                activeFile.Content,
                 requestGuid.ToString("N"),
                 request.SourcePath,
                 projectFiles),
@@ -96,15 +107,16 @@ public sealed class TerminalSessionService(
         return roomId;
     }
 
-    private static void ValidateProjectFiles(RunExecutionRequest request)
+    private static void ValidateProjectFiles(
+        string sourcePath,
+        string source,
+        IReadOnlyList<ExecutionProjectFileInput> files)
     {
-        if (request.Source is null || Encoding.UTF8.GetByteCount(request.Source) > 64 * 1024)
-            throw new HubOperationException("Source must be 64 KB or less.");
-        var files = request.ProjectFiles;
-        if (files is null || files.Count is < 1 or > 500 ||
-            string.IsNullOrWhiteSpace(request.SourcePath) || !ProjectPathRules.IsSafePath(request.SourcePath))
+        if (Encoding.UTF8.GetByteCount(source) > RoomWorkspaceAdapter.MaximumWorkspaceBytes)
+            throw new HubOperationException("The project exceeds the 32 MB run limit.");
+        if (files.Count is < 1 or > 500 || !ProjectPathRules.IsSafePath(sourcePath))
             throw new HubOperationException("Invalid project files for execution.");
-        if (!files.Any(file => file is not null && file.Path == request.SourcePath))
+        if (!files.Any(file => file.Path == sourcePath))
             throw new HubOperationException("The active file is missing from the project run.");
 
         long projectBytes = 0;
@@ -116,10 +128,10 @@ public sealed class TerminalSessionService(
             projectBytes += Encoding.UTF8.GetByteCount(file.Content);
         }
 
-        var activeFile = files.First(file => file.Path == request.SourcePath);
-        var totalBytes = projectBytes - Encoding.UTF8.GetByteCount(activeFile.Content) + Encoding.UTF8.GetByteCount(request.Source);
-        if (totalBytes > 64 * 1024)
-            throw new HubOperationException("Project files must total 64 KB or less to run.");
+        var activeFile = files.First(file => file.Path == sourcePath);
+        var totalBytes = projectBytes - Encoding.UTF8.GetByteCount(activeFile.Content) + Encoding.UTF8.GetByteCount(source);
+        if (totalBytes > RoomWorkspaceAdapter.MaximumWorkspaceBytes)
+            throw new HubOperationException("The project exceeds the 32 MB run limit.");
     }
 
     private static string NormalizeLanguage(string? language) => language?.Trim().ToLowerInvariant() switch

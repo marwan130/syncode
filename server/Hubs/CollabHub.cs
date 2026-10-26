@@ -47,13 +47,11 @@ public class CollabHub : Hub
 
     public Task<ExecutionSubmissionResult> RunExecution(
         string language,
-        string source,
         string requestId,
-        string sourcePath,
-        IReadOnlyList<ExecutionProjectFileInput>? projectFiles = null) =>
+        string sourcePath) =>
         _services.Terminal.RunAsync(
             Context.ConnectionId,
-            new RunExecutionRequest(language, source, requestId, sourcePath, projectFiles),
+            new RunExecutionRequest(language, requestId, sourcePath),
             Context.ConnectionAborted);
 
     public Task WriteExecutionInput(string jobId, string input) =>
