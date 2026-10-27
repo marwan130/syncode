@@ -19,8 +19,9 @@ ENV RUNNER_RUNTIME=csharp \
 
 RUN groupadd --system --gid 10001 runner \
     && useradd --system --uid 10001 --gid runner --no-create-home runner \
-    && mkdir -p /workspace \
-    && chown runner:runner /workspace
+    && mkdir -p /runner/tmp /runner/dotnet /runner/runtime /runner/nuget /workspace \
+    && dotnet tool install --tool-path /usr/local/bin csharp-ls --version 0.28.0 \
+    && chown -R runner:runner /runner /workspace
 
 COPY entrypoint.sh /usr/local/bin/runner-entrypoint
 RUN chmod 0555 /usr/local/bin/runner-entrypoint

@@ -11,7 +11,15 @@ public interface IDockerCli
     Task TryRunAsync(IReadOnlyList<string> arguments, CancellationToken cancellationToken);
 }
 
-public sealed class ExecutionInputBufferLimitException : Exception { }
+public sealed class ExecutionInputBufferLimitException : Exception
+{
+    public ExecutionInputBufferLimitException() : base() { }
+
+    public ExecutionInputBufferLimitException(string message) : base(message) { }
+
+    public ExecutionInputBufferLimitException(string message, Exception innerException)
+        : base(message, innerException) { }
+}
 
 public sealed class DockerCli : IDockerCli
 {

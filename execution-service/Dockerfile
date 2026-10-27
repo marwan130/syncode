@@ -8,7 +8,7 @@ RUN dotnet publish execution-service/Syncode.ExecutionService.csproj \
     --no-restore \
     --output /app/publish
 
-FROM docker:27.5.1-cli AS docker-cli
+FROM docker:28.0.0-cli AS docker-cli
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
 WORKDIR /app

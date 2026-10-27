@@ -19,7 +19,7 @@ services:
     restart: unless-stopped
 
   docker:
-    image: docker:27.5.1-dind
+    image: docker:28.0.0-dind
     privileged: true
     hostname: docker
     environment:
@@ -45,7 +45,7 @@ services:
     restart: unless-stopped
 
   runner-images:
-    image: docker:27.5.1-cli
+    image: docker:28.0.0-cli
     environment:
       DOCKER_HOST: tcp://docker:2376
       DOCKER_TLS_VERIFY: "1"
@@ -78,6 +78,7 @@ services:
       ASPNETCORE_ENVIRONMENT: Development
       ExecutionService__Enabled: "true"
       ExecutionService__ContainerRuntime: ${EXECUTION_CONTAINER_RUNTIME:-runc}
+      ExecutionService__PackageEgress__Enabled: ${PACKAGE_EGRESS_ENABLED:-false}
       ExecutionService__ApiKey: ${SYNCODE_EXECUTION_API_KEY:?Set SYNCODE_EXECUTION_API_KEY in infra/.env}
       ExecutionService__Urls: http://0.0.0.0:5112
       ExecutionService__WorkerCount: ${EXECUTION_WORKER_COUNT:-3}
@@ -105,7 +106,50 @@ services:
       - docker-control
     restart: unless-stopped
 
+  room-server:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.server
+    environment:
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
+      ASPNETCORE_URLS: http://0.0.0.0:5111
+      ASPNETCORE_FORWARDEDHEADERS_ENABLED: "true"
+      Redis: redis:6379
+      ExecutionService__BaseUrl: http://execution-service:5112
+      ExecutionService__ApiKey: ${SYNCODE_EXECUTION_API_KEY:?Set SYNCODE_EXECUTION_API_KEY in infra/.env}
+      Github__ClientId: ${GITHUB_CLIENT_ID:-}
+      Github__ClientSecret: ${GITHUB_CLIENT_SECRET:-}
+      Github__RedirectUri: ${GITHUB_REDIRECT_URI:-http://localhost:8080/github/callback}
+      Github__TokenEncryptionKey: ${GITHUB_TOKEN_ENCRYPTION_KEY:-}
+      AllowedHosts: ${SYNCODE_ALLOWED_HOSTS:-localhost;127.0.0.1}
+      AllowedOrigins__0: ${SYNCODE_ALLOWED_ORIGIN:-http://localhost:8080}
+    depends_on:
+      redis:
+        condition: service_healthy
+      execution-service:
+        condition: service_started
+    networks:
+      - frontend-network
+      - service-network
+    restart: unless-stopped
+
+  client:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.client
+      args:
+        VITE_BACKEND_URL: ${VITE_BACKEND_URL:-}
+        VITE_GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+    ports:
+      - "127.0.0.1:${CLIENT_PORT:-8080}:8080"
+    depends_on:
+      - room-server
+    networks:
+      - frontend-network
+    restart: unless-stopped
+
 networks:
+  frontend-network:
   service-network:
   docker-control:
     internal: true

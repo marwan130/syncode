@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Net.WebSockets;
 using Syncode.ExecutionService.Queue;
 using Syncode.ExecutionService.Runner;
 using Syncode.ExecutionService.Security;
@@ -9,12 +10,71 @@ namespace Syncode.ExecutionService.Api;
 
 internal static class ExecutionEndpoints
 {
-    private sealed record TerminalStartRequest(IReadOnlyList<TerminalWorkspaceEntry>? Entries);
+    private sealed record TerminalStartRequest(string? RoomId, IReadOnlyList<TerminalWorkspaceEntry>? Entries);
+    private sealed record LanguageServerStartRequest(string? RoomId, string? Language, IReadOnlyList<TerminalWorkspaceEntry>? Entries);
 
     internal static void Map(WebApplication app, string apiKey)
     {
         MapTerminalEndpoints(app, apiKey);
+        MapLanguageServerEndpoints(app, apiKey);
         MapExecutionJobEndpoints(app, apiKey);
+    }
+
+    private static void MapLanguageServerEndpoints(WebApplication app, string apiKey)
+    {
+        app.MapPost("/api/language-servers", async (
+            HttpContext context,
+            [Microsoft.AspNetCore.Mvc.FromBody] LanguageServerStartRequest? request,
+            LanguageServerSessions sessions,
+            CancellationToken cancellationToken) =>
+        {
+            if (!HasValidApiKey(context, apiKey)) return Results.Unauthorized();
+            if (request?.RoomId is not { Length: > 0 and <= 128 } roomId ||
+                request.Language is not { Length: > 0 and <= 32 } language || request.Entries is null)
+                return Results.BadRequest(new { error = "Invalid language server request." });
+            var bodySize = context.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>();
+            if (bodySize is { IsReadOnly: false }) bodySize.MaxRequestBodySize = 64 * 1024 * 1024;
+            if (context.Request.ContentLength > 64 * 1024 * 1024)
+                return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
+            try { return Results.Ok(await sessions.CreateAsync(roomId, language, request.Entries, cancellationToken)); }
+            catch (LanguageServerCapacityException) { return Results.StatusCode(StatusCodes.Status429TooManyRequests); }
+            catch (ArgumentException exception) { return Results.BadRequest(new { error = exception.Message }); }
+            catch (Exception exception) when (exception is IOException or InvalidOperationException or System.ComponentModel.Win32Exception)
+            {
+                return Results.Problem("The language server could not start.", statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
+        });
+
+        app.MapGet("/api/language-servers/{sessionId}/socket", async (
+            HttpContext context,
+            string sessionId,
+            LanguageServerSessions sessions,
+            CancellationToken cancellationToken) =>
+        {
+            if (!HasValidApiKey(context, apiKey)) return Results.Unauthorized();
+            if (!IsValidJobId(sessionId)) return Results.BadRequest();
+            if (!context.WebSockets.IsWebSocketRequest) return Results.BadRequest();
+            using var socket = await context.WebSockets.AcceptWebSocketAsync();
+            try { await sessions.ProxyAsync(sessionId, socket, cancellationToken); }
+            catch (KeyNotFoundException) { await socket.CloseAsync(WebSocketCloseStatus.PolicyViolation, "Language server session ended", CancellationToken.None); }
+            catch (Exception exception) when (exception is WebSocketException or IOException or InvalidDataException or JsonException)
+            {
+                if (socket.State is WebSocketState.Open or WebSocketState.CloseReceived)
+                    await socket.CloseAsync(WebSocketCloseStatus.InvalidMessageType, "Invalid language server connection", CancellationToken.None);
+            }
+            return Results.Empty;
+        });
+
+        app.MapDelete("/api/language-servers/{sessionId}", async (
+            HttpContext context,
+            string sessionId,
+            LanguageServerSessions sessions) =>
+        {
+            if (!HasValidApiKey(context, apiKey)) return Results.Unauthorized();
+            if (!IsValidJobId(sessionId)) return Results.BadRequest();
+            await sessions.CloseAsync(sessionId);
+            return Results.NoContent();
+        });
     }
 
     private static void MapTerminalEndpoints(WebApplication app, string apiKey)
@@ -32,8 +92,9 @@ internal static class ExecutionEndpoints
             TerminalStartRequest? request;
             try { request = await context.Request.ReadFromJsonAsync<TerminalStartRequest>(cancellationToken); }
             catch (JsonException) { return Results.BadRequest(new { error = "Invalid workspace snapshot." }); }
-            if (request?.Entries is null) return Results.BadRequest(new { error = "Invalid workspace snapshot." });
-            try { return Results.Ok(await terminals.CreateAsync(request.Entries, cancellationToken)); }
+            if (request?.Entries is null || string.IsNullOrWhiteSpace(request.RoomId) || request.RoomId.Length > 128)
+                return Results.BadRequest(new { error = "Invalid workspace snapshot." });
+            try { return Results.Ok(await terminals.CreateAsync(request.RoomId, request.Entries, cancellationToken)); }
             catch (TerminalSessionLimitException exception)
             {
                 return Results.Problem(exception.Message, statusCode: StatusCodes.Status429TooManyRequests);
@@ -89,6 +150,18 @@ internal static class ExecutionEndpoints
         {
             if (!HasValidApiKey(context, apiKey)) return Results.Unauthorized();
             await terminals.CloseAsync(sessionId);
+            return Results.NoContent();
+        });
+
+        app.MapDelete("/api/rooms/{roomId}/dependencies", (
+            HttpContext context,
+            string roomId,
+            RoomDependencyStore dependencies) =>
+        {
+            if (!HasValidApiKey(context, apiKey)) return Results.Unauthorized();
+            if (string.IsNullOrWhiteSpace(roomId) || roomId.Length > 128)
+                return Results.BadRequest(new { error = "Invalid room id." });
+            dependencies.DeleteRoom(roomId);
             return Results.NoContent();
         });
     }

@@ -1,18 +1,21 @@
-FROM node:24-alpine
+FROM node:24.22.1-alpine3.24
 
 ENV RUNNER_RUNTIME=node \
     TMPDIR=/runner/tmp
 
 RUN addgroup -S -g 10001 runner \
     && adduser -S -D -H -u 10001 -G runner runner \
+    && apk add --no-cache python3 \
     && npm install --global --ignore-scripts typescript@6.0.2 @types/node@24.13.3 \
+        vscode-langservers-extracted@4.10.0 pyright@1.1.414 \
+    && npm cache clean --force \
     && rm -rf /usr/local/lib/node_modules/npm \
               /usr/local/lib/node_modules/corepack \
     && rm -f /usr/local/bin/npm \
              /usr/local/bin/npx \
              /usr/local/bin/corepack \
              /usr/local/bin/pnpx \
-    && mkdir -p /workspace \
+    && mkdir -p /workspace/node_modules \
     && chown runner:runner /workspace
 
 COPY entrypoint.sh /usr/local/bin/runner-entrypoint

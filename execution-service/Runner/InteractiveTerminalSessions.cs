@@ -23,12 +23,14 @@ public sealed class InteractiveTerminalSessions : IHostedService, IAsyncDisposab
     private const int MaxInputCharacters = 4096;
     private static readonly TimeSpan IdleLifetime = TimeSpan.FromMinutes(15);
     private static readonly TimeSpan MaximumLifetime = TimeSpan.FromHours(1);
-    private const long MaximumWorkspaceDiskBytes = 64L * 1024 * 1024;
+    private const long MaximumWorkspaceDiskBytes = 128L * 1024 * 1024;
     private readonly ConcurrentDictionary<string, Session> _sessions = new(StringComparer.Ordinal);
     private readonly string _docker;
     private readonly string _containerRuntime;
     private readonly ILogger<InteractiveTerminalSessions> _logger;
     private readonly ActiveContainerRegistry _activeContainers;
+    private readonly PackageEgressBoundary _packageEgress;
+    private readonly RoomDependencyStore _dependencies;
     private readonly SemaphoreSlim _sessionSlots = new(MaxSessions, MaxSessions);
     private readonly CancellationTokenSource _shutdown = new();
     private Task? _cleanupTask;
@@ -36,12 +38,16 @@ public sealed class InteractiveTerminalSessions : IHostedService, IAsyncDisposab
     public InteractiveTerminalSessions(
         IConfiguration configuration,
         ILogger<InteractiveTerminalSessions> logger,
-        ActiveContainerRegistry activeContainers)
+        ActiveContainerRegistry activeContainers,
+        PackageEgressBoundary packageEgress,
+        RoomDependencyStore dependencies)
     {
         _docker = configuration["ExecutionService:DockerCli"] ?? "docker";
         _containerRuntime = configuration["ExecutionService:ContainerRuntime"] ?? "runc";
         _logger = logger;
         _activeContainers = activeContainers;
+        _packageEgress = packageEgress;
+        _dependencies = dependencies;
     }
 
     public Task StartAsync(CancellationToken cancellationToken)
@@ -51,6 +57,7 @@ public sealed class InteractiveTerminalSessions : IHostedService, IAsyncDisposab
     }
 
     public async Task<TerminalSessionStart> CreateAsync(
+        string roomId,
         IReadOnlyList<TerminalWorkspaceEntry> entries,
         CancellationToken cancellationToken)
     {
@@ -60,6 +67,7 @@ public sealed class InteractiveTerminalSessions : IHostedService, IAsyncDisposab
         var id = Guid.NewGuid().ToString("N");
         var containerName = $"syncode-terminal-{id}";
         var workspaceDirectory = Path.Combine(Path.GetTempPath(), $"{containerName}-workspace");
+        var dependencyDirectory = _dependencies.GetRoomPath(roomId);
         var startInfo = new ProcessStartInfo
         {
             FileName = _docker,
@@ -70,9 +78,11 @@ public sealed class InteractiveTerminalSessions : IHostedService, IAsyncDisposab
             CreateNoWindow = true
         };
         WorkspaceMaterialization initialWorkspace;
+        RunnerNetwork? runnerNetwork = null;
         try
         {
             initialWorkspace = await InitializeWorkspaceAsync(workspaceDirectory, entries, cancellationToken);
+            runnerNetwork = await _packageEgress.CreateSessionNetworkAsync(id, cancellationToken);
         }
         catch
         {
@@ -80,14 +90,14 @@ public sealed class InteractiveTerminalSessions : IHostedService, IAsyncDisposab
             TryDeleteWorkspace(workspaceDirectory);
             throw;
         }
-        foreach (var argument in BuildArguments(containerName, workspaceDirectory)) startInfo.ArgumentList.Add(argument);
+        foreach (var argument in BuildArguments(containerName, workspaceDirectory, dependencyDirectory, runnerNetwork)) startInfo.ArgumentList.Add(argument);
 
         var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
         _activeContainers.Add(containerName);
         try
         {
             if (!process.Start()) throw new InvalidOperationException("Could not start the isolated Bash terminal.");
-            var session = new Session(id, containerName, process, workspaceDirectory, initialWorkspace);
+            var session = new Session(id, roomId, containerName, process, workspaceDirectory, initialWorkspace, runnerNetwork);
             if (!_sessions.TryAdd(id, session))
             {
                 _activeContainers.Remove(containerName);
@@ -103,7 +113,9 @@ public sealed class InteractiveTerminalSessions : IHostedService, IAsyncDisposab
         {
             _activeContainers.Remove(containerName);
             KillProcess(process);
+            await KillContainerAsync(containerName);
             process.Dispose();
+            await _packageEgress.RemoveSessionNetworkAsync(runnerNetwork);
             _sessionSlots.Release();
             throw;
         }
@@ -154,20 +166,53 @@ public sealed class InteractiveTerminalSessions : IHostedService, IAsyncDisposab
             ? session
             : throw new KeyNotFoundException("Terminal session not found.");
 
-    private string[] BuildArguments(string containerName, string workspaceDirectory) =>
-    [
+    private string[] BuildArguments(string containerName, string workspaceDirectory, string dependencyDirectory, RunnerNetwork? network)
+    {
+        var arguments = new List<string>
+        {
         "run", "--rm", "--interactive", "--name", containerName,
         "--label", "syncode.terminal=true",
-        "--pull=never", ContainerRuntimePolicy.DockerArgument(_containerRuntime), "--network=none", "--memory=256m", "--memory-swap=256m",
-        "--cpus=0.5", "--pids-limit=32", "--read-only",
-        "--ulimit", "nofile=256:256", "--ulimit", "fsize=16777216:16777216",
-        "--tmpfs", "/tmp:rw,noexec,nosuid,nodev,size=16m,uid=10001,gid=10001",
+        "--pull=never", ContainerRuntimePolicy.DockerArgument(_containerRuntime), "--network=none", "--memory=512m", "--memory-swap=512m",
+        "--cpus=0.5", "--pids-limit=64", "--read-only",
+        "--ulimit", "nofile=256:256", "--ulimit", "fsize=268435456:268435456",
+        "--tmpfs", "/tmp:rw,noexec,nosuid,nodev,size=64m,uid=10001,gid=10001",
         "--mount", $"type=bind,source={workspaceDirectory},target=/workspace",
+        "--mount", $"type=bind,source={dependencyDirectory},target=/deps",
+        "--mount", $"type=bind,source={Path.Combine(dependencyDirectory, "npm-project", "node_modules")},target=/workspace/node_modules",
         "--cap-drop=ALL", "--security-opt=no-new-privileges", "--user=10001:10001",
         "--workdir=/workspace", "--env", "TERM=xterm-256color", "--env", "PS1=syncode:/workspace$ ",
+        "--env", "HOME=/deps/home", "--env", "XDG_CACHE_HOME=/deps/cache", "--env", "DOTNET_CLI_HOME=/deps/dotnet",
+        "--env", "DOTNET_PROCESSOR_COUNT=1",
+        "--env", "NPM_CONFIG_CACHE=/deps/npm-cache", "--env", "NPM_CONFIG_PREFIX=/deps/npm-global",
+        "--env", "YARN_CACHE_FOLDER=/deps/yarn-cache",
+        "--env", "NODE_PATH=/deps/npm-global/lib/node_modules",
+        "--env", "PIP_CACHE_DIR=/deps/pip-cache", "--env", "PIP_TARGET=/deps/python",
+        "--env", "PYTHONPATH=/deps/python", "--env", "NUGET_PACKAGES=/deps/nuget",
+        "--env", "CARGO_HOME=/deps/cargo-home", "--env", "RUSTUP_HOME=/usr/local/rustup",
+        "--env", "GRADLE_USER_HOME=/deps/gradle", "--env", "MAVEN_OPTS=-Dmaven.repo.local=/deps/maven",
+        "--env", "CONAN_HOME=/deps/conan",
         "--entrypoint", "/usr/bin/script", "syncode-runner-bash",
         "-qfec", "exec /bin/bash --noprofile --norc -i", "/dev/null"
-    ];
+        };
+        if (network is null)
+            return arguments.ToArray();
+
+        var networkOption = arguments.IndexOf("--network=none");
+        arguments[networkOption] = "--network";
+        arguments.Insert(networkOption + 1, network.Name);
+
+        arguments.InsertRange(networkOption + 2,
+        [
+            "--dns", network.ProxyAddress,
+            "--env", $"HTTP_PROXY=http://{network.ProxyAddress}:3128",
+            "--env", $"HTTPS_PROXY=http://{network.ProxyAddress}:3128",
+            "--env", $"http_proxy=http://{network.ProxyAddress}:3128",
+            "--env", $"https_proxy=http://{network.ProxyAddress}:3128",
+            "--env", "NO_PROXY=localhost,127.0.0.1,::1",
+            "--env", "no_proxy=localhost,127.0.0.1,::1"
+        ]);
+        return arguments.ToArray();
+    }
 
     private static async Task<WorkspaceMaterialization> InitializeWorkspaceAsync(
         string workspaceDirectory,
@@ -453,6 +498,7 @@ public sealed class InteractiveTerminalSessions : IHostedService, IAsyncDisposab
                         continue;
                     }
                     await EnforceWorkspaceDiskLimitAsync(session, cancellationToken);
+                    await EnforceDependencyDiskLimitAsync(session, cancellationToken);
                 }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
@@ -501,9 +547,23 @@ public sealed class InteractiveTerminalSessions : IHostedService, IAsyncDisposab
         await session.OutputLock.WaitAsync(cancellationToken);
         try
         {
-            session.Output.Append("\r\nTerminal workspace exceeded its 64 MB disk limit. This terminal has been stopped.\r\n");
+            session.Output.Append("\r\nTerminal workspace exceeded its 128 MB disk limit. This terminal has been stopped.\r\n");
             session.WorkspaceLimitMessageWritten = true;
         }
+        finally { session.OutputLock.Release(); }
+        KillProcess(session.Process);
+        await KillContainerAsync(session.ContainerName);
+    }
+
+    private async Task EnforceDependencyDiskLimitAsync(Session session, CancellationToken cancellationToken)
+    {
+        bool exceeded;
+        try { exceeded = _dependencies.ExceedsRoomLimit(session.RoomId); }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        { exceeded = true; }
+        if (!exceeded) return;
+        await session.OutputLock.WaitAsync(cancellationToken);
+        try { session.Output.Append("\r\nRoom dependency storage exceeded its 256 MB limit. This terminal has been stopped.\r\n"); }
         finally { session.OutputLock.Release(); }
         KillProcess(session.Process);
         await KillContainerAsync(session.ContainerName);
@@ -532,6 +592,7 @@ public sealed class InteractiveTerminalSessions : IHostedService, IAsyncDisposab
         {
             _activeContainers.Remove(session.ContainerName);
             TryDeleteWorkspace(session.WorkspaceDirectory);
+            await _packageEgress.RemoveSessionNetworkAsync(session.Network);
             ReleaseSlot(session);
         }
     }
@@ -594,15 +655,19 @@ public sealed class InteractiveTerminalSessions : IHostedService, IAsyncDisposab
 
     private sealed class Session(
         string id,
+        string roomId,
         string containerName,
         Process process,
         string workspaceDirectory,
-        WorkspaceMaterialization workspace)
+        WorkspaceMaterialization workspace,
+        RunnerNetwork? network)
     {
         internal string Id { get; } = id;
+        internal string RoomId { get; } = roomId;
         internal string ContainerName { get; } = containerName;
         internal Process Process { get; } = process;
         internal string WorkspaceDirectory { get; } = workspaceDirectory;
+        internal RunnerNetwork? Network { get; } = network;
         internal Dictionary<string, TerminalWorkspaceEntry> WorkspaceEntries { get; } = workspace.Entries;
         internal Dictionary<string, WorkspaceFileState> WorkspaceFileStates { get; } = workspace.FileStates;
         internal StringBuilder Output { get; } = new();
