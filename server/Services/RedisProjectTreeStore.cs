@@ -1,8 +1,9 @@
+using server.Application.Projects;
 using StackExchange.Redis;
 
 namespace server.Services;
 
-public sealed class RedisProjectTreeStore
+public sealed class RedisProjectTreeStore : IProjectTreeOperationStore
 {
     private readonly IDatabase _db;
 

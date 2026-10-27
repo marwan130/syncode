@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.SignalR;
+using server.Application.Rooms;
 
 namespace server.Services;
 
@@ -55,13 +56,15 @@ public class RoomLifecycleService : BackgroundService
                 foreach (var sessionId in sessions.SessionIds)
                 {
                     try { await _executionService.CloseTerminalAsync(sessionId, CancellationToken.None); }
-                    catch (Exception exception) when (exception is HubException or HubOperationException) { }
+                    catch (Exception exception) when (exception is HubException or RoomOperationException) { }
                 }
                 foreach (var jobId in sessions.ExecutionIds)
                 {
                     try { await _executionService.CancelExecutionAsync(jobId, CancellationToken.None); }
-                    catch (Exception exception) when (exception is HubException or HubOperationException) { }
+                    catch (Exception exception) when (exception is HubException or RoomOperationException) { }
                 }
+                try { await _executionService.DeleteRoomDependenciesAsync(roomId, CancellationToken.None); }
+                catch (Exception exception) when (exception is HubException or RoomOperationException) { }
                 await _rooms.DeleteRoomAsync(roomId);
             }
         }

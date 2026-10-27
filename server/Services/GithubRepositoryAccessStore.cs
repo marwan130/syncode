@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using server.Application.Rooms;
 using server.Models;
 using StackExchange.Redis;
 
@@ -17,7 +18,7 @@ public sealed class GithubRepositoryAccessStore(
         var participant = await participants.GetParticipantAsync(roomId, connectionId);
         if (participant?.IsAdmin != true || participant.IsLocked ||
             await participants.GetConnectionRoomAsync(connectionId) != roomId)
-            throw new HubOperationException("Only room admins can import a repository.");
+            throw new RoomOperationException("Only room admins can import a repository.");
 
         var token = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))
             .TrimEnd('=')

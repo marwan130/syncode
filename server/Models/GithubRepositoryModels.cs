@@ -1,3 +1,5 @@
+using server.Application.Projects;
+
 namespace server.Models;
 
 public sealed record GithubRepositoryImportRequest(
@@ -36,6 +38,13 @@ public sealed record GithubPushResponse(
 
 public sealed class GithubRepositoryException : Exception
 {
+    public GithubRepositoryException() : this("GitHub repository operation failed.", 500) { }
+
+    public GithubRepositoryException(string message) : this(message, 500) { }
+
+    public GithubRepositoryException(string message, Exception innerException)
+        : base(message, innerException) => StatusCode = 500;
+
     public GithubRepositoryException(string message, int statusCode)
         : base(message) => StatusCode = statusCode;
 

@@ -1,6 +1,5 @@
-using System.Security.Cryptography;
 using Microsoft.AspNetCore.Mvc;
-using server.Services;
+using server.Application.Rooms;
 
 namespace server.Controllers;
 
@@ -8,33 +7,13 @@ namespace server.Controllers;
 [Route("api/rooms")]
 public class RoomsController : ControllerBase
 {
-    private readonly RedisRoomMetadataStore _rooms;
+    private readonly CreateRoomService _createRoom;
 
-    public RoomsController(RedisRoomMetadataStore rooms) => _rooms = rooms;
+    public RoomsController(CreateRoomService createRoom) => _createRoom = createRoom;
 
     [HttpPost]
     public async Task<IActionResult> Create()
     {
-        var roomId = GenerateRoomId();
-        var accessKey = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))
-            .TrimEnd('=')
-            .Replace('+', '-')
-            .Replace('/', '_');
-        var accessKeyHash = Convert.ToHexString(
-            SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(accessKey)));
-        var creatorToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))
-            .TrimEnd('=')
-            .Replace('+', '-')
-            .Replace('/', '_');
-        var creatorTokenHash = Convert.ToHexString(
-            SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(creatorToken)));
-        await _rooms.CreateRoomAsync(roomId, accessKeyHash, creatorTokenHash);
-        return Ok(new { roomId, accessKey, creatorToken });
-    }
-
-    private static string GenerateRoomId()
-    {
-        const string chars = "abcdefghijklmnopqrstuvwxyz0123456789";
-        return RandomNumberGenerator.GetString(chars, 8);
+        return Ok(await _createRoom.CreateAsync());
     }
 }

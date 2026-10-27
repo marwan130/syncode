@@ -1,10 +1,10 @@
 using System.Text.Json;
-using server.Models;
+using server.Application.Projects;
 using StackExchange.Redis;
 
 namespace server.Services;
 
-public sealed class GithubRepositoryStore(IConnectionMultiplexer redis)
+public sealed class GithubRepositoryStore(IConnectionMultiplexer redis) : IProjectImportBaselineStore
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly IDatabase _database = redis.GetDatabase();

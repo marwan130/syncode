@@ -8,7 +8,8 @@ namespace server.Controllers;
 [Route("api/github/repository")]
 [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
 public sealed class GithubRepositoryController(
-    GithubRepositoryService repositories,
+    GithubRepositoryImportService importService,
+    GithubRepositoryPushService pushService,
     GithubRepositoryAccessStore repositoryAccess,
     IConfiguration configuration,
     IWebHostEnvironment environment) : ControllerBase
@@ -22,14 +23,14 @@ public sealed class GithubRepositoryController(
         CancellationToken cancellationToken)
     {
         if (!GithubRequestSecurity.HasTrustedOrigin(Request, configuration, environment))
-            return Forbid();
+            return StatusCode(StatusCodes.Status403Forbidden);
         if (request is null) return BadRequest(new { error = "invalid_request" });
         var actorId = await repositoryAccess.ValidateAdminGrantAsync(
             Request.Headers["X-Syncode-Admin-Grant"].FirstOrDefault(), request.RoomId);
-        if (actorId is null) return Forbid();
+        if (actorId is null) return StatusCode(StatusCodes.Status403Forbidden);
         try
         {
-            var result = await repositories.ImportAsync(
+            var result = await importService.ImportAsync(
                 request,
                 GetSessionId(),
                 actorId,
@@ -55,11 +56,11 @@ public sealed class GithubRepositoryController(
         CancellationToken cancellationToken)
     {
         if (!GithubRequestSecurity.HasTrustedOrigin(Request, configuration, environment))
-            return Forbid();
+            return StatusCode(StatusCodes.Status403Forbidden);
         if (request is null) return BadRequest(new { error = "invalid_request" });
         try
         {
-            var result = await repositories.PushAsync(
+            var result = await pushService.PushAsync(
                 request,
                 GetSessionId(),
                 cancellationToken);

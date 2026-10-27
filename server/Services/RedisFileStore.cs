@@ -1,10 +1,10 @@
 using System.Text.Json;
-using server.Models;
+using server.Application.Projects;
 using StackExchange.Redis;
 
 namespace server.Services;
 
-public class RedisFileStore
+public class RedisFileStore : IProjectEntryStore, IProjectSnapshotWriter, IProjectSnapshotReader
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -22,6 +22,8 @@ public class RedisFileStore
         var val = (string?)await _db.StringGetAsync(RedisRoomKeys.Snapshot(roomId));
         return val;
     }
+
+    public Task<string?> GetLegacyRoomSnapshotAsync(string roomId) => GetSnapshotAsync(roomId);
 
     public async Task<IReadOnlyList<ProjectEntry>> GetEntriesAsync(string roomId)
     {

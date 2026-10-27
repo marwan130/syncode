@@ -1,8 +1,5 @@
 using server.Hubs;
-using server.Models;
-using server.Services;
-using Microsoft.AspNetCore.SignalR;
-using StackExchange.Redis;
+using server.Infrastructure;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -33,72 +30,7 @@ if (builder.Environment.IsDevelopment())
     }
 }
 
-// Redis stores room state and provides the SignalR scale-out backplane.
-var redisConnStr = builder.Configuration["Redis"];
-if (string.IsNullOrWhiteSpace(redisConnStr))
-{
-    if (!builder.Environment.IsDevelopment())
-        throw new InvalidOperationException("Configure Redis before starting Syncode outside Development.");
-    redisConnStr = "localhost:6379";
-}
-builder.Services.AddSingleton<IConnectionMultiplexer>(_ =>
-    ConnectionMultiplexer.Connect(redisConnStr));
-
-builder.Services.AddSignalR(options =>
-    {
-        options.MaximumReceiveMessageSize = 16 * 1024 * 1024;
-        options.AddFilter<HubOperationExceptionFilter>();
-    })
-    .AddStackExchangeRedis(redisConnStr);
-
-builder.Services.AddOpenApi();
-builder.Services.AddControllers();
-builder.Services.AddHttpClient("GithubOAuth", client => client.Timeout = TimeSpan.FromSeconds(15));
-
-builder.Services.AddSingleton<RedisFileStore>();
-builder.Services.AddSingleton<RedisParticipantStore>();
-builder.Services.AddSingleton<RedisRoomJoinApprovalStore>();
-builder.Services.AddSingleton<RedisProjectTreeStore>();
-builder.Services.AddSingleton<RedisRoomMetadataStore>();
-builder.Services.AddSingleton<RedisRoomChatStore>();
-builder.Services.AddSingleton<RedisRoomRateLimitStore>();
-builder.Services.AddSingleton<ProjectTreeStateService>();
-builder.Services.AddSingleton<RoomWorkspaceAdapter>();
-builder.Services.AddSingleton<ProjectTreeOperationService>();
-builder.Services.AddSingleton<ProjectImportService>();
-builder.Services.AddSingleton<GithubRepositoryStore>();
-builder.Services.AddSingleton<GithubRepositoryAccessStore>();
-builder.Services.AddSingleton<GithubApiClient>();
-builder.Services.AddSingleton<GithubRepositoryService>();
-builder.Services.AddSingleton<RoomJoinService>();
-builder.Services.AddSingleton<RoomAuthorizationService>();
-builder.Services.AddSingleton<RoomFileService>();
-builder.Services.AddSingleton<TerminalSessionService>();
-builder.Services.AddSingleton<RoomInteractionService>();
-builder.Services.AddSingleton<CollabHubServices>();
-builder.Services.AddSingleton<IRoomEventPublisher, SignalRRoomEventPublisher>();
-builder.Services.AddSingleton<GithubTokenVault>();
-builder.Services.AddSingleton<GithubOAuthService>();
-builder.Services.AddOptions<RoomCapacityOptions>()
-    .Bind(builder.Configuration.GetSection(RoomCapacityOptions.SectionName))
-    .Validate(options => options.MaxParticipantsPerRoom > 0 &&
-        options.MaxConnectionsPerInstance > 0 && options.MaxActiveRooms > 0,
-        "Room capacity limits must all be positive numbers.");
-builder.Services.AddSingleton<ServerInstanceIdentity>();
-builder.Services.AddHostedService<RoomConnectionLeaseService>();
-builder.Services.AddSingleton<TerminalSessionRegistry>();
-builder.Services.AddHostedService<RoomLifecycleService>();
-builder.Services.AddHttpClient<ExecutionServiceClient>(client =>
-    client.Timeout = TimeSpan.FromSeconds(15));
-builder.Services.AddHostedService<ExecutionOutputRelayService>();
-
-var allowedOrigins = AllowedOriginsConfiguration.Resolve(builder.Configuration, builder.Environment);
-ProductionConfigurationValidator.ValidateGithub(
-    builder.Configuration,
-    builder.Environment,
-    allowedOrigins);
-builder.Services.AddCors(options => options.AddPolicy("client", policy =>
-    policy.WithOrigins(allowedOrigins).AllowAnyHeader().AllowAnyMethod().AllowCredentials()));
+builder.Services.AddSyncodeServerServices(builder.Configuration, builder.Environment);
 
 var app = builder.Build();
 
@@ -108,10 +40,16 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseExceptionHandler(_ => { });
-app.UseHttpsRedirection();
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHttpsRedirection();
+}
 app.UseCors("client");
+app.UseWebSockets();
 
 app.MapControllers();
+app.MapGet("/api/language-servers", (HttpContext context, server.Services.LanguageServerSessionService languageServers) =>
+    languageServers.ProxyAsync(context));
 app.MapHub<CollabHub>("/collabhub");
 
 app.Run();

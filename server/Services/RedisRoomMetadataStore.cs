@@ -1,9 +1,16 @@
 using System.Security.Cryptography;
 using StackExchange.Redis;
+using server.Application.Projects;
+using server.Application.Rooms;
 
 namespace server.Services;
 
-public sealed class RedisRoomMetadataStore
+public sealed class RedisRoomMetadataStore :
+    IRoomCreationStore,
+    IRoomActivityStore,
+    IRoomInvitationStore,
+    IProjectRootNameStore,
+    IProjectImportQuotaStore
 {
     private const string ReserveProjectImportBytesScript = """
         local current = tonumber(redis.call('GET', KEYS[1]) or '0')
@@ -17,12 +24,12 @@ public sealed class RedisRoomMetadataStore
 
     private readonly IDatabase _db;
     private readonly RedisProjectTreeStore treeStore;
-    private readonly ProjectTreeStateService projectTreeState;
+    private readonly IProjectTreeStateReader projectTreeState;
 
     public RedisRoomMetadataStore(
         IConnectionMultiplexer redis,
         RedisProjectTreeStore projectTreeStore,
-        ProjectTreeStateService projectTreeState)
+        IProjectTreeStateReader projectTreeState)
     {
         _db = redis.GetDatabase();
         treeStore = projectTreeStore;
@@ -114,6 +121,15 @@ public sealed class RedisRoomMetadataStore
         var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds().ToString();
         await _db.HashSetAsync(RedisRoomKeys.Meta(roomId), "lastActivity", now);
     }
+
+    public async Task<string?> GetProjectRootNameAsync(string roomId)
+    {
+        var name = (string?)await _db.HashGetAsync(RedisRoomKeys.Meta(roomId), "projectRootName");
+        return string.IsNullOrWhiteSpace(name) ? null : name;
+    }
+
+    public Task SetProjectRootNameAsync(string roomId, string name) =>
+        _db.HashSetAsync(RedisRoomKeys.Meta(roomId), "projectRootName", name);
 
     public async Task DeleteRoomAsync(string roomId)
     {

@@ -1,8 +1,13 @@
 using StackExchange.Redis;
+using server.Application.Projects;
+using server.Application.Rooms;
 
 namespace server.Services;
 
-public sealed class RedisRoomRateLimitStore(IConnectionMultiplexer redis)
+public sealed class RedisRoomRateLimitStore(IConnectionMultiplexer redis) :
+    IProjectTreeRateLimiter,
+    IProjectImportRateLimiter,
+    IRoomRateLimiter
 {
     private const string ConsumeRateLimitScript = """
         local now = tonumber(ARGV[1])

@@ -1,6 +1,8 @@
+using server.Application.Execution;
+
 namespace server.Services;
 
-public sealed class TerminalSessionRegistry
+public sealed class TerminalSessionRegistry : ITerminalSessionRegistry
 {
     private const int MaxPerConnection = 3;
     private readonly object _gate = new();
@@ -49,6 +51,18 @@ public sealed class TerminalSessionRegistry
     public bool RemoveExecution(string jobId)
     {
         lock (_gate) return _executions.Remove(jobId);
+    }
+
+    public bool TryRemoveExecution(string connectionId, string roomId, string jobId)
+    {
+        lock (_gate)
+        {
+            PurgeExpiredExecutions(DateTimeOffset.UtcNow);
+            if (!_executions.TryGetValue(jobId, out var execution) ||
+                execution.ConnectionId != connectionId || execution.RoomId != roomId)
+                return false;
+            return _executions.Remove(jobId);
+        }
     }
 
     public string[] RemoveExecutions(string connectionId)

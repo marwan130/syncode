@@ -1,5 +1,5 @@
 using Microsoft.AspNetCore.SignalR;
-using server.Services;
+using server.Application.Rooms;
 
 namespace server.Hubs;
 
@@ -13,7 +13,7 @@ public sealed class HubOperationExceptionFilter : IHubFilter
         {
             return await next(invocationContext);
         }
-        catch (HubOperationException exception)
+        catch (RoomOperationException exception)
         {
             throw new HubException(exception.Message);
         }

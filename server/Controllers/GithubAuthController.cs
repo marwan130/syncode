@@ -23,7 +23,8 @@ public sealed partial class GithubAuthController(
         [FromBody] GithubOAuthExchangeRequest? request,
         CancellationToken cancellationToken)
     {
-        if (!GithubRequestSecurity.HasTrustedOrigin(Request, configuration, environment)) return Forbid();
+        if (!GithubRequestSecurity.HasTrustedOrigin(Request, configuration, environment))
+            return StatusCode(StatusCodes.Status403Forbidden);
         if (request is null ||
             string.IsNullOrWhiteSpace(request.Code) || request.Code.Length > 512 ||
             string.IsNullOrWhiteSpace(request.CodeVerifier) ||
@@ -46,7 +47,8 @@ public sealed partial class GithubAuthController(
     [HttpPost("session/refresh")]
     public async Task<IActionResult> GetSession(CancellationToken cancellationToken)
     {
-        if (!GithubRequestSecurity.HasTrustedOrigin(Request, configuration, environment)) return Forbid();
+        if (!GithubRequestSecurity.HasTrustedOrigin(Request, configuration, environment))
+            return StatusCode(StatusCodes.Status403Forbidden);
         if (!Request.Cookies.TryGetValue(SessionCookieName, out var sessionId))
             return Unauthorized(new { error = "unauthorized" });
         try
@@ -65,7 +67,8 @@ public sealed partial class GithubAuthController(
     [HttpDelete("session")]
     public async Task<IActionResult> DeleteSession(CancellationToken cancellationToken)
     {
-        if (!GithubRequestSecurity.HasTrustedOrigin(Request, configuration, environment)) return Forbid();
+        if (!GithubRequestSecurity.HasTrustedOrigin(Request, configuration, environment))
+            return StatusCode(StatusCodes.Status403Forbidden);
         var revoked = true;
         if (Request.Cookies.TryGetValue(SessionCookieName, out var sessionId))
         {
