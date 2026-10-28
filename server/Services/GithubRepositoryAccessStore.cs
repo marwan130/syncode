@@ -8,7 +8,7 @@ namespace server.Services;
 
 public sealed class GithubRepositoryAccessStore(
     IConnectionMultiplexer redis,
-    RedisParticipantStore participants)
+    IRoomParticipantReader participants)
 {
     private static readonly TimeSpan GrantLifetime = TimeSpan.FromMinutes(5);
     private readonly IDatabase _database = redis.GetDatabase();
@@ -25,7 +25,7 @@ public sealed class GithubRepositoryAccessStore(
             .Replace('+', '-')
             .Replace('/', '_');
         await _database.StringSetAsync(
-            RedisRoomKeys.GithubRepositoryAdminGrant(HashToken(token)),
+            RedisRoomKeys.GithubRepositoryAdminGrant(roomId, HashToken(token)),
             $"{roomId}\n{connectionId}",
             GrantLifetime);
         return token;
@@ -36,7 +36,7 @@ public sealed class GithubRepositoryAccessStore(
         if (token is null || token.Length != 43 || !token.All(IsBase64UrlCharacter))
             return null;
 
-        var key = RedisRoomKeys.GithubRepositoryAdminGrant(HashToken(token));
+        var key = RedisRoomKeys.GithubRepositoryAdminGrant(roomId, HashToken(token));
         var value = (string?)await _database.StringGetAsync(key);
         if (value is null) return null;
 

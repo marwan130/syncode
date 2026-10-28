@@ -29,6 +29,9 @@ internal static class GithubRepositoryRules
             request.Message.Any(char.IsControl) || request.Changes is null ||
             request.Changes.Count is < 1 or > MaxFiles)
             throw new GithubRepositoryException("The GitHub push request is invalid.", 400);
+        if (!string.IsNullOrWhiteSpace(request.BranchName) &&
+            !IsValidBranch(request.BranchName.Trim()))
+            throw new GithubRepositoryException("The GitHub branch name is invalid.", 422);
 
         var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var totalBytes = 0;
@@ -49,9 +52,14 @@ internal static class GithubRepositoryRules
 
     internal static bool IsValidBranch(string? branch) =>
         !string.IsNullOrWhiteSpace(branch) && branch.Length <= 255 &&
-        !branch.StartsWith('/') && !branch.EndsWith('/') &&
+        branch != "@" && !branch.StartsWith('/') && !branch.EndsWith('/') &&
+        !branch.StartsWith('.') && !branch.EndsWith('.') &&
+        !branch.Contains("//", StringComparison.Ordinal) &&
         !branch.Contains("..", StringComparison.Ordinal) &&
         !branch.Contains("@{", StringComparison.Ordinal) &&
+        !branch.Split('/').Any(part =>
+            part.StartsWith('.') || part.EndsWith('.') ||
+            part.EndsWith(".lock", StringComparison.OrdinalIgnoreCase)) &&
         !branch.Any(character => char.IsControl(character) || character is ' ' or '~' or '^' or ':' or '?' or '*' or '[' or '\\');
 
     internal static bool IsSha(string? value) =>

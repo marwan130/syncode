@@ -13,10 +13,11 @@ public sealed class GithubApiClient(IHttpClientFactory clients)
     public async Task<T> GetAsync<T>(
         string path,
         string? accessToken,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        long maxResponseBytes = MaxResponseBytes)
     {
         using var response = await SendAsync(
-            HttpMethod.Get, path, accessToken, null, cancellationToken);
+            HttpMethod.Get, path, accessToken, null, cancellationToken, maxResponseBytes);
         return await ReadJsonAsync<T>(response, cancellationToken);
     }
 
@@ -31,12 +32,33 @@ public sealed class GithubApiClient(IHttpClientFactory clients)
         return await ReadJsonAsync<T>(response, cancellationToken);
     }
 
+    public async Task DeleteAsync(
+        string path,
+        string accessToken,
+        CancellationToken cancellationToken)
+    {
+        using var response = await SendAsync(
+            HttpMethod.Delete, path, accessToken, null, cancellationToken);
+    }
+
+    public async Task<T> PatchAsync<T>(
+        string path,
+        string accessToken,
+        object body,
+        CancellationToken cancellationToken)
+    {
+        using var response = await SendAsync(
+            HttpMethod.Patch, path, accessToken, body, cancellationToken);
+        return await ReadJsonAsync<T>(response, cancellationToken);
+    }
+
     private async Task<HttpResponseMessage> SendAsync(
         HttpMethod method,
         string path,
         string? accessToken,
         object? body,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        long maxResponseBytes = MaxResponseBytes)
     {
         if (path.StartsWith('/') || path.Contains("..", StringComparison.Ordinal))
             throw new InvalidOperationException("Invalid GitHub API path.");
@@ -51,7 +73,7 @@ public sealed class GithubApiClient(IHttpClientFactory clients)
 
         var response = await clients.CreateClient("GithubOAuth")
             .SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-        if (response.Content.Headers.ContentLength is > MaxResponseBytes)
+        if (response.Content.Headers.ContentLength is { } contentLength && contentLength > maxResponseBytes)
         {
             response.Dispose();
             throw new GithubRepositoryException("The GitHub response is too large to import.", 413);

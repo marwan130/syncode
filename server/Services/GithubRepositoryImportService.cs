@@ -9,8 +9,8 @@ namespace server.Services;
 public sealed class GithubRepositoryImportService(
     GithubApiClient github,
     GithubOAuthService oauth,
-    RedisRoomMetadataStore rooms,
-    RedisRoomRateLimitStore rateLimits)
+    IRoomInvitationStore rooms,
+    IRoomRateLimiter rateLimits)
 {
     private static readonly UTF8Encoding StrictUtf8 = new(false, true);
 

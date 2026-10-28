@@ -1,4 +1,5 @@
 using server.Application.Projects;
+using server.Application.Rooms;
 using server.Models;
 
 namespace server.Services;
@@ -6,8 +7,8 @@ namespace server.Services;
 public sealed class GithubRepositoryPushService(
     GithubApiClient github,
     GithubOAuthService oauth,
-    RedisRoomMetadataStore rooms,
-    RedisRoomRateLimitStore rateLimits,
+    IRoomInvitationStore rooms,
+    IRoomRateLimiter rateLimits,
     GithubRepositoryStore repositories,
     IProjectTreeStateReader treeState,
     IRoomEventPublisher events)
@@ -48,9 +49,17 @@ public sealed class GithubRepositoryPushService(
         CancellationToken cancellationToken)
     {
         var context = await LoadPushContextAsync(request, sessionId, cancellationToken);
-        var treePlan = BuildTreePlan(request.Changes, context.Baseline);
+        var treePlan = BuildTreePlan(
+            request.Changes,
+            context.Baseline,
+            context.TargetFileBlobShas);
         var tree = await CreateTreeAsync(context, request.Changes, treePlan, cancellationToken);
-        var published = await CreateCommitAndBranchAsync(context, request.Message, tree.Sha, cancellationToken);
+        var published = await CreateCommitAndBranchAsync(
+            context,
+            request.Message,
+            tree.Sha,
+            request.BranchName,
+            cancellationToken);
         var updatedBaseline = context.Baseline with
         {
             Branch = published.Branch,
@@ -90,14 +99,42 @@ public sealed class GithubRepositoryPushService(
 
         var session = await oauth.GetSessionAsync(sessionId, cancellationToken);
         var repoPath = $"repos/{baseline.Owner}/{baseline.Name}";
-        var current = await github.GetAsync<GithubCommitResponse>(
-            $"{repoPath}/commits/{Uri.EscapeDataString(baseline.Branch)}",
-            accessToken,
-            cancellationToken);
-        if (!string.Equals(current.Sha, baseline.BaseCommitSha, StringComparison.OrdinalIgnoreCase))
+        var targetBranch = string.IsNullOrWhiteSpace(request.BranchName)
+            ? baseline.Branch
+            : request.BranchName.Trim();
+        GithubCommitResponse current;
+        try
+        {
+            current = await GetBranchCommitAsync(
+                repoPath, targetBranch, accessToken, cancellationToken);
+        }
+        catch (GithubRepositoryException exception) when (
+            exception.StatusCode == StatusCodes.Status404NotFound && targetBranch != baseline.Branch)
+        {
+            targetBranch = baseline.Branch;
+            current = await GetBranchCommitAsync(
+                repoPath, targetBranch, accessToken, cancellationToken);
+        }
+        if (!GithubRepositoryRules.IsSha(current.Sha) ||
+            !GithubRepositoryRules.IsSha(current.Commit.Tree.Sha))
+            throw new GithubRepositoryException("GitHub returned an invalid branch revision.", 502);
+        if (targetBranch == baseline.Branch &&
+            !string.Equals(current.Sha, baseline.BaseCommitSha, StringComparison.OrdinalIgnoreCase))
             throw new GithubRepositoryException(
                 "The GitHub branch moved since this room opened it. Refresh the repository before pushing.",
                 409);
+
+        var targetTree = await github.GetAsync<GithubTreeResponse>(
+            $"{repoPath}/git/trees/{current.Commit.Tree.Sha}?recursive=1",
+            accessToken,
+            cancellationToken);
+        if (targetTree.Truncated || targetTree.Entries.Count > 10000)
+            throw new GithubRepositoryException("This GitHub branch is too large to update safely.", 413);
+        var trackedPaths = baseline.FileBlobShas.Keys.ToHashSet(StringComparer.Ordinal);
+        var targetFileBlobShas = targetTree.Entries
+            .Where(entry => entry.Type == "blob" && trackedPaths.Contains(entry.Path) &&
+                GithubRepositoryRules.IsSha(entry.Sha))
+            .ToDictionary(entry => entry.Path, entry => entry.Sha, StringComparer.Ordinal);
 
         var entries = await treeState.GetEntriesAsync(request.RoomId);
         var knownPaths = entries.Values
@@ -112,8 +149,21 @@ public sealed class GithubRepositoryPushService(
             accessToken,
             session.Account.Id,
             session.Account.Login,
-            repoPath);
+            repoPath,
+            current.Sha,
+            current.Commit.Tree.Sha,
+            targetFileBlobShas);
     }
+
+    private Task<GithubCommitResponse> GetBranchCommitAsync(
+        string repositoryPath,
+        string branch,
+        string accessToken,
+        CancellationToken cancellationToken) =>
+        github.GetAsync<GithubCommitResponse>(
+            $"{repositoryPath}/commits/{Uri.EscapeDataString(branch)}",
+            accessToken,
+            cancellationToken);
 
     private static void ValidateChanges(
         IReadOnlyList<GithubFileChange> changes,
@@ -137,10 +187,11 @@ public sealed class GithubRepositoryPushService(
 
     private static GithubTreePlan BuildTreePlan(
         IReadOnlyList<GithubFileChange> changes,
-        GithubRepositoryBaseline baseline)
+        GithubRepositoryBaseline baseline,
+        IReadOnlyDictionary<string, string> targetFileBlobShas)
     {
         var treeItems = new List<object>();
-        var updatedShas = new Dictionary<string, string>(baseline.FileBlobShas, StringComparer.Ordinal);
+        var updatedShas = new Dictionary<string, string>(targetFileBlobShas, StringComparer.Ordinal);
         var updatedLineEndings = new Dictionary<string, string>(baseline.FileLineEndings, StringComparer.Ordinal);
         foreach (var change in changes)
         {
@@ -168,7 +219,7 @@ public sealed class GithubRepositoryPushService(
         var tree = await github.PostAsync<GithubCreatedTreeResponse>(
             $"{context.RepositoryPath}/git/trees",
             context.AccessToken,
-            new { base_tree = context.Baseline.BaseTreeSha, tree = plan.Items },
+            new { base_tree = context.TargetTreeSha, tree = plan.Items },
             cancellationToken);
         if (!GithubRepositoryRules.IsSha(tree.Sha))
             throw new GithubRepositoryException("GitHub returned an invalid file revision.", 502);
@@ -188,6 +239,7 @@ public sealed class GithubRepositoryPushService(
         GithubPushContext context,
         string message,
         string treeSha,
+        string? requestedBranchName,
         CancellationToken cancellationToken)
     {
         var commit = await github.PostAsync<GithubCommitCreatedResponse>(
@@ -197,17 +249,48 @@ public sealed class GithubRepositoryPushService(
             {
                 message = message.Trim(),
                 tree = treeSha,
-                parents = new[] { context.Baseline.BaseCommitSha },
+                parents = new[] { context.TargetCommitSha },
                 author = new { name = context.AccountLogin, email = $"{context.AccountId}+{context.AccountLogin}@users.noreply.github.com" },
                 committer = new { name = context.AccountLogin, email = $"{context.AccountId}+{context.AccountLogin}@users.noreply.github.com" }
             },
             cancellationToken);
-        var branch = $"syncode/{DateTimeOffset.UtcNow:yyyyMMdd}-{Guid.NewGuid():N}"[..27];
-        await github.PostAsync<GithubRefResponse>(
-            $"{context.RepositoryPath}/git/refs",
-            context.AccessToken,
-            new { @ref = $"refs/heads/{branch}", sha = commit.Sha },
-            cancellationToken);
+        var branch = string.IsNullOrWhiteSpace(requestedBranchName)
+            ? $"syncode/{DateTimeOffset.UtcNow:yyyyMMdd}-{Guid.NewGuid():N}"[..27]
+            : requestedBranchName.Trim();
+        if (string.IsNullOrWhiteSpace(requestedBranchName))
+        {
+            await github.PostAsync<GithubRefResponse>(
+                $"{context.RepositoryPath}/git/refs",
+                context.AccessToken,
+                new { @ref = $"refs/heads/{branch}", sha = commit.Sha },
+                cancellationToken);
+        }
+        else
+        {
+            var refPath = $"{context.RepositoryPath}/git/refs/heads/{Uri.EscapeDataString(branch)}";
+            try
+            {
+                var current = await github.GetAsync<GithubRefResponse>(
+                    refPath, context.AccessToken, cancellationToken);
+                if (!string.Equals(current.Object.Sha, context.TargetCommitSha, StringComparison.OrdinalIgnoreCase))
+                    throw new GithubRepositoryException(
+                        "The selected branch has moved. Refresh it before pushing.", 409);
+                await github.PatchAsync<GithubRefResponse>(
+                    refPath,
+                    context.AccessToken,
+                    new { sha = commit.Sha, force = false },
+                    cancellationToken);
+            }
+            catch (GithubRepositoryException exception) when (
+                exception.StatusCode == StatusCodes.Status404NotFound)
+            {
+                await github.PostAsync<GithubRefResponse>(
+                    $"{context.RepositoryPath}/git/refs",
+                    context.AccessToken,
+                    new { @ref = $"refs/heads/{branch}", sha = commit.Sha },
+                    cancellationToken);
+            }
+        }
         return new PublishedGithubCommit(branch, commit.Sha);
     }
 
@@ -219,7 +302,10 @@ public sealed class GithubRepositoryPushService(
         string AccessToken,
         long AccountId,
         string AccountLogin,
-        string RepositoryPath);
+        string RepositoryPath,
+        string TargetCommitSha,
+        string TargetTreeSha,
+        Dictionary<string, string> TargetFileBlobShas);
 
     private sealed record GithubTreePlan(
         List<object> Items,
