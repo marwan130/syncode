@@ -29,9 +29,15 @@ internal static class RedisParticipantScripts
                 participant.IsAdmin = true
                 participant.IsLocked = false
                 redis.call('HSET', KEYS[2], 'hasHadAdmin', '1')
+            elseif ARGV[9] == '1' then
+                participant.IsAdmin = ARGV[10] == '1'
+                participant.IsLocked = ARGV[11] == '1' and not participant.IsAdmin
+                if participant.IsAdmin then
+                    redis.call('HSET', KEYS[2], 'hasHadAdmin', '1')
+                end
             elseif hasAdmin then
                 redis.call('HSET', KEYS[2], 'hasHadAdmin', '1')
-            elseif redis.call('HGET', KEYS[2], 'hasHadAdmin') == '1' then
+            elseif redis.call('HGET', KEYS[2], 'hasHadAdmin') == '1' and ARGV[12] ~= '1' then
                 participant.IsAdmin = true
             end
         end

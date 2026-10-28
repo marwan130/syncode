@@ -33,6 +33,7 @@ if (builder.Environment.IsDevelopment())
 builder.Services.AddSyncodeServerServices(builder.Configuration, builder.Environment);
 
 var app = builder.Build();
+app.UseTrustedProxyForwarding();
 
 if (app.Environment.IsDevelopment())
 {
@@ -48,6 +49,7 @@ app.UseCors("client");
 app.UseWebSockets();
 
 app.MapControllers();
+app.MapGet("/health", () => Results.Ok(new { status = "healthy" }));
 app.MapGet("/api/language-servers", (HttpContext context, server.Services.LanguageServerSessionService languageServers) =>
     languageServers.ProxyAsync(context));
 app.MapHub<CollabHub>("/collabhub");

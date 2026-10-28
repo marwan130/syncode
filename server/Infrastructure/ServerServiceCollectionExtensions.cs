@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Options;
 using server.Application.Execution;
+using server.Application.Github;
 using server.Application.Projects;
 using server.Application.Rooms;
 using server.Hubs;
@@ -17,6 +18,7 @@ public static class ServerServiceCollectionExtensions
         IConfiguration configuration,
         IWebHostEnvironment environment)
     {
+        TrustedProxyConfiguration.Configure(services, configuration);
         var redisConnection = configuration["Redis"];
         if (string.IsNullOrWhiteSpace(redisConnection))
         {
@@ -55,30 +57,43 @@ public static class ServerServiceCollectionExtensions
         return services;
     }
 
+    public static IApplicationBuilder UseTrustedProxyForwarding(this IApplicationBuilder app) =>
+        app.UseForwardedHeaders();
+
     private static void AddRoomServices(IServiceCollection services)
     {
         services.AddSingleton<RedisFileStore>();
-        services.AddSingleton<RedisParticipantStore>();
         services.AddSingleton<RedisRoomJoinApprovalStore>();
+        services.AddSingleton<IRoomParticipantStore, RedisParticipantStore>();
+        services.AddSingleton<IRoomJoinApprovalStore>(provider =>
+            provider.GetRequiredService<RedisRoomJoinApprovalStore>());
         services.AddSingleton<RedisProjectTreeStore>();
         services.AddSingleton<RedisRoomMetadataStore>();
         services.AddSingleton<RedisRoomChatStore>();
         services.AddSingleton<RedisRoomRateLimitStore>();
+        services.AddSingleton<IGithubAuthRateLimiter>(provider =>
+            provider.GetRequiredService<RedisRoomRateLimitStore>());
         services.AddSingleton<ProjectImportService>();
         services.AddSingleton<RoomInteractionService>();
         services.AddSingleton<IRoomParticipantCommands>(provider =>
-            provider.GetRequiredService<RedisParticipantStore>());
+            provider.GetRequiredService<IRoomParticipantStore>());
         services.AddSingleton<IRoomParticipantAdmissionStore>(provider =>
-            provider.GetRequiredService<RedisParticipantStore>());
+            provider.GetRequiredService<IRoomParticipantStore>());
         services.AddSingleton<IRoomChatStore>(provider =>
             provider.GetRequiredService<RedisRoomChatStore>());
         services.AddSingleton<IRoomChatHistoryReader>(provider =>
             provider.GetRequiredService<RedisRoomChatStore>());
         services.AddSingleton<IRoomInvitationStore>(provider =>
             provider.GetRequiredService<RedisRoomMetadataStore>());
+        services.AddSingleton<IRoomLifecycleStore>(provider =>
+            provider.GetRequiredService<RedisRoomMetadataStore>());
         services.AddSingleton<IRoomRateLimiter>(provider =>
             provider.GetRequiredService<RedisRoomRateLimitStore>());
+        services.AddSingleton<IRoomCreationRateLimiter>(provider =>
+            provider.GetRequiredService<RedisRoomRateLimitStore>());
         services.AddSingleton<IRoomActivityStore>(provider =>
+            provider.GetRequiredService<RedisRoomMetadataStore>());
+        services.AddSingleton<IRoomRecoveryStore>(provider =>
             provider.GetRequiredService<RedisRoomMetadataStore>());
         services.AddSingleton<RoomCapacityLimits>(provider =>
         {
@@ -103,7 +118,7 @@ public static class ServerServiceCollectionExtensions
         services.AddSingleton<IProjectSnapshotReader>(provider =>
             provider.GetRequiredService<RedisFileStore>());
         services.AddSingleton<IRoomParticipantReader>(provider =>
-            provider.GetRequiredService<RedisParticipantStore>());
+            provider.GetRequiredService<IRoomParticipantStore>());
         services.AddSingleton<IProjectTreeOperationStore>(provider =>
             provider.GetRequiredService<RedisProjectTreeStore>());
         services.AddSingleton<IProjectTreeRateLimiter>(provider =>
@@ -128,6 +143,7 @@ public static class ServerServiceCollectionExtensions
         services.AddSingleton<GithubApiClient>();
         services.AddSingleton<GithubRepositoryImportService>();
         services.AddSingleton<GithubRepositoryPushService>();
+        services.AddSingleton<GithubRepositoryBrowserService>();
         services.AddSingleton<GithubTokenVault>();
         services.AddSingleton<GithubOAuthService>();
     }
@@ -143,7 +159,6 @@ public static class ServerServiceCollectionExtensions
             client.Timeout = TimeSpan.FromSeconds(90));
         services.AddSingleton<IExecutionGateway>(provider =>
             provider.GetRequiredService<ExecutionServiceClient>());
-        services.AddHostedService<ExecutionOutputRelayService>();
     }
 
     private static void AddBackgroundServices(IServiceCollection services)

@@ -1,13 +1,15 @@
+using server.Application.Rooms;
+
 namespace server.Services;
 
 public sealed class RoomConnectionLeaseService : BackgroundService
 {
-    private readonly RedisParticipantStore _participants;
+    private readonly IRoomParticipantStore _participants;
     private readonly ServerInstanceIdentity _instance;
     private readonly ILogger<RoomConnectionLeaseService> _logger;
 
     public RoomConnectionLeaseService(
-        RedisParticipantStore participants,
+        IRoomParticipantStore participants,
         ServerInstanceIdentity instance,
         ILogger<RoomConnectionLeaseService> logger)
     {

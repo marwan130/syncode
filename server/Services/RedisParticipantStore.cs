@@ -4,10 +4,7 @@ using StackExchange.Redis;
 
 namespace server.Services;
 
-public sealed class RedisParticipantStore :
-    IRoomParticipantReader,
-    IRoomParticipantCommands,
-    IRoomParticipantAdmissionStore
+public sealed class RedisParticipantStore : IRoomParticipantStore
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
     private readonly IDatabase _db;
@@ -20,12 +17,16 @@ public sealed class RedisParticipantStore :
         int maxParticipants,
         int maxActiveRooms,
         int maxConnections,
-        bool isRoomCreator)
+        bool isRoomCreator,
+        bool isReturningMember,
+        bool returningMemberIsAdmin,
+        bool returningMemberIsLocked,
+        bool hasReturningAdmin)
     {
         return (int)await _db.ScriptEvaluateAsync(
             RedisParticipantScripts.AdmitParticipantScript,
             [RedisRoomKeys.Participants(roomId), RedisRoomKeys.Meta(roomId), RedisRoomKeys.ActiveRooms, RedisRoomKeys.InstanceConnections(instanceId), RedisRoomKeys.ConnectionRoom(participant.ConnectionId)],
-            [participant.ConnectionId, JsonSerializer.Serialize(participant), instanceId, maxParticipants, roomId, maxActiveRooms, maxConnections, isRoomCreator ? "1" : "0"]);
+            [participant.ConnectionId, JsonSerializer.Serialize(participant), instanceId, maxParticipants, roomId, maxActiveRooms, maxConnections, isRoomCreator ? "1" : "0", isReturningMember ? "1" : "0", returningMemberIsAdmin ? "1" : "0", returningMemberIsLocked ? "1" : "0", hasReturningAdmin ? "1" : "0"]);
     }
 
     public async Task<bool> TryRegisterConnectionAsync(string connectionId, string instanceId, int maxConnections) =>
