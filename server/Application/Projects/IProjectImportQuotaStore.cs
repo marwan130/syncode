@@ -6,4 +6,8 @@ public interface IProjectImportQuotaStore
         string roomId,
         long incomingBytes,
         long maximumBytes);
+    Task<bool> TryReplaceProjectImportBytesAsync(
+        string roomId,
+        long incomingBytes,
+        long maximumBytes);
 }

@@ -11,18 +11,22 @@ internal static class ProjectImportValidator
     private const long MaxProjectSnapshotBytes = 192 * 1024 * 1024;
     private const long MaxFileContentBytes = 64 * 1024;
     private const long MaxProjectContentBytes = 1024 * 1024;
+    private const long MaxRecoveryProjectContentBytes = 32 * 1024 * 1024;
     private const long MaxProjectCompressedBytes = 10 * 1024 * 1024;
 
     internal static long Validate(
         IReadOnlyList<ProjectImportFile> files,
-        GithubRepositoryBaseline? baseline)
+        GithubRepositoryBaseline? baseline,
+        bool isRecoveryImport = false)
     {
-        var totalStoredBytes = ValidateFiles(files);
+        var totalStoredBytes = ValidateFiles(files, isRecoveryImport);
         ValidateRepositoryBaseline(baseline, files);
         return totalStoredBytes;
     }
 
-    private static long ValidateFiles(IReadOnlyList<ProjectImportFile> files)
+    private static long ValidateFiles(
+        IReadOnlyList<ProjectImportFile> files,
+        bool isRecoveryImport)
     {
         long totalSnapshotBytes = 0;
         long totalContentBytes = 0;
@@ -49,9 +53,13 @@ internal static class ProjectImportValidator
             totalStoredBytes += Encoding.UTF8.GetByteCount(storedSnapshot);
             var snapshot = ImportedSnapshotValidator.Decompress(file.CompressedSnapshot, MaxFileSnapshotBytes);
             totalSnapshotBytes += Encoding.UTF8.GetByteCount(snapshot);
-            totalContentBytes += ImportedSnapshotValidator.Validate(snapshot, MaxFileContentBytes);
+            totalContentBytes += ImportedSnapshotValidator.Validate(
+                snapshot,
+                isRecoveryImport ? MaxFileSnapshotBytes : MaxFileContentBytes);
             if (totalCompressedBytes > MaxProjectCompressedBytes ||
-                totalContentBytes > MaxProjectContentBytes ||
+                totalContentBytes > (isRecoveryImport
+                    ? MaxRecoveryProjectContentBytes
+                    : MaxProjectContentBytes) ||
                 totalSnapshotBytes > MaxProjectSnapshotBytes)
                 throw new RoomOperationException("The folder import exceeds the project size limit.");
         }

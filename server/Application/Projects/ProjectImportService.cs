@@ -23,10 +23,13 @@ public sealed class ProjectImportService(
         string importId,
         IReadOnlyList<ProjectImportFile>? files,
         GithubRepositoryBaseline? repositoryBaseline = null,
-        string? projectRootName = null)
+        string? projectRootName = null,
+        bool replaceWorkspace = false,
+        Func<int, Task>? reportProgress = null,
+        bool allowRecoveryImport = false)
     {
         var participant = await participants.GetParticipantAsync(roomId, connectionId);
-        if (participant?.IsAdmin != true)
+        if (participant is null || (!participant.IsAdmin && !allowRecoveryImport))
             throw new RoomOperationException("Only room admins can import a folder.");
         if (!Guid.TryParseExact(importId, "N", out _) || files is null ||
             files.Count is < 1 or > 500)
@@ -37,21 +40,51 @@ public sealed class ProjectImportService(
             : string.IsNullOrWhiteSpace(projectRootName)
                 ? null
                 : ProjectRootName.Normalize(projectRootName);
-        var totalStoredBytes = ProjectImportValidator.Validate(files, repositoryBaseline);
-        var entries = await treeState.GetEntriesAsync(roomId);
-        var plan = ProjectImportPlanner.Build(entries, files, importId);
+        var totalStoredBytes = ProjectImportValidator.Validate(
+            files,
+            repositoryBaseline,
+            allowRecoveryImport);
+        var currentEntries = await treeState.GetEntriesAsync(roomId);
+        var entries = replaceWorkspace
+            ? new Dictionary<string, ProjectEntry>(StringComparer.Ordinal)
+            : currentEntries;
+        var rootEntries = replaceWorkspace
+            ? currentEntries.Values.Where(entry => entry.ParentId is null).ToArray()
+            : [];
+        var initialCounter = rootEntries.Length;
+        var plan = ProjectImportPlanner.Build(entries, files, importId, initialCounter);
         if (entries.Count + plan.NewEntryCount > 500)
             throw new RoomOperationException("A room can contain up to 500 files and folders.");
 
         if (!await rateLimits.TryConsumeProjectImportAsync(
                 roomId, connectionId, Guid.NewGuid().ToString("N")))
             throw new RoomOperationException("Folder import rate limit reached. Wait before importing again.");
-        if (!await importQuota.TryReserveProjectImportBytesAsync(
-                roomId, totalStoredBytes, MaxRoomImportBytes))
+        var quotaReserved = replaceWorkspace
+            ? await importQuota.TryReplaceProjectImportBytesAsync(roomId, totalStoredBytes, MaxRoomImportBytes)
+            : await importQuota.TryReserveProjectImportBytesAsync(roomId, totalStoredBytes, MaxRoomImportBytes);
+        if (!quotaReserved)
             throw new RoomOperationException("This room has reached its folder import storage limit.");
 
+        if (replaceWorkspace)
+        {
+            for (var index = 0; index < rootEntries.Length; index++)
+            {
+                plan.Operations.Insert(index, new ProjectTreeMutation(
+                    "delete",
+                    new ProjectTreeOperationId($"import-{importId}", index + 1),
+                    EntryId: rootEntries[index].Id));
+            }
+        }
         await PersistOperationsAsync(roomId, plan.Operations, plan.ChangedOperations);
-        var importedFiles = await SaveSnapshotsAsync(roomId, plan.ImportedFiles);
+        if (replaceWorkspace)
+        {
+            var oldFileIds = currentEntries.Values
+                .Where(entry => !entry.IsFolder)
+                .Select(entry => entry.Id)
+                .ToArray();
+            await snapshots.DeleteFileSnapshotsAsync(roomId, oldFileIds);
+        }
+        var importedFiles = await SaveSnapshotsAsync(roomId, plan.ImportedFiles, reportProgress);
         await repositoryBaselineStore.SetAsync(roomId, repositoryBaseline);
         var rootName = requestedRootName ?? await projectRootNames.GetProjectRootNameAsync(roomId);
         if (rootName is not null)
@@ -60,10 +93,13 @@ public sealed class ProjectImportService(
         return new ProjectImportResult(plan.Operations, plan.ChangedOperations, importedFiles, rootName);
     }
 
+    public Task SetRootNameAsync(string roomId, string name) =>
+        projectRootNames.SetProjectRootNameAsync(roomId, ProjectRootName.Normalize(name));
+
     private async Task PersistOperationsAsync(
         string roomId,
-        IReadOnlyList<ProjectTreeCreateOperation> operations,
-        List<ProjectTreeCreateOperation> changedOperations)
+        IReadOnlyList<ProjectTreeMutation> operations,
+        List<ProjectTreeMutation> changedOperations)
     {
         foreach (var operation in operations)
         {
@@ -79,7 +115,8 @@ public sealed class ProjectImportService(
 
     private async Task<List<ImportedProjectFileSnapshot>> SaveSnapshotsAsync(
         string roomId,
-        List<(string CompressedSnapshot, ProjectTreeEntry Entry)> files)
+        List<(string CompressedSnapshot, ProjectTreeEntry Entry)> files,
+        Func<int, Task>? reportProgress)
     {
         var importedFiles = new List<ImportedProjectFileSnapshot>(files.Count);
         foreach (var (compressedSnapshot, entry) in files)
@@ -87,6 +124,8 @@ public sealed class ProjectImportService(
             var storedSnapshot = ImportedSnapshotValidator.StoreCompressed(compressedSnapshot);
             await snapshots.SaveFileSnapshotAsync(roomId, entry.Id, storedSnapshot);
             importedFiles.Add(new ImportedProjectFileSnapshot(entry.Id, storedSnapshot));
+            if (reportProgress is not null)
+                await reportProgress(importedFiles.Count);
         }
         return importedFiles;
     }

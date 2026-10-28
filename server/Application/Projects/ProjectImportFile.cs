@@ -10,3 +10,9 @@ public sealed record ProjectTreeCreateOperation(
     string Type,
     ProjectTreeOperationId OpId,
     ProjectTreeEntry Entry);
+
+public sealed record ProjectTreeMutation(
+    string Type,
+    ProjectTreeOperationId OpId,
+    ProjectTreeEntry? Entry = null,
+    string? EntryId = null);

@@ -35,6 +35,13 @@ public class RedisFileStore : IProjectEntryStore, IProjectSnapshotWriter, IProje
     public async Task SaveFileSnapshotAsync(string roomId, string fileId, string snapshot) =>
         await _db.StringSetAsync(RedisRoomKeys.FileSnapshot(roomId, fileId), snapshot, TimeSpan.FromHours(24));
 
+    public async Task DeleteFileSnapshotsAsync(string roomId, IReadOnlyCollection<string> fileIds)
+    {
+        if (fileIds.Count == 0) return;
+        var keys = fileIds.Select(fileId => (RedisKey)RedisRoomKeys.FileSnapshot(roomId, fileId)).ToArray();
+        await _db.KeyDeleteAsync(keys);
+    }
+
     public async Task<string?> GetFileSnapshotAsync(string roomId, string fileId) =>
         (string?)await _db.StringGetAsync(RedisRoomKeys.FileSnapshot(roomId, fileId));
 }

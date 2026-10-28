@@ -212,17 +212,6 @@ public sealed class RedisProjectTreeStore : IProjectTreeOperationStore
     public async Task<string?> GetProjectTreeSnapshotAsync(string roomId) =>
         (string?)await _db.StringGetAsync(ProjectTreeSnapshotKey(roomId));
 
-    public async Task<RedisKey[]> GetRoomDeletionKeysAsync(string roomId, IEnumerable<string> fileIds)
-    {
-        var entryIds = await _db.HashKeysAsync(ProjectTreeEntryIndexKey(roomId));
-        var allIds = fileIds.Concat(entryIds.Select(id => (string)id!)).Distinct(StringComparer.Ordinal);
-        RedisKey[] treeKeys = [
-            ProjectTreeOperationsKey(roomId), ProjectTreeOperationIndexKey(roomId),
-            ProjectTreeSnapshotKey(roomId), ProjectTreeEntryIndexKey(roomId),
-            ProjectTreeSiteCounterKey(roomId), ProjectTreeSiteLastOperationKey(roomId)];
-        return treeKeys.Concat(allIds.Select(id => (RedisKey)FileSnapshotKey(roomId, id))).ToArray();
-    }
-
     private static string FilesKey(string roomId) => $"room:{roomId}:files";
     private static string ProjectTreeOperationsKey(string roomId) => $"room:{roomId}:project-tree:operations";
     private static string ProjectTreeOperationIndexKey(string roomId) => $"room:{roomId}:project-tree:index";

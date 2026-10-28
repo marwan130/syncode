@@ -7,13 +7,14 @@ internal static class ProjectImportPlanner
     internal static ProjectImportPlan Build(
         IReadOnlyDictionary<string, ProjectEntry> entries,
         IReadOnlyList<ProjectImportFile> files,
-        string importId)
+        string importId,
+        long initialCounter = 0)
     {
         var entriesByPath = CreatePathIndex(entries);
-        var operations = new List<ProjectTreeCreateOperation>();
+        var operations = new List<ProjectTreeMutation>();
         var importedFiles = new List<(string CompressedSnapshot, ProjectTreeEntry Entry)>();
         var occupiedIds = entries.Keys.ToHashSet(StringComparer.Ordinal);
-        var nextCounter = 0L;
+        var nextCounter = initialCounter;
 
         foreach (var file in files)
         {
@@ -25,7 +26,18 @@ internal static class ProjectImportPlanner
                 var isFile = index == segments.Length - 1;
                 if (entriesByPath.TryGetValue(path, out var existing))
                 {
-                    if (isFile || !existing.IsFolder)
+                    if (isFile && !existing.IsFolder && existing.Id == file.Id)
+                    {
+                        importedFiles.Add((
+                            file.CompressedSnapshot,
+                            new ProjectTreeEntry(
+                                existing.Id,
+                                existing.Name,
+                                existing.ParentId,
+                                false)));
+                        continue;
+                    }
+                    if (!existing.IsFolder)
                         throw new RoomOperationException("A file or folder with that path already exists.");
                     parentId = existing.Id;
                     continue;
@@ -37,8 +49,8 @@ internal static class ProjectImportPlanner
                 if (!occupiedIds.Add(id))
                     throw new RoomOperationException("The folder import contains a duplicate file identifier.");
                 var entry = new ProjectTreeEntry(id, segments[index], parentId, !isFile);
-                operations.Add(new ProjectTreeCreateOperation(
-                    "create", new ProjectTreeOperationId($"import-{importId}", ++nextCounter), entry));
+                operations.Add(new ProjectTreeMutation(
+                    "create", new ProjectTreeOperationId($"import-{importId}", ++nextCounter), Entry: entry));
                 entriesByPath.Add(path, new ProjectEntry(entry.Id, entry.Name, entry.ParentId, entry.IsFolder));
                 if (isFile) importedFiles.Add((file.CompressedSnapshot, entry));
                 else parentId = id;
@@ -63,11 +75,11 @@ internal static class ProjectImportPlanner
 }
 
 internal sealed class ProjectImportPlan(
-    List<ProjectTreeCreateOperation> operations,
+    List<ProjectTreeMutation> operations,
     List<(string CompressedSnapshot, ProjectTreeEntry Entry)> importedFiles)
 {
-    internal List<ProjectTreeCreateOperation> Operations { get; } = operations;
+    internal List<ProjectTreeMutation> Operations { get; } = operations;
     internal List<(string CompressedSnapshot, ProjectTreeEntry Entry)> ImportedFiles { get; } = importedFiles;
     internal int NewEntryCount => Operations.Count;
-    internal List<ProjectTreeCreateOperation> ChangedOperations { get; } = [];
+    internal List<ProjectTreeMutation> ChangedOperations { get; } = [];
 }

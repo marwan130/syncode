@@ -7,7 +7,8 @@ public sealed class ProjectTreeOperationService(
     IProjectTreeRateLimiter rateLimits,
     IRoomActivityStore roomMetadata,
     IProjectTreeOperationStore treeStore,
-    IProjectTreeStateReader state)
+    IProjectTreeStateReader state,
+    IProjectSnapshotWriter snapshots)
 {
     private const long MaximumCounter = 9_007_199_254_740_991L;
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -26,14 +27,47 @@ public sealed class ProjectTreeOperationService(
         if (await IsDuplicateAsync(roomId, operationId, operationValue)) return false;
 
         await ValidateOperationAsync(roomId, type, operation);
+        IReadOnlyList<string> deletedFileIds = type == "delete"
+            ? await GetDeletedFileIdsAsync(roomId, operation)
+            : Array.Empty<string>();
         if (!await rateLimits.TryConsumeFileEntryCreateAsync(
                 roomId, connectionId, Guid.NewGuid().ToString("N")))
             throw new RoomOperationException("File update rate limit reached. Please wait before trying again.");
 
         var result = await treeStore.AppendProjectTreeOperationAsync(roomId, operationId, json, siteId, counter);
         ThrowForAppendResult(result);
+        if (result == 1 && deletedFileIds.Count > 0)
+            await snapshots.DeleteFileSnapshotsAsync(roomId, deletedFileIds);
         await roomMetadata.TouchRoomAsync(roomId);
         return result == 1;
+    }
+
+    private async Task<IReadOnlyList<string>> GetDeletedFileIdsAsync(
+        string roomId,
+        JsonElement operation)
+    {
+        var entries = await state.GetEntriesAsync(roomId);
+        var children = new Dictionary<string, List<ProjectEntry>>(StringComparer.Ordinal);
+        foreach (var entry in entries.Values.Where(entry => entry.ParentId is not null))
+        {
+            var parentId = entry.ParentId!;
+            if (!children.TryGetValue(parentId, out var siblings))
+                children.Add(parentId, siblings = []);
+            siblings.Add(entry);
+        }
+
+        var pending = new Stack<string>();
+        var visited = new HashSet<string>(StringComparer.Ordinal);
+        var fileIds = new List<string>();
+        pending.Push(ReadEntryId(operation, "Invalid project tree entry."));
+        while (pending.TryPop(out var entryId))
+        {
+            if (!visited.Add(entryId) || !entries.TryGetValue(entryId, out var entry)) continue;
+            if (!entry.IsFolder) fileIds.Add(entry.Id);
+            if (children.TryGetValue(entryId, out var descendants))
+                foreach (var descendant in descendants) pending.Push(descendant.Id);
+        }
+        return fileIds;
     }
 
     private async Task<bool> IsDuplicateAsync(string roomId, string operationId, string operationValue)

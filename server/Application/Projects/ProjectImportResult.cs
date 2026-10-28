@@ -1,8 +1,8 @@
 namespace server.Application.Projects;
 
 public sealed record ProjectImportResult(
-    IReadOnlyList<ProjectTreeCreateOperation> Operations,
-    IReadOnlyList<ProjectTreeCreateOperation> ChangedOperations,
+    IReadOnlyList<ProjectTreeMutation> Operations,
+    IReadOnlyList<ProjectTreeMutation> ChangedOperations,
     IReadOnlyList<ImportedProjectFileSnapshot> Files,
     string? ProjectRootName);
 
