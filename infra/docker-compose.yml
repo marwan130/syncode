@@ -81,7 +81,6 @@ services:
       ExecutionService__PackageEgress__Enabled: ${PACKAGE_EGRESS_ENABLED:-false}
       ExecutionService__ApiKey: ${SYNCODE_EXECUTION_API_KEY:?Set SYNCODE_EXECUTION_API_KEY in infra/.env}
       ExecutionService__Urls: http://0.0.0.0:5112
-      ExecutionService__WorkerCount: ${EXECUTION_WORKER_COUNT:-3}
       Redis: redis:6379
       DOCKER_HOST: tcp://docker:2376
       DOCKER_TLS_VERIFY: "1"
@@ -114,6 +113,7 @@ services:
       ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Development}
       ASPNETCORE_URLS: http://0.0.0.0:5111
       ASPNETCORE_FORWARDEDHEADERS_ENABLED: "true"
+      ReverseProxy__KnownProxies__0: ${SYNCODE_FRONTEND_PROXY_IP:-172.30.10.3}
       Redis: redis:6379
       ExecutionService__BaseUrl: http://execution-service:5112
       ExecutionService__ApiKey: ${SYNCODE_EXECUTION_API_KEY:?Set SYNCODE_EXECUTION_API_KEY in infra/.env}
@@ -128,9 +128,11 @@ services:
         condition: service_healthy
       execution-service:
         condition: service_started
+    # Keep the room server separate from the client proxy address.
     networks:
-      - frontend-network
-      - service-network
+      frontend-network:
+        ipv4_address: ${SYNCODE_ROOM_SERVER_IP:-172.30.10.2}
+      service-network:
     restart: unless-stopped
 
   client:
@@ -145,11 +147,15 @@ services:
     depends_on:
       - room-server
     networks:
-      - frontend-network
+      frontend-network:
+        ipv4_address: ${SYNCODE_FRONTEND_PROXY_IP:-172.30.10.3}
     restart: unless-stopped
 
 networks:
   frontend-network:
+    ipam:
+      config:
+        - subnet: ${SYNCODE_FRONTEND_SUBNET:-172.30.10.0/24}
   service-network:
   docker-control:
     internal: true
