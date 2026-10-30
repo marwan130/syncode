@@ -66,4 +66,6 @@ Changes should keep room authorization on the server, validate all imported path
 
 ## License
 
-Syncode is available under the MIT License. See [LICENSE](LICENSE).
+Syncode is available under the MIT License. See [LICENSE](LICENSE) and
+[third-party notices](client/THIRD-PARTY-NOTICES.md) for included assets and
+dependency licenses.
