@@ -1,6 +1,5 @@
 using Microsoft.AspNetCore.Http.Json;
 using StackExchange.Redis;
-using Syncode.ExecutionService.Queue;
 using Syncode.ExecutionService.Runner;
 using Syncode.ExecutionService.Security;
 
@@ -27,23 +26,17 @@ public static class ExecutionServiceCollectionExtensions
             runtime));
         services.AddHostedService(sp => sp.GetRequiredService<LanguageServerSessions>());
 
-        var queuePrefix = configuration["ExecutionService:QueuePrefix"] ?? "syncode:execution";
-        AddOutputPublisher(services, redis, queuePrefix);
         AddInteractiveTerminals(services, configuration);
-        AddExecutionQueue(services, redis, configuration, queuePrefix);
-        AddContainerExecution(services, configuration, runtime);
-        AddWorkers(services, configuration);
+        services.AddSingleton<ActiveContainerRegistry>();
+        services.AddSingleton(ResourceLimits.Default);
+        if (runtime == ContainerRuntimePolicy.GvisorRuntime)
+            services.AddHostedService<RunscRuntimeValidator>();
+        services.AddHostedService(sp => new ContainerLifecycle(
+            sp.GetRequiredService<DockerCli>(),
+            sp.GetRequiredService<ActiveContainerRegistry>(),
+            sp.GetRequiredService<ILogger<ContainerLifecycle>>(),
+            sp.GetRequiredService<ResourceLimits>()));
         return services;
-    }
-
-    private static void AddOutputPublisher(
-        IServiceCollection services,
-        IConnectionMultiplexer redis,
-        string queuePrefix)
-    {
-        var outputChannel = RedisChannel.Literal($"{queuePrefix}:output:stream");
-        services.AddSingleton(sp => new ExecutionOutputPublisher(
-            redis.GetSubscriber(), outputChannel, sp.GetRequiredService<ILogger<ExecutionOutputPublisher>>()));
     }
 
     private static void AddInteractiveTerminals(IServiceCollection services, IConfiguration configuration)
@@ -56,53 +49,4 @@ public static class ExecutionServiceCollectionExtensions
         services.AddHostedService(sp => sp.GetRequiredService<InteractiveTerminalSessions>());
     }
 
-    private static void AddExecutionQueue(
-        IServiceCollection services,
-        IConnectionMultiplexer redis,
-        IConfiguration configuration,
-        string queuePrefix)
-    {
-        services.AddSingleton(new ExecutionRateLimiter(
-            redis,
-            queuePrefix,
-            configuration.GetValue("ExecutionService:MaxExecutionsPerRoomPerMinute", 10),
-            TimeSpan.FromMinutes(configuration.GetValue("ExecutionService:ExecutionRateWindowMinutes", 1))));
-        services.AddSingleton(new ExecutionJobQueue(
-            redis,
-            configuration.GetValue("ExecutionService:MaxPendingJobs", 50),
-            queuePrefix));
-    }
-
-    private static void AddContainerExecution(
-        IServiceCollection services,
-        IConfiguration configuration,
-        string runtime)
-    {
-        services.AddSingleton<ActiveContainerRegistry>();
-        services.AddSingleton(ResourceLimits.Default);
-        services.AddSingleton(sp => new ContainerRunner(
-            sp.GetRequiredService<DockerCli>(),
-            sp.GetRequiredService<ActiveContainerRegistry>(),
-            sp.GetRequiredService<ILogger<ContainerRunner>>(),
-            sp.GetRequiredService<ResourceLimits>(),
-            runtime,
-            sp.GetRequiredService<RoomDependencyStore>()));
-        if (runtime == ContainerRuntimePolicy.GvisorRuntime)
-            services.AddHostedService<RunscRuntimeValidator>();
-        services.AddHostedService(sp => new ContainerLifecycle(
-            sp.GetRequiredService<DockerCli>(),
-            sp.GetRequiredService<ActiveContainerRegistry>(),
-            sp.GetRequiredService<ILogger<ContainerLifecycle>>(),
-            sp.GetRequiredService<ResourceLimits>()));
-    }
-
-    private static void AddWorkers(IServiceCollection services, IConfiguration configuration)
-    {
-        services.AddHostedService(sp => new ExecutionQueueWorker(
-            sp.GetRequiredService<ExecutionJobQueue>(),
-            sp.GetRequiredService<ContainerRunner>(),
-            sp.GetRequiredService<ExecutionOutputPublisher>(),
-            sp.GetRequiredService<ILogger<ExecutionQueueWorker>>(),
-            configuration.GetValue("ExecutionService:WorkerCount", 3)));
-    }
 }

@@ -1,4 +1,3 @@
-using System.Text;
 using server.Application.Projects;
 using server.Application.Rooms;
 
@@ -56,74 +55,27 @@ public sealed class TerminalSessionService(
             catch (RoomOperationException) { }
         }
 
-        foreach (var jobId in sessions.RemoveExecutions(connectionId))
-        {
-            try { await executionService.CancelExecutionAsync(jobId, CancellationToken.None); }
-            catch (RoomOperationException) { }
-        }
     }
 
-    public async Task<ExecutionSubmissionResult> RunAsync(
-        string connectionId, RunExecutionRequest request, CancellationToken cancellationToken)
+    public async Task RunFileAsync(
+        string connectionId,
+        string sessionId,
+        string language,
+        string sourcePath,
+        CancellationToken cancellationToken)
     {
-        var roomId = await GetParticipantRoomAsync(connectionId, "Join a room before running code.");
-        if (!Guid.TryParse(request.RequestId, out var requestGuid))
-            throw new RoomOperationException("Invalid execution request.");
+        var roomId = await EnsureTerminalOwnerAsync(connectionId, sessionId);
         await authorization.EnsureCanEditAsync(roomId, connectionId);
-        var language = NormalizeLanguage(request.Language);
-        var participant = await participants.GetParticipantAsync(roomId, connectionId)
-            ?? throw new RoomOperationException("Join a room before running code.");
-        if (!ProjectPathRules.IsSafePath(request.SourcePath))
-            throw new RoomOperationException("The active project file is invalid.");
-        var workspaceEntries = await workspace.MaterializeAsync(roomId);
-        var projectFiles = workspaceEntries
-            .Where(entry => !entry.IsFolder)
-            .Select(entry => new ExecutionProjectFileInput(entry.Path, entry.Content))
-            .ToArray();
-        var activeFile = projectFiles.FirstOrDefault(file => file.Path == request.SourcePath)
-            ?? throw new RoomOperationException("The active project file no longer exists.");
-        ValidateProjectFiles(request.SourcePath, activeFile.Content, projectFiles);
-        var submission = await executionService.SubmitAsync(
-            new ExecutionSubmissionRequest(
-                roomId,
-                participant.UserId ?? participant.DisplayName,
-                language,
-                activeFile.Content,
-                requestGuid.ToString("N"),
-                request.SourcePath,
-                projectFiles),
-            CancellationToken.None);
-        if (cancellationToken.IsCancellationRequested || !sessions.TryAddExecution(connectionId, roomId, submission.JobId))
-        {
-            await executionService.CancelExecutionAsync(submission.JobId, CancellationToken.None);
-            cancellationToken.ThrowIfCancellationRequested();
-            throw new RoomOperationException("Could not attach an interactive terminal to this run.");
-        }
-        if (cancellationToken.IsCancellationRequested && sessions.RemoveExecution(submission.JobId))
-            await executionService.CancelExecutionAsync(submission.JobId, CancellationToken.None);
-        return submission;
-    }
-
-    public async Task WriteExecutionInputAsync(
-        string connectionId, string jobId, string input, CancellationToken cancellationToken)
-    {
-        var roomId = await GetParticipantRoomAsync(connectionId, "Join a room before using the terminal.");
-        await authorization.EnsureCanEditAsync(roomId, connectionId);
-        if (jobId.Length != 32 || !jobId.All(Uri.IsHexDigit) || !sessions.OwnsExecution(connectionId, roomId, jobId))
-            throw new RoomOperationException("Execution not found.");
-        if (string.IsNullOrEmpty(input) || input.Length > 1024 || !sessions.AllowExecutionInput(connectionId, roomId, jobId))
+        if (!sessions.AllowCommand(connectionId, roomId, sessionId))
             throw new RoomOperationException("Terminal input rate limit reached. Wait a moment and try again.");
-        await executionService.WriteExecutionInputAsync(jobId, input, cancellationToken);
-    }
-
-    public async Task CancelExecutionAsync(
-        string connectionId, string jobId, CancellationToken cancellationToken)
-    {
-        var roomId = await GetParticipantRoomAsync(connectionId, "Join a room before stopping code.");
-        if (jobId.Length != 32 || !jobId.All(Uri.IsHexDigit) ||
-            !sessions.TryRemoveExecution(connectionId, roomId, jobId))
-            throw new RoomOperationException("Execution not found.");
-        await executionService.CancelExecutionAsync(jobId, cancellationToken);
+        var normalizedLanguage = NormalizeLanguage(language);
+        if (!ProjectPathRules.IsSafePath(sourcePath))
+            throw new RoomOperationException("The active project file is invalid.");
+        var entries = await workspace.MaterializeAsync(roomId);
+        if (!entries.Any(file => file.Path == sourcePath && !file.IsFolder))
+            throw new RoomOperationException("The active project file no longer exists.");
+        await executionService.RunTerminalFileAsync(
+            sessionId, normalizedLanguage, sourcePath, entries, cancellationToken);
     }
 
     private async Task<string> EnsureTerminalOwnerAsync(string connectionId, string sessionId)
@@ -141,33 +93,6 @@ public sealed class TerminalSessionService(
         if (string.IsNullOrEmpty(roomId) || !await participants.IsParticipantAsync(roomId, connectionId))
             throw new RoomOperationException(error);
         return roomId;
-    }
-
-    private static void ValidateProjectFiles(
-        string sourcePath,
-        string source,
-        IReadOnlyList<ExecutionProjectFileInput> files)
-    {
-        if (Encoding.UTF8.GetByteCount(source) > RoomWorkspaceAdapter.MaximumWorkspaceBytes)
-            throw new RoomOperationException("The project exceeds the 32 MB run limit.");
-        if (files.Count is < 1 or > 500 || !ProjectPathRules.IsSafePath(sourcePath))
-            throw new RoomOperationException("Invalid project files for execution.");
-        if (!files.Any(file => file.Path == sourcePath))
-            throw new RoomOperationException("The active file is missing from the project run.");
-
-        long projectBytes = 0;
-        var paths = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var file in files)
-        {
-            if (file is null || !ProjectPathRules.IsSafePath(file.Path) || file.Content is null || !paths.Add(file.Path))
-                throw new RoomOperationException("Invalid project files for execution.");
-            projectBytes += Encoding.UTF8.GetByteCount(file.Content);
-        }
-
-        var activeFile = files.First(file => file.Path == sourcePath);
-        var totalBytes = projectBytes - Encoding.UTF8.GetByteCount(activeFile.Content) + Encoding.UTF8.GetByteCount(source);
-        if (totalBytes > RoomWorkspaceAdapter.MaximumWorkspaceBytes)
-            throw new RoomOperationException("The project exceeds the 32 MB run limit.");
     }
 
     private static string NormalizeLanguage(string? language) => language?.Trim().ToLowerInvariant() switch

@@ -1,6 +1,12 @@
 #!/bin/sh
 set -eu
 
+if [ "$#" -eq 2 ]; then
+  export RUNNER_RUNTIME="$1"
+  export SYNCODE_SOURCE_PATH="$2"
+  shift 2
+fi
+
 if [ "$#" -ne 0 ]; then
   printf '%s\n' 'Runner images do not accept command arguments.' >&2
   exit 64
@@ -148,6 +154,7 @@ EOF
     # Standalone single-file path
     find /workspace -type f -name '*.c' ! -path "/workspace/$source_path" -print0 |
       xargs -0 gcc -std=c17 -O0 -pipe -o /runner/main "/workspace/$source_path"
+    chmod 700 /runner/main
     exec /runner/main
     ;;
   cpp)
@@ -181,6 +188,7 @@ EOF
     # Standalone single-file path
     find /workspace -type f \( -name '*.cpp' -o -name '*.cc' -o -name '*.cxx' \) ! -path "/workspace/$source_path" -print0 |
       xargs -0 g++ -std=c++20 -O0 -pipe -o /runner/main "/workspace/$source_path"
+    chmod 700 /runner/main
     exec /runner/main
     ;;
   rust)

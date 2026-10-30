@@ -13,14 +13,14 @@ public sealed record LanguageServerStartResult(string Ticket);
 
 public sealed class LanguageServerSessionService(
     IConnectionMultiplexer redis,
-    RedisParticipantStore participants,
+    IRoomParticipantReader participants,
     RoomAuthorizationService authorization,
     RoomWorkspaceAdapter workspace,
     ExecutionServiceClient executionService,
     IConfiguration configuration,
     IHostEnvironment environment)
 {
-    private const int MaximumSessionsPerConnection = 4;
+    private const int MaximumSessionsPerConnection = 8;
     private static readonly TimeSpan SessionLifetime = TimeSpan.FromMinutes(30);
     private static readonly TimeSpan TicketLifetime = TimeSpan.FromMinutes(1);
     private const string SessionPrefix = "syncode:lsp:session:";

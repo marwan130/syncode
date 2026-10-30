@@ -16,8 +16,11 @@ COPY --from=rust-runtime /usr/local/cargo /usr/local/cargo
 COPY --from=rust-runtime /usr/local/rustup /usr/local/rustup
 COPY --from=gradle-runtime /opt/gradle /opt/gradle
 COPY --from=maven-runtime /usr/share/maven /usr/share/maven
+COPY entrypoint.sh /usr/local/bin/syncode-runner
+COPY sync-workspace.py /usr/local/bin/syncode-sync-workspace
 
-ENV RUSTUP_HOME=/usr/local/rustup
+ENV RUSTUP_HOME=/usr/local/rustup \
+    TMPDIR=/runner/tmp
 
 RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
     && ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
@@ -26,7 +29,7 @@ RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
         bash build-essential ca-certificates cmake coreutils curl findutils git grep \
         ninja-build openjdk-21-jdk-headless passwd python3 python3-pip python3-venv \
         sed util-linux \
-    && npm install --global --ignore-scripts pnpm@12.15.0 yarn@1.22.22 \
+    && npm install --global --ignore-scripts pnpm@12.15.0 yarn@1.22.22 typescript@6.0.2 @types/node@24.13.3 \
     && python3 -m venv /opt/conan \
     && /opt/conan/bin/pip install --no-cache-dir conan==2.33.0 \
     && rm -rf /var/lib/apt/lists/*
@@ -34,7 +37,8 @@ RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
 RUN /usr/sbin/groupadd --system --gid 10001 runner \
     && /usr/sbin/useradd --system --uid 10001 --gid runner --no-create-home --shell /usr/sbin/nologin runner \
     && mkdir -p /workspace \
-    && chown runner:runner /workspace
+    && chown runner:runner /workspace \
+    && chmod 0555 /usr/local/bin/syncode-runner
 
 WORKDIR /workspace
 USER 10001:10001

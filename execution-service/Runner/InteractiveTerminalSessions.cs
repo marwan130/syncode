@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Text;
+using System.Text.Json;
 using Syncode.ExecutionService.Security;
 
 namespace Syncode.ExecutionService.Runner;
@@ -138,6 +139,49 @@ public sealed class InteractiveTerminalSessions : IHostedService, IAsyncDisposab
         finally { session.InputLock.Release(); }
     }
 
+    public async Task RunFileAsync(
+        string id,
+        string language,
+        string sourcePath,
+        IReadOnlyList<TerminalWorkspaceEntry> entries,
+        CancellationToken cancellationToken)
+    {
+        var session = Find(id);
+        var runtime = language.ToLowerInvariant() switch
+        {
+            "javascript" => "node",
+            "typescript" => "typescript",
+            "python" => "python",
+            "csharp" or "c#" => "csharp",
+            "c" => "c",
+            "cpp" or "c++" => "cpp",
+            "rust" => "rust",
+            "java" => "java",
+            _ => throw new ArgumentException("The selected file type cannot be run.", nameof(language))
+        };
+        if (!WorkspaceLimits.IsSharedPath(sourcePath) ||
+            entries.Count is < 1 or > WorkspaceLimits.MaximumEntries ||
+            !entries.Any(entry => entry.Path == sourcePath && !entry.IsFolder))
+            throw new ArgumentException("The active project file is invalid.", nameof(sourcePath));
+
+        await SyncWorkspaceAsync(session, entries, cancellationToken);
+        var command = $"/usr/local/bin/syncode-runner {QuoteShellValue(runtime)} {QuoteShellValue(sourcePath)}\n";
+        await session.InputLock.WaitAsync(cancellationToken);
+        try
+        {
+            if (session.Process.HasExited) throw new InvalidOperationException("This terminal session has ended.");
+            await session.Process.StandardInput.WriteAsync("\u0003".AsMemory(), cancellationToken);
+            await session.Process.StandardInput.FlushAsync(cancellationToken);
+            await Task.Delay(TimeSpan.FromMilliseconds(100), cancellationToken);
+            if (session.Process.HasExited) throw new InvalidOperationException("This terminal session has ended.");
+            await session.Process.StandardInput.WriteAsync(command.AsMemory(), cancellationToken);
+            await session.Process.StandardInput.FlushAsync(cancellationToken);
+            session.LastActivity = DateTimeOffset.UtcNow;
+        }
+        catch (IOException) { throw new InvalidOperationException("This terminal session has ended."); }
+        finally { session.InputLock.Release(); }
+    }
+
     public async Task<TerminalSessionOutput> ReadOutputAsync(string id, int offset, CancellationToken cancellationToken)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(offset);
@@ -176,6 +220,7 @@ public sealed class InteractiveTerminalSessions : IHostedService, IAsyncDisposab
         "--cpus=0.5", "--pids-limit=64", "--read-only",
         "--ulimit", "nofile=256:256", "--ulimit", "fsize=268435456:268435456",
         "--tmpfs", "/tmp:rw,noexec,nosuid,nodev,size=64m,uid=10001,gid=10001",
+        "--tmpfs", "/runner:rw,exec,nosuid,nodev,size=256m,uid=10001,gid=10001",
         "--mount", $"type=bind,source={workspaceDirectory},target=/workspace",
         "--mount", $"type=bind,source={dependencyDirectory},target=/deps",
         "--mount", $"type=bind,source={Path.Combine(dependencyDirectory, "npm-project", "node_modules")},target=/workspace/node_modules",
@@ -312,6 +357,88 @@ public sealed class InteractiveTerminalSessions : IHostedService, IAsyncDisposab
             session.WorkspaceLock.Release();
         }
     }
+
+    private async Task SyncWorkspaceAsync(
+        Session session,
+        IReadOnlyList<TerminalWorkspaceEntry> entries,
+        CancellationToken cancellationToken)
+    {
+        var snapshot = new Dictionary<string, TerminalWorkspaceEntry>(StringComparer.Ordinal);
+        long totalBytes = 0;
+        foreach (var entry in entries)
+        {
+            var normalized = ValidateWorkspaceEntry(entry);
+            if (!snapshot.TryAdd(normalized.Path, normalized))
+                throw new ArgumentException("The room workspace contains duplicate paths.", nameof(entries));
+            if (!normalized.IsFolder)
+            {
+                var bytes = Encoding.UTF8.GetByteCount(normalized.Content);
+                totalBytes += bytes;
+                if (bytes > WorkspaceLimits.MaximumFileBytes || totalBytes > WorkspaceLimits.MaximumWorkspaceBytes)
+                    throw new ArgumentException("The room workspace exceeds the terminal size limit.", nameof(entries));
+            }
+        }
+
+        await session.WorkspaceLock.WaitAsync(cancellationToken);
+        try
+        {
+            var payload = JsonSerializer.Serialize(
+                new
+                {
+                    entries = snapshot.Values,
+                    previousPaths = session.WorkspaceEntries.Keys
+                },
+                new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = _docker,
+                UseShellExecute = false,
+                RedirectStandardInput = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true
+            };
+            foreach (var argument in new[]
+                     {
+                         "exec", "--interactive", "--user=10001:10001", session.ContainerName,
+                         "python3", "/usr/local/bin/syncode-sync-workspace"
+                     })
+                startInfo.ArgumentList.Add(argument);
+            using var process = new Process { StartInfo = startInfo };
+            if (!process.Start()) throw new InvalidOperationException("Could not refresh the terminal workspace.");
+            var outputTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
+            var errorTask = process.StandardError.ReadToEndAsync(cancellationToken);
+            try
+            {
+                await process.StandardInput.WriteAsync(payload.AsMemory(), cancellationToken);
+                await process.StandardInput.FlushAsync(cancellationToken);
+                process.StandardInput.Close();
+                await Task.WhenAll(process.WaitForExitAsync(cancellationToken), outputTask, errorTask);
+                if (process.ExitCode != 0)
+                    throw new InvalidOperationException("The room workspace could not be refreshed in the terminal.");
+            }
+            catch
+            {
+                KillProcess(process);
+                throw;
+            }
+
+            var fileStates = new Dictionary<string, WorkspaceFileState>(StringComparer.Ordinal);
+            foreach (var entry in snapshot.Values.Where(entry => !entry.IsFolder))
+            {
+                var target = ResolveWorkspacePath(session.WorkspaceDirectory, entry.Path);
+                fileStates.Add(entry.Path, WorkspaceFileState.From(new FileInfo(target)));
+            }
+
+            session.WorkspaceEntries.Clear();
+            foreach (var entry in snapshot) session.WorkspaceEntries.Add(entry.Key, entry.Value);
+            session.WorkspaceFileStates.Clear();
+            foreach (var file in fileStates) session.WorkspaceFileStates.Add(file.Key, file.Value);
+        }
+        finally { session.WorkspaceLock.Release(); }
+    }
+
+    private static string QuoteShellValue(string value) => $"'{value.Replace("'", "'\\''", StringComparison.Ordinal)}'";
 
     private static void ScanWorkspaceDirectory(
         string directory,

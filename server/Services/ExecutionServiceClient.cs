@@ -119,72 +119,20 @@ public sealed class ExecutionServiceClient(HttpClient httpClient, IConfiguration
             throw await TerminalErrorAsync(response, cancellationToken);
     }
 
-    public async Task<ExecutionSubmissionResult> SubmitAsync(
-        ExecutionSubmissionRequest submission,
+    public async Task RunTerminalFileAsync(
+        string sessionId,
+        string language,
+        string sourcePath,
+        IReadOnlyList<RoomWorkspaceEntry> entries,
         CancellationToken cancellationToken)
     {
-        using var request = CreateTerminalRequest(HttpMethod.Post, "api/executions");
-        request.Content = JsonContent.Create(new
-        {
-            submission.RoomId,
-            submission.RequestedBy,
-            submission.Language,
-            submission.Source,
-            submission.SourcePath,
-            submission.ProjectFiles,
-            submission.RequestId,
-        }, options: TerminalJsonOptions);
-
-        HttpResponseMessage response;
-        try
-        {
-            response = await httpClient.SendAsync(
-                request,
-                HttpCompletionOption.ResponseHeadersRead,
-                cancellationToken);
-        }
-        catch (HttpRequestException)
-        {
-            throw new RoomOperationException("The code execution service is unavailable.");
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            throw new RoomOperationException("The code execution service did not respond in time.");
-        }
-
-        using (response)
-        {
-            if (response.StatusCode == HttpStatusCode.Accepted)
-            {
-                var result = await response.Content.ReadFromJsonAsync<ExecutionSubmissionResult>(cancellationToken);
-                return result ?? throw new RoomOperationException("The execution service returned an invalid response.");
-            }
-
-            var message = await ReadErrorMessageAsync(response, cancellationToken);
-            if (response.StatusCode == HttpStatusCode.TooManyRequests &&
-                response.Headers.RetryAfter?.Delta is { } retryAfter)
-            {
-                message = $"Execution rate limit reached. Try again in {Math.Max(1, (int)Math.Ceiling(retryAfter.TotalSeconds))} seconds.";
-            }
-            throw new RoomOperationException(message);
-        }
-    }
-
-    public async Task WriteExecutionInputAsync(string jobId, string input, CancellationToken cancellationToken)
-    {
-        using var request = CreateTerminalRequest(HttpMethod.Post, $"api/executions/{Uri.EscapeDataString(jobId)}/input");
-        request.Content = JsonContent.Create(new { input });
+        using var request = CreateTerminalRequest(
+            HttpMethod.Post, $"api/terminals/{Uri.EscapeDataString(sessionId)}/run");
+        request.Content = JsonContent.Create(new { language, sourcePath, entries }, options: TerminalJsonOptions);
         using var response = await SendTerminalRequestAsync(request, cancellationToken);
         if (!response.IsSuccessStatusCode) throw await TerminalErrorAsync(response, cancellationToken);
     }
 
-    public async Task CancelExecutionAsync(string jobId, CancellationToken cancellationToken)
-    {
-        using var request = CreateTerminalRequest(HttpMethod.Delete, $"api/executions/{Uri.EscapeDataString(jobId)}");
-        using var response = await SendTerminalRequestAsync(request, cancellationToken);
-        if (response.StatusCode is not HttpStatusCode.NotFound && !response.IsSuccessStatusCode)
-            throw await TerminalErrorAsync(response, cancellationToken);
-    }
 
     private async Task<T?> SendTerminalAsync<T>(HttpMethod method, string path, HttpContent? content, CancellationToken cancellationToken)
     {
@@ -269,6 +217,6 @@ public sealed class ExecutionServiceClient(HttpClient httpClient, IConfiguration
         }
         catch (JsonException) { }
 
-        return "Could not queue code for execution. Please try again.";
+        return "The terminal request failed. Please try again.";
     }
 }

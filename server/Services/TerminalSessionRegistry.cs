@@ -9,94 +9,19 @@ public sealed class TerminalSessionRegistry : ITerminalSessionRegistry
     private readonly Dictionary<string, (string ConnectionId, string RoomId)> _sessions = new(StringComparer.Ordinal);
     private readonly Dictionary<string, Queue<DateTimeOffset>> _commandTimes = new(StringComparer.Ordinal);
     private readonly Dictionary<string, Queue<DateTimeOffset>> _pollTimes = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, (string ConnectionId, string RoomId, DateTimeOffset CreatedAt, Queue<DateTimeOffset> InputTimes)> _executions = new(StringComparer.Ordinal);
-
-    public bool TryAddExecution(string connectionId, string roomId, string jobId)
-    {
-        lock (_gate)
-        {
-            PurgeExpiredExecutions(DateTimeOffset.UtcNow);
-            if (_executions.TryGetValue(jobId, out var existing))
-                return existing.ConnectionId == connectionId && existing.RoomId == roomId;
-            if (_executions.Count >= 1000) return false;
-            _executions[jobId] = (connectionId, roomId, DateTimeOffset.UtcNow, new Queue<DateTimeOffset>());
-            return true;
-        }
-    }
-
-    public bool OwnsExecution(string connectionId, string roomId, string jobId)
-    {
-        lock (_gate)
-        {
-            PurgeExpiredExecutions(DateTimeOffset.UtcNow);
-            return _executions.TryGetValue(jobId, out var execution) &&
-                execution.ConnectionId == connectionId && execution.RoomId == roomId;
-        }
-    }
-
-    public bool AllowExecutionInput(string connectionId, string roomId, string jobId)
-    {
-        lock (_gate)
-        {
-            PurgeExpiredExecutions(DateTimeOffset.UtcNow);
-            if (!_executions.TryGetValue(jobId, out var execution) || execution.ConnectionId != connectionId || execution.RoomId != roomId) return false;
-            var now = DateTimeOffset.UtcNow;
-            while (execution.InputTimes.TryPeek(out var oldest) && now - oldest > TimeSpan.FromSeconds(10)) execution.InputTimes.Dequeue();
-            if (execution.InputTimes.Count >= 80) return false;
-            execution.InputTimes.Enqueue(now);
-            return true;
-        }
-    }
-
-    public bool RemoveExecution(string jobId)
-    {
-        lock (_gate) return _executions.Remove(jobId);
-    }
-
-    public bool TryRemoveExecution(string connectionId, string roomId, string jobId)
-    {
-        lock (_gate)
-        {
-            PurgeExpiredExecutions(DateTimeOffset.UtcNow);
-            if (!_executions.TryGetValue(jobId, out var execution) ||
-                execution.ConnectionId != connectionId || execution.RoomId != roomId)
-                return false;
-            return _executions.Remove(jobId);
-        }
-    }
-
-    public string[] RemoveExecutions(string connectionId)
-    {
-        lock (_gate)
-        {
-            var ids = _executions.Where(pair => pair.Value.ConnectionId == connectionId).Select(pair => pair.Key).ToArray();
-            foreach (var id in ids) _executions.Remove(id);
-            return ids;
-        }
-    }
-
-    public (string[] SessionIds, string[] ExecutionIds) RemoveRoom(string roomId)
+    public string[] RemoveRoom(string roomId)
     {
         lock (_gate)
         {
             var sessionIds = _sessions.Where(pair => pair.Value.RoomId == roomId).Select(pair => pair.Key).ToArray();
-            var executionIds = _executions.Where(pair => pair.Value.RoomId == roomId).Select(pair => pair.Key).ToArray();
             foreach (var id in sessionIds)
             {
                 _sessions.Remove(id);
                 _commandTimes.Remove(id);
                 _pollTimes.Remove(id);
             }
-            foreach (var id in executionIds) _executions.Remove(id);
-            return (sessionIds, executionIds);
+            return sessionIds;
         }
-    }
-
-    private void PurgeExpiredExecutions(DateTimeOffset now)
-    {
-        foreach (var id in _executions.Where(pair => now - pair.Value.CreatedAt > TimeSpan.FromMinutes(15))
-                     .Select(pair => pair.Key).ToArray())
-            _executions.Remove(id);
     }
 
     public bool TryAdd(string connectionId, string roomId, string sessionId)
