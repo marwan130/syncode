@@ -1,6 +1,9 @@
 import { useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import type { AwarenessState, RoomJoinRequest } from '../../providers/SignalRCrdtProvider';
+import type {
+  AwarenessState,
+  RoomJoinRequest,
+} from '../../providers/SignalRCrdtProvider';
 import { useOutsidePointerDismiss } from '../../hooks/useOutsidePointerDismiss';
 import { RoomJoin } from './RoomJoin';
 import { Avatar } from './Avatar';
@@ -11,8 +14,11 @@ export interface ParticipantProfileProps {
   localName: string;
   localColor: string;
   localAvatarUrl?: string;
+  canLeaveRoom: boolean;
+  leaving: boolean;
   onJoinProfile: (info: { displayName: string; color: string }) => void;
   onColorChange: (color: string) => void;
+  onLeaveRoom?: () => Promise<void>;
 }
 
 export interface ParticipantManagementActions {
@@ -116,8 +122,15 @@ function JoinRequestControl({
         Join requests <span>{requests.length}</span>
       </button>
       {isOpen && (
-        <div className="participant-manage-menu join-request-menu" aria-label="Room join requests">
-          {error && <div className="join-request-error" role="alert">{error}</div>}
+        <div
+          className="participant-manage-menu join-request-menu"
+          aria-label="Room join requests"
+        >
+          {error && (
+            <div className="join-request-error" role="alert">
+              {error}
+            </div>
+          )}
           {requests.map((request) => (
             <div className="join-request-item" key={request.requestId}>
               <Avatar
@@ -155,8 +168,11 @@ function ParticipantProfile({ profile }: { profile: ParticipantProfileProps }) {
     localName,
     localColor,
     localAvatarUrl,
+    canLeaveRoom,
+    leaving,
     onJoinProfile,
     onColorChange,
+    onLeaveRoom,
   } = profile;
   const [profileState, setProfileState] = useState(() => ({
     roomId,
@@ -178,7 +194,7 @@ function ParticipantProfile({ profile }: { profile: ParticipantProfileProps }) {
       <button
         type="button"
         onClick={() => setProfileOpen(!isProfileOpen)}
-        title="Edit your avatar color"
+        title="Profile options, edit your name and color or leave the room"
         aria-label="Edit your name and avatar color"
         aria-expanded={isProfileOpen}
         aria-haspopup="dialog"
@@ -188,7 +204,6 @@ function ParticipantProfile({ profile }: { profile: ParticipantProfileProps }) {
           name={localName || '?'}
           color={localColor}
           avatarUrl={localAvatarUrl}
-          title={localName ? `${localName} (you)` : 'Choose your name'}
           cursor="pointer"
         />
       </button>
@@ -203,6 +218,8 @@ function ParticipantProfile({ profile }: { profile: ParticipantProfileProps }) {
             setProfileOpen(false);
           }}
           onColorChange={onColorChange}
+          leaving={leaving}
+          onLeaveRoom={canLeaveRoom ? onLeaveRoom : undefined}
           onClose={() => setProfileOpen(false)}
         />
       )}
@@ -225,7 +242,6 @@ function isProfileAnchorTarget(
   return target instanceof Node && Boolean(anchor?.contains(target));
 }
 
-
 interface ParticipantItemProps {
   peerId: string;
   peer: AwarenessState;
@@ -247,7 +263,11 @@ function ParticipantItem({
         className="participant-avatar-wrap"
         style={getStackStyle(stacked, index, false)}
       >
-        <Avatar name={peer.name} color={peer.color} avatarUrl={peer.avatarUrl} />
+        <Avatar
+          name={peer.name}
+          color={peer.color}
+          avatarUrl={peer.avatarUrl}
+        />
       </div>
     );
 
@@ -285,7 +305,6 @@ function ManagedParticipantItem({
       <button
         type="button"
         className={`participant-avatar-action${peer.isLocked ? ' is-locked' : ''}`}
-        data-hint={`Manage ${peer.name}`}
         aria-label={`Manage ${peer.name}`}
         aria-expanded={menuOpen}
         aria-haspopup="true"

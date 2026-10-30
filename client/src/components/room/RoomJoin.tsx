@@ -10,8 +10,10 @@ import {
   getStoredColor,
   getStoredDisplayName,
   setStoredColor,
-  setStoredDisplayName,
+  storeRoomProfile,
 } from '../../utils/userStorage';
+import { useAppActivity } from '../shared/useAppActivity';
+import { GithubLoginButton } from '../github/GithubLoginButton';
 
 export interface RoomProfileForm {
   displayName: string;
@@ -28,6 +30,8 @@ export interface RoomJoinProps {
   currentRoomId?: string;
   onJoin?: (info: { displayName: string; color: string }) => void;
   onColorChange?: (color: string) => void;
+  leaving?: boolean;
+  onLeaveRoom?: () => Promise<void>;
   onStart?: (info: RoomProfileForm) => void | Promise<void>;
   onClose: () => void;
 }
@@ -41,9 +45,12 @@ export function RoomJoin({
   currentRoomId,
   onJoin,
   onColorChange,
+  leaving = false,
+  onLeaveRoom,
   onStart,
   onClose,
 }: RoomJoinProps) {
+  const { runActivity } = useAppActivity();
   const [name, setName] = useState(defaultName);
   const [selectedColor, setSelectedColor] = useState(() =>
     getStoredColor(colorStorageId)
@@ -77,8 +84,12 @@ export function RoomJoin({
 
     const info = { displayName: validation.displayName, color: selectedColor };
     if (mode === 'profile' && roomId) {
-      const fixedName = getStoredDisplayName(roomId) ?? validation.displayName;
-      setStoredDisplayName(roomId, fixedName);
+      const fixedName = storeRoomProfile(
+        roomId,
+        validation.displayName,
+        selectedColor,
+        colorStorageId
+      );
       onJoin?.({ ...info, displayName: fixedName });
       onClose();
       return;
@@ -88,7 +99,10 @@ export function RoomJoin({
     submittingRef.current = true;
     setIsSubmitting(true);
     try {
-      await onStart?.({ ...info, invite: validation.invite });
+      const label = mode === 'create' ? 'Creating room…' : 'Joining room…';
+      await runActivity(label, () =>
+        Promise.resolve(onStart?.({ ...info, invite: validation.invite }))
+      );
     } catch {
       setError('Could not continue. Please try again.');
     } finally {
@@ -131,6 +145,22 @@ export function RoomJoin({
           <RoomJoinSubmitButton mode={mode} isSubmitting={isSubmitting} />
         )}
       </form>
+      {mode === 'profile' && (
+        <GithubLoginButton
+          returnTo={`${window.location.pathname}${window.location.search}${window.location.hash}`}
+          className="profile-github-button"
+        />
+      )}
+      {mode === 'profile' && onLeaveRoom && (
+        <button
+          className="room-leave-button profile-leave-button"
+          type="button"
+          onClick={() => void onLeaveRoom()}
+          disabled={leaving}
+        >
+          {leaving ? 'Leaving…' : 'Leave room'}
+        </button>
+      )}
     </section>
   );
 
@@ -237,7 +267,7 @@ function RoomJoinSubmitButton({
 }) {
   return (
     <button
-      className="profile-join-button"
+      className={`profile-join-button${mode === 'create' ? ' is-create' : ''}`}
       type="submit"
       disabled={isSubmitting}
     >
