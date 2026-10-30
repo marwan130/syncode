@@ -4,26 +4,30 @@ import type {
   KeyboardEvent,
   PointerEvent,
   ReactNode,
+  UIEventHandler,
 } from 'react';
 
 export type PanelElement = 'aside' | 'div';
+export type ScrollbarOrientation = 'horizontal' | 'vertical';
 
 export interface ScrollbarPanelProps extends HTMLAttributes<HTMLElement> {
   as?: PanelElement;
   children: ReactNode;
+  orientation?: ScrollbarOrientation;
+  onViewportScroll?: UIEventHandler<HTMLDivElement>;
 }
 
 interface ScrollMetrics {
   hasOverflow: boolean;
-  thumbHeight: number;
-  thumbTop: number;
+  thumbSize: number;
+  thumbPosition: number;
   value: number;
 }
 
 const INITIAL_METRICS: ScrollMetrics = {
   hasOverflow: false,
-  thumbHeight: 0,
-  thumbTop: 0,
+  thumbSize: 0,
+  thumbPosition: 0,
   value: 0,
 };
 
@@ -31,13 +35,18 @@ export function ScrollbarPanel({
   as: Element = 'div',
   children,
   className = '',
+  orientation = 'vertical',
+  onViewportScroll,
   ...props
 }: ScrollbarPanelProps) {
   const id = useId();
   const viewportRef = useRef<HTMLDivElement>(null);
   const sliderRef = useRef<HTMLDivElement>(null);
   const hideTimerRef = useRef<number | null>(null);
-  const dragRef = useRef<{ pointerY: number; scrollTop: number } | null>(null);
+  const dragRef = useRef<{
+    pointerPosition: number;
+    scrollPosition: number;
+  } | null>(null);
   const pointerInsideRef = useRef(false);
   const [isScrollbarVisible, setScrollbarVisible] = useState(false);
   const [metrics, setMetrics] = useState(INITIAL_METRICS);
@@ -46,41 +55,45 @@ export function ScrollbarPanel({
     const viewport = viewportRef.current;
     if (!viewport) return;
 
-    const scrollRange = viewport.scrollHeight - viewport.clientHeight;
+    const scrollSize =
+      orientation === 'horizontal'
+        ? viewport.scrollWidth
+        : viewport.scrollHeight;
+    const clientSize =
+      orientation === 'horizontal'
+        ? viewport.clientWidth
+        : viewport.clientHeight;
+    const scrollPosition =
+      orientation === 'horizontal' ? viewport.scrollLeft : viewport.scrollTop;
+    const scrollRange = scrollSize - clientSize;
     const hasOverflow = scrollRange > 1;
-    const thumbHeight = hasOverflow
+    const thumbSize = hasOverflow
       ? Math.min(
-          viewport.clientHeight,
-          Math.max(
-            20,
-            (viewport.clientHeight / viewport.scrollHeight) *
-              viewport.clientHeight
-          )
+          clientSize,
+          Math.max(20, (clientSize / scrollSize) * clientSize)
         )
       : 0;
-    const thumbRange = Math.max(0, viewport.clientHeight - thumbHeight);
+    const thumbRange = Math.max(0, clientSize - thumbSize);
     const next = {
       hasOverflow,
-      thumbHeight,
-      thumbTop:
-        scrollRange > 0 ? (viewport.scrollTop / scrollRange) * thumbRange : 0,
+      thumbSize,
+      thumbPosition:
+        scrollRange > 0 ? (scrollPosition / scrollRange) * thumbRange : 0,
       value:
-        scrollRange > 0
-          ? Math.round((viewport.scrollTop / scrollRange) * 100)
-          : 0,
+        scrollRange > 0 ? Math.round((scrollPosition / scrollRange) * 100) : 0,
     };
 
     if (!hasOverflow) setScrollbarVisible(false);
 
     setMetrics((current) =>
       current.hasOverflow === next.hasOverflow &&
-      current.thumbHeight === next.thumbHeight &&
-      current.thumbTop === next.thumbTop &&
+      current.thumbSize === next.thumbSize &&
+      current.thumbPosition === next.thumbPosition &&
       current.value === next.value
         ? current
         : next
     );
-  }, []);
+  }, [orientation]);
 
   const clearHideTimer = () => {
     if (hideTimerRef.current !== null) {
@@ -133,27 +146,35 @@ export function ScrollbarPanel({
     track.setPointerCapture(event.pointerId);
     const slider = sliderRef.current;
     const isOnSlider = Boolean(slider?.contains(event.target as Node));
+    const isHorizontal = orientation === 'horizontal';
+    const pointerPosition = isHorizontal ? event.clientX : event.clientY;
+    const scrollPosition = isHorizontal
+      ? viewport.scrollLeft
+      : viewport.scrollTop;
 
     if (isOnSlider) {
       slider?.classList.add('active');
-      dragRef.current = {
-        pointerY: event.clientY,
-        scrollTop: viewport.scrollTop,
-      };
+      dragRef.current = { pointerPosition, scrollPosition };
       return;
     }
 
     const bounds = track.getBoundingClientRect();
-    const maxScroll = viewport.scrollHeight - viewport.clientHeight;
-    const thumbRange = Math.max(1, bounds.height - metrics.thumbHeight);
-    const desiredTop = Math.max(
+    const maxScroll = isHorizontal
+      ? viewport.scrollWidth - viewport.clientWidth
+      : viewport.scrollHeight - viewport.clientHeight;
+    const trackStart = isHorizontal ? bounds.left : bounds.top;
+    const trackSize = isHorizontal ? bounds.width : bounds.height;
+    const thumbRange = Math.max(1, trackSize - metrics.thumbSize);
+    const desiredPosition = Math.max(
       0,
-      Math.min(thumbRange, event.clientY - bounds.top - metrics.thumbHeight / 2)
+      Math.min(thumbRange, pointerPosition - trackStart - metrics.thumbSize / 2)
     );
-    viewport.scrollTop = (desiredTop / thumbRange) * maxScroll;
+    if (isHorizontal)
+      viewport.scrollLeft = (desiredPosition / thumbRange) * maxScroll;
+    else viewport.scrollTop = (desiredPosition / thumbRange) * maxScroll;
     dragRef.current = {
-      pointerY: event.clientY,
-      scrollTop: viewport.scrollTop,
+      pointerPosition,
+      scrollPosition: isHorizontal ? viewport.scrollLeft : viewport.scrollTop,
     };
   };
 
@@ -167,14 +188,21 @@ export function ScrollbarPanel({
     )
       return;
 
-    const thumbRange = Math.max(1, viewport.clientHeight - metrics.thumbHeight);
-    const scrollRange = Math.max(
-      0,
-      viewport.scrollHeight - viewport.clientHeight
-    );
-    viewport.scrollTop =
-      drag.scrollTop +
-      ((event.clientY - drag.pointerY) / thumbRange) * scrollRange;
+    const isHorizontal = orientation === 'horizontal';
+    const clientSize = isHorizontal
+      ? viewport.clientWidth
+      : viewport.clientHeight;
+    const scrollSize = isHorizontal
+      ? viewport.scrollWidth
+      : viewport.scrollHeight;
+    const scrollRange = Math.max(0, scrollSize - clientSize);
+    const thumbRange = Math.max(1, clientSize - metrics.thumbSize);
+    const pointerPosition = isHorizontal ? event.clientX : event.clientY;
+    const nextPosition =
+      drag.scrollPosition +
+      ((pointerPosition - drag.pointerPosition) / thumbRange) * scrollRange;
+    if (isHorizontal) viewport.scrollLeft = nextPosition;
+    else viewport.scrollTop = nextPosition;
   };
 
   const endDrag = (event: PointerEvent<HTMLDivElement>) => {
@@ -189,19 +217,23 @@ export function ScrollbarPanel({
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const viewport = viewportRef.current;
     if (!viewport) return;
-    const page = viewport.clientHeight;
+    const isHorizontal = orientation === 'horizontal';
+    const page = isHorizontal ? viewport.clientWidth : viewport.clientHeight;
+    const position = isHorizontal ? viewport.scrollLeft : viewport.scrollTop;
+    const max = isHorizontal ? viewport.scrollWidth : viewport.scrollHeight;
     const targets: Record<string, number> = {
-      ArrowDown: viewport.scrollTop + 40,
-      ArrowUp: viewport.scrollTop - 40,
-      PageDown: viewport.scrollTop + page,
-      PageUp: viewport.scrollTop - page,
+      [isHorizontal ? 'ArrowRight' : 'ArrowDown']: position + 40,
+      [isHorizontal ? 'ArrowLeft' : 'ArrowUp']: position - 40,
+      PageDown: position + page,
+      PageUp: position - page,
       Home: 0,
-      End: viewport.scrollHeight,
+      End: max,
     };
     if (!Object.hasOwn(targets, event.key)) return;
     event.preventDefault();
     revealScrollbar();
-    viewport.scrollTop = targets[event.key];
+    if (isHorizontal) viewport.scrollLeft = targets[event.key];
+    else viewport.scrollTop = targets[event.key];
   };
 
   const handleMouseEnter = () => {
@@ -233,16 +265,21 @@ export function ScrollbarPanel({
           id={id}
           ref={viewportRef}
           className="syncode-scrollbar-viewport"
-          onScroll={handleScroll}
+          onScroll={(event) => {
+            handleScroll();
+            onViewportScroll?.(event);
+          }}
         >
           <div className="syncode-scrollbar-content">{children}</div>
         </div>
         <div
-          className={`scrollbar vertical syncode-scrollbar-track ${scrollbarClass}`}
+          className={`scrollbar ${orientation} syncode-scrollbar-track ${scrollbarClass}`}
           role="scrollbar"
-          aria-label="Scroll content"
+          aria-label={
+            orientation === 'horizontal' ? 'Scroll tabs' : 'Scroll content'
+          }
           aria-controls={id}
-          aria-orientation="vertical"
+          aria-orientation={orientation}
           aria-valuemin={0}
           aria-valuemax={100}
           aria-valuenow={metrics.value}
@@ -264,7 +301,11 @@ export function ScrollbarPanel({
           <div
             ref={sliderRef}
             className="slider"
-            style={{ height: metrics.thumbHeight, top: metrics.thumbTop }}
+            style={
+              orientation === 'horizontal'
+                ? { width: metrics.thumbSize, left: metrics.thumbPosition }
+                : { height: metrics.thumbSize, top: metrics.thumbPosition }
+            }
           />
         </div>
       </div>

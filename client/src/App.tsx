@@ -3,7 +3,7 @@ import {
   Routes,
   Route,
   useNavigate,
-  Navigate,
+  Link,
   useParams,
   useLocation,
 } from 'react-router-dom';
@@ -14,16 +14,27 @@ import { ThemeInitializer } from './components/editor/ThemePicker';
 import { GithubOAuthCallback } from './components/github/GithubOAuthCallback';
 import { GithubAuthProvider } from './github/GithubAuthProvider';
 import { AppFeedbackProvider } from './components/shared/AppFeedback';
+import { AppActivityProvider } from './components/shared/AppActivity';
 import { isValidRoomAccessKey } from './utils/roomInvites';
-import {
-  createSiteId,
-  getStoredDisplayName,
-  getOrCreateParticipantId,
-  setStoredColor,
-  setStoredDisplayName,
-  setParticipantId,
-  setStoredRoomCreatorToken,
-} from './utils/userStorage';
+import { storeRoomProfile } from './utils/userStorage';
+import { createRoomSession } from './utils/roomCreation';
+import { SyncodeLogo } from './components/shared/SyncodeLogo';
+import { PrivacyPolicyPage } from './components/shared/PrivacyPolicyPage';
+
+function NotFoundPage() {
+  return (
+    <main className="home-page not-found-page">
+      <Link to="/" className="home-title" aria-label="Syncode home">
+        <SyncodeLogo className="home-logo" />
+      </Link>
+      <h1>Page not found</h1>
+      <p>The page you requested does not exist.</p>
+      <Link className="home-secondary not-found-link" to="/">
+        Back to Syncode
+      </Link>
+    </main>
+  );
+}
 
 function Home() {
   const navigate = useNavigate();
@@ -31,47 +42,47 @@ function Home() {
   const [creating, setCreating] = useState(false);
   const [intent, setIntent] = useState<'create' | 'join' | null>(null);
 
-  async function startRoom({ displayName, color, invite }: RoomProfileForm) {
-    if (intent === 'create') setCreating(true);
-    setError('');
-    if (intent === 'create') {
-      try {
-        const participantId = createSiteId();
-        const response = await fetch('/api/rooms', { method: 'POST' });
-        if (!response.ok)
-          throw new Error(`Room creation failed (${response.status})`);
-        const { roomId, accessKey, creatorToken } = await response.json();
-        if (!roomId || !accessKey || !creatorToken)
-          throw new Error('The server did not return a complete room invite.');
-        setStoredDisplayName(roomId, displayName);
-        setParticipantId(roomId, participantId);
-        setStoredColor(color, participantId);
-        setStoredRoomCreatorToken(roomId, creatorToken);
-        navigate(`/room/${roomId}#key=${accessKey}`, { replace: true });
-      } catch {
-        setIntent(null);
-        setError('Could not create a room. Please try again.');
-        setCreating(false);
-      }
-      return;
+  async function createRoom(displayName: string, color: string) {
+    setCreating(true);
+    try {
+      const roomUrl = await createRoomSession(displayName, color);
+      navigate(roomUrl, { replace: true });
+    } catch {
+      setIntent(null);
+      setError('Could not create a room. Please try again.');
+      setCreating(false);
     }
+  }
 
+  function joinRoom(
+    displayName: string,
+    color: string,
+    invite?: RoomProfileForm['invite']
+  ) {
     if (!invite) {
       setError('Use a complete room invite link with its access key.');
       return;
     }
-    const name = getStoredDisplayName(invite.roomId) ?? displayName;
-    const participantId = getOrCreateParticipantId(invite.roomId);
-    setStoredDisplayName(invite.roomId, name);
-    setStoredColor(color, participantId);
+    storeRoomProfile(invite.roomId, displayName, color);
     navigate(`/room/${invite.roomId}#key=${invite.accessKey}`, {
       replace: true,
     });
   }
 
+  async function startRoom({ displayName, color, invite }: RoomProfileForm) {
+    setError('');
+    if (intent === 'create') {
+      await createRoom(displayName, color);
+      return;
+    }
+    joinRoom(displayName, color, invite);
+  }
+
   return (
     <main className="home-page">
-      <h1>Syncode</h1>
+      <h1 className="home-title">
+        <SyncodeLogo className="home-logo" />
+      </h1>
       <div className="home-actions">
         <button onClick={() => setIntent('create')} disabled={creating}>
           Create a room
@@ -90,6 +101,9 @@ function Home() {
           onStart={startRoom}
         />
       )}
+      <footer className="home-footer">
+        <Link to="/privacy">Privacy</Link>
+      </footer>
     </main>
   );
 }
@@ -104,6 +118,9 @@ function RoomRoute() {
   if (!isValidRoomAccessKey(accessKey)) {
     return (
       <main className="home-page">
+        <h1 className="home-title">
+          <SyncodeLogo className="home-logo" />
+        </h1>
         <p
           style={{
             color: 'var(--text-muted)',
@@ -135,12 +152,15 @@ function App() {
     <GithubAuthProvider>
       <ThemeInitializer />
       <AppFeedbackProvider>
-        <Routes>
-          <Route path="/" element={<Home />} />
-          <Route path="/github/callback" element={<GithubOAuthCallback />} />
-          <Route path="/room/:roomId" element={<RoomRoute />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+        <AppActivityProvider>
+          <Routes>
+            <Route path="/" element={<Home />} />
+            <Route path="/privacy" element={<PrivacyPolicyPage />} />
+            <Route path="/github/callback" element={<GithubOAuthCallback />} />
+            <Route path="/room/:roomId" element={<RoomRoute />} />
+            <Route path="*" element={<NotFoundPage />} />
+          </Routes>
+        </AppActivityProvider>
       </AppFeedbackProvider>
     </GithubAuthProvider>
   );

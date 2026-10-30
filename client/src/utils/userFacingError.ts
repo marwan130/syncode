@@ -116,14 +116,6 @@ const SAFE_MESSAGES = new Map<string, string>([
     'Terminal output is being requested too quickly. Wait a moment and try again.',
   ],
   [
-    'Execution rate limit reached. Please wait before submitting another run.',
-    'Code is being run too quickly. Wait a moment and try again.',
-  ],
-  [
-    'The execution queue is full. Try again shortly.',
-    'The code runner is busy. Wait a moment and try again.',
-  ],
-  [
     'Terminal session has ended.',
     'This terminal session has ended. Open a new terminal to continue.',
   ],
@@ -143,66 +135,29 @@ const SAFE_MESSAGES = new Map<string, string>([
     'Join a room before using a terminal.',
     'Join a room before using a terminal.',
   ],
-  ['Join a room before running code.', 'Join a room before running code.'],
   [
     'Invalid terminal output offset.',
     'Could not load terminal output. Open a new terminal and try again.',
-  ],
-  [
-    'Invalid execution id.',
-    'That code run is no longer available. Run it again to continue.',
-  ],
-  [
-    'Execution not found.',
-    'This code run is no longer available. Run it again to continue.',
   ],
   [
     'The terminal service is unavailable.',
     'The terminal service is unavailable. Try again shortly.',
   ],
   [
-    'The code execution service is unavailable.',
-    'The code runner is unavailable. Try again shortly.',
-  ],
-  [
     'The terminal service did not respond in time.',
     'The terminal service took too long to respond. Try again.',
-  ],
-  [
-    'The code execution service did not respond in time.',
-    'The code runner took too long to respond. Try again.',
   ],
   [
     'The isolated Bash terminal could not start. Check that Docker is available and the syncode-runner-bash image is built.',
     'Could not start a Bash terminal. Try again or contact the room host.',
   ],
   [
-    'Could not queue code for execution. Please try again.',
-    'Could not start the code run. Try again shortly.',
-  ],
-  [
     'The terminal service returned an invalid response.',
     'The terminal service returned an unexpected response. Try again.',
   ],
   [
-    'The execution service returned an invalid response.',
-    'The code runner returned an unexpected response. Try again.',
-  ],
-  [
     'Code execution is not configured on this server.',
     'Code execution is not available right now.',
-  ],
-  [
-    'Could not attach an interactive terminal to this run.',
-    'Could not attach a terminal to this code run. Try again.',
-  ],
-  [
-    'Invalid execution request.',
-    'Could not start the code run. Check the selected file and try again.',
-  ],
-  [
-    'Source must be 64 KB or less.',
-    'This file is too large to run. Reduce it to 64 KB or less.',
   ],
   [
     'This file type cannot be run in the terminal.',
@@ -211,10 +166,6 @@ const SAFE_MESSAGES = new Map<string, string>([
   [
     'Invalid terminal input.',
     'Could not send that terminal input. Check it and try again.',
-  ],
-  [
-    'This execution is no longer accepting input.',
-    'This code run has finished and no longer accepts input.',
   ],
 ]);
 
@@ -234,12 +185,5 @@ export function userFacingError(error: unknown, fallback: string): string {
   ) {
     return 'This room is full. Ask the host to make space before joining.';
   }
-  if (
-    /^Execution rate limit reached\. Try again in \d+ seconds\.$/.test(message)
-  ) {
-    const seconds = Number(message.match(/\d+/)?.[0]);
-    return `Code is being run too quickly. Try again in ${seconds} seconds.`;
-  }
-
   return fallback;
 }

@@ -11,15 +11,6 @@ describe('userFacingError', () => {
     ).toBe('That room invite is invalid or has expired.');
   });
 
-  it('formats known rate limit delays without exposing raw errors', () => {
-    expect(
-      userFacingError(
-        new Error('Execution rate limit reached. Try again in 12 seconds.'),
-        'Try again.'
-      )
-    ).toBe('Code is being run too quickly. Try again in 12 seconds.');
-  });
-
   it('uses a safe fallback for unknown server errors', () => {
     expect(
       userFacingError(
