@@ -31,7 +31,9 @@ describe('normalizeImportPath', () => {
   });
 
   it('rejects paths deeper than the project tree limit', () => {
-    expect(() => normalizeImportPath(`${Array(33).fill('folder').join('/')}/file.ts`)).toThrow();
+    expect(() =>
+      normalizeImportPath(`${Array(33).fill('folder').join('/')}/file.ts`)
+    ).toThrow();
   });
 
   it('rejects values that do not satisfy the runtime string contract', () => {
