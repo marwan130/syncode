@@ -203,7 +203,10 @@ function createInitialOperations(
 ): CrdtOp[] {
   return peers.flatMap(({ document, siteId }) => {
     const first = document.localInsert(null, siteId.slice(-1));
-    const second = document.localInsert(first.char.id, siteId.slice(-1).toLowerCase());
+    const second = document.localInsert(
+      first.char.id,
+      siteId.slice(-1).toLowerCase()
+    );
     return [first, second];
   });
 }
@@ -221,7 +224,10 @@ function shuffleOperations<T>(items: T[], seed: number): T[] {
   const shuffled = [...items];
   for (let index = shuffled.length - 1; index > 0; index--) {
     const swapIndex = Math.floor(nextRandom() * (index + 1));
-    [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
+    [shuffled[index], shuffled[swapIndex]] = [
+      shuffled[swapIndex],
+      shuffled[index],
+    ];
   }
   return shuffled;
 }
@@ -233,7 +239,9 @@ function deliverRemoteOperations(
 ): void {
   for (const operation of operations) {
     const operationSiteId =
-      operation.type === 'insert' ? operation.char.id.siteId : operation.id.siteId;
+      operation.type === 'insert'
+        ? operation.char.id.siteId
+        : operation.id.siteId;
     if (operationSiteId !== localSiteId) buffer.process(operation);
   }
 }

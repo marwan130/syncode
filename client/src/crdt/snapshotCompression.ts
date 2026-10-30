@@ -8,7 +8,9 @@ export async function compressCrdtSnapshot(snapshot: string): Promise<{
   compressedBytes: number;
 }> {
   if (typeof CompressionStream === 'undefined')
-    throw new Error('This browser does not support compressed project snapshots.');
+    throw new Error(
+      'This browser does not support compressed project snapshots.'
+    );
   const snapshotBytes = new TextEncoder().encode(snapshot).byteLength;
   if (snapshotBytes > MAX_EXPANDED_SNAPSHOT_BYTES)
     throw new Error(
@@ -22,17 +24,30 @@ export async function compressCrdtSnapshot(snapshot: string): Promise<{
   );
   let binary = '';
   for (let offset = 0; offset < compressed.length; offset += 0x8000)
-    binary += String.fromCharCode(...compressed.subarray(offset, offset + 0x8000));
+    binary += String.fromCharCode(
+      ...compressed.subarray(offset, offset + 0x8000)
+    );
   const encoded = btoa(binary);
   if (encoded.length > MAX_COMPRESSED_SNAPSHOT_BASE64_BYTES)
-    throw new Error('The compressed file snapshot exceeds the 5 MB per-file limit.');
+    throw new Error(
+      'The compressed file snapshot exceeds the 5 MB per-file limit.'
+    );
   const value = COMPRESSED_SNAPSHOT_PREFIX + encoded;
-  return { value, snapshotBytes, compressedBytes: new TextEncoder().encode(value).byteLength };
+  return {
+    value,
+    snapshotBytes,
+    compressedBytes: new TextEncoder().encode(value).byteLength,
+  };
 }
 
-export async function decompressCrdtSnapshot(snapshot: string): Promise<string> {
+export async function decompressCrdtSnapshot(
+  snapshot: string
+): Promise<string> {
   if (!snapshot.startsWith(COMPRESSED_SNAPSHOT_PREFIX)) return snapshot;
-  if (snapshot.length - COMPRESSED_SNAPSHOT_PREFIX.length > MAX_COMPRESSED_SNAPSHOT_BASE64_BYTES)
+  if (
+    snapshot.length - COMPRESSED_SNAPSHOT_PREFIX.length >
+    MAX_COMPRESSED_SNAPSHOT_BASE64_BYTES
+  )
     throw new Error('The compressed file snapshot exceeds its size limit.');
   if (typeof DecompressionStream === 'undefined')
     throw new Error('This browser cannot open the imported project snapshot.');

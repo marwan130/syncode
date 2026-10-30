@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { RoomEntry } from '../../providers/SignalRCrdtProvider';
-import { ProjectTree, type ProjectTreeOperation } from '../ProjectTree';
+import {
+  parseProjectTreeOperation,
+  ProjectTree,
+  type ProjectTreeOperation,
+} from '../ProjectTree';
 
 const rootFolder: RoomEntry = {
   id: 'folder-root',
@@ -45,6 +49,37 @@ describe('ProjectTree', () => {
     expectSameTree(left, right, [
       { id: 'file-main', name: 'index.ts', parentId: null, isFolder: false },
     ]);
+  });
+
+  it('parses serialized project tree history operations', () => {
+    const source = ProjectTree.fromEntries('source', []);
+    const operation = source.createEntry(rootFolder);
+    const restored = ProjectTree.fromEntries('restored', []);
+
+    restored.applyOperation(
+      parseProjectTreeOperation(JSON.stringify(operation))
+    );
+
+    expect(restored.getEntries()).toEqual([rootFolder]);
+  });
+
+  it('rejects duplicate sibling names regardless of case', () => {
+    const tree = ProjectTree.fromEntries('site-a', [rootFolder]);
+    tree.createEntry({
+      id: 'file-main',
+      name: 'main.ts',
+      parentId: rootFolder.id,
+      isFolder: false,
+    });
+
+    expect(() =>
+      tree.createEntry({
+        id: 'file-duplicate',
+        name: 'MAIN.ts',
+        parentId: rootFolder.id,
+        isFolder: true,
+      })
+    ).toThrow('A file or folder with that name already exists here.');
   });
 
   it('uses Lamport time and site ID to resolve concurrent renames', () => {
