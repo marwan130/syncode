@@ -9,7 +9,11 @@ public interface IRoomParticipantAdmissionStore
         int maxParticipants,
         int maxActiveRooms,
         int maxConnections,
-        bool isRoomCreator);
+        bool isRoomCreator,
+        bool isReturningMember,
+        bool returningMemberIsAdmin,
+        bool returningMemberIsLocked,
+        bool hasReturningAdmin);
 
     Task<IReadOnlyList<Participant>> GetParticipantsAsync(string roomId);
 }

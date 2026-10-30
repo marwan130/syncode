@@ -74,6 +74,7 @@ public static class ServerServiceCollectionExtensions
         services.AddSingleton<IGithubAuthRateLimiter>(provider =>
             provider.GetRequiredService<RedisRoomRateLimitStore>());
         services.AddSingleton<ProjectImportService>();
+        services.AddSingleton<ProjectImportCancellationRegistry>();
         services.AddSingleton<RoomInteractionService>();
         services.AddSingleton<IRoomParticipantCommands>(provider =>
             provider.GetRequiredService<IRoomParticipantStore>());
@@ -143,6 +144,7 @@ public static class ServerServiceCollectionExtensions
         services.AddSingleton<GithubApiClient>();
         services.AddSingleton<GithubRepositoryImportService>();
         services.AddSingleton<GithubRepositoryPushService>();
+        services.AddSingleton<GithubRepositoryCreateService>();
         services.AddSingleton<GithubRepositoryBrowserService>();
         services.AddSingleton<GithubTokenVault>();
         services.AddSingleton<GithubOAuthService>();

@@ -37,8 +37,18 @@ internal static class RedisParticipantScripts
                 end
             elseif hasAdmin then
                 redis.call('HSET', KEYS[2], 'hasHadAdmin', '1')
-            elseif redis.call('HGET', KEYS[2], 'hasHadAdmin') == '1' and ARGV[12] ~= '1' then
-                participant.IsAdmin = true
+            else
+                local memberId = participant.JoinRequestId or participant.joinRequestId
+                local memberValue = memberId and redis.call('HGET', KEYS[6], memberId)
+                local adminRevoked = false
+                if memberValue then
+                    local member = cjson.decode(memberValue)
+                    adminRevoked = member.AdminRevoked or member.adminRevoked or false
+                end
+                if redis.call('HGET', KEYS[2], 'hasHadAdmin') == '1'
+                    and ARGV[12] ~= '1' and not adminRevoked then
+                    participant.IsAdmin = true
+                end
             end
         end
         redis.call('HSET', KEYS[1], ARGV[1], cjson.encode(participant))
@@ -85,6 +95,36 @@ internal static class RedisParticipantScripts
         local targetValue = redis.call('HGET', KEYS[1], ARGV[2])
         if not targetValue then return '0' end
         local target = cjson.decode(targetValue)
+        local memberId = target.JoinRequestId or target.joinRequestId
+        if memberId then
+            local memberValue = redis.call('HGET', KEYS[4], memberId)
+            local member
+            if memberValue then
+                member = cjson.decode(memberValue)
+            else
+                member = {
+                    RequestId = memberId,
+                    DisplayName = target.DisplayName or target.displayName or '',
+                    Color = target.Color or target.color or '',
+                    AvatarUrl = target.AvatarUrl or target.avatarUrl or cjson.null,
+                    IsApproved = true,
+                    IsStableRequestId = true
+                }
+            end
+            member.ConnectionId = target.ConnectionId or target.connectionId or ARGV[2]
+            member.DisplayName = target.DisplayName or target.displayName or member.DisplayName
+            member.Color = target.Color or target.color or member.Color
+            member.AvatarUrl = target.AvatarUrl or target.avatarUrl or member.AvatarUrl or cjson.null
+            member.IsApproved = true
+            member.IsStableRequestId = true
+            member.IsAdmin = false
+            if target.IsAdmin or target.isAdmin then member.AdminRevoked = true end
+            member.IsLocked = (target.IsLocked or target.isLocked or false) and not member.IsAdmin
+            member.RequiresApproval = true
+            redis.call('HSET', KEYS[4], memberId, cjson.encode(member))
+            redis.call('HDEL', KEYS[5], memberId)
+            redis.call('DEL', 'room:' .. ARGV[3] .. ':rejected-join-request:' .. memberId)
+        end
         redis.call('HDEL', KEYS[1], ARGV[2])
         if redis.call('GET', KEYS[3]) == ARGV[3] then
             redis.call('DEL', KEYS[3])
@@ -123,6 +163,17 @@ internal static class RedisParticipantScripts
         local target = cjson.decode(targetValue)
         target.IsAdmin = ARGV[3] == '1'
         if target.IsAdmin then target.IsLocked = false end
+        local memberId = target.JoinRequestId or target.joinRequestId
+        if memberId then
+            local memberValue = redis.call('HGET', KEYS[2], memberId)
+            if memberValue then
+                local member = cjson.decode(memberValue)
+                member.IsAdmin = target.IsAdmin
+                member.AdminRevoked = not target.IsAdmin
+                if member.IsAdmin then member.IsLocked = false end
+                redis.call('HSET', KEYS[2], memberId, cjson.encode(member))
+            end
+        end
         local updated = cjson.encode(target)
         redis.call('HSET', KEYS[1], ARGV[2], updated)
         return updated
@@ -133,6 +184,35 @@ internal static class RedisParticipantScripts
         redis.call('SADD', KEYS[1], ARGV[1])
         redis.call('PEXPIRE', KEYS[1], 120000)
         return 1
+        """;
+
+    internal const string PromoteParticipantScript = """
+        for _, value in ipairs(redis.call('HVALS', KEYS[1])) do
+            local existing = cjson.decode(value)
+            if existing.IsAdmin or existing.isAdmin then return false end
+        end
+        local value = redis.call('HGET', KEYS[1], ARGV[1])
+        if not value then return false end
+        local participant = cjson.decode(value)
+        local memberId = participant.JoinRequestId or participant.joinRequestId
+        if memberId then
+            local memberValue = redis.call('HGET', KEYS[2], memberId)
+            if memberValue then
+                local member = cjson.decode(memberValue)
+                if member.IsAdmin ~= true or member.AdminRevoked or member.adminRevoked then
+                    return false
+                end
+                member.IsAdmin = true
+                member.IsLocked = false
+                member.AdminRevoked = false
+                redis.call('HSET', KEYS[2], memberId, cjson.encode(member))
+            end
+        end
+        participant.IsAdmin = true
+        participant.IsLocked = false
+        local updated = cjson.encode(participant)
+        redis.call('HSET', KEYS[1], ARGV[1], updated)
+        return updated
         """;
 
 }

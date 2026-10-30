@@ -40,37 +40,14 @@ public sealed class RedisRoomRateLimitStore(IConnectionMultiplexer redis) :
         return TryConsumeAsync([key, key], operationId, 5, 20, 5, 20);
     }
 
-    async Task<bool> IRoomCreationRateLimiter.TryConsumeAsync(
+    Task<bool> IRoomCreationRateLimiter.TryConsumeAsync(
         string clientAddress,
         string operationId)
     {
         var addressHash = HashAddress(clientAddress);
-        var addressAllowed = await TryConsumeAsync(
-            [
-                $"syncode:{{room-create-{addressHash}}}:10s",
-                $"syncode:{{room-create-{addressHash}}}:1m",
-                $"syncode:{{room-create-{addressHash}}}:10s",
-                $"syncode:{{room-create-{addressHash}}}:1m",
-            ],
-            operationId,
-            5,
-            20,
-            5,
-            20);
-        if (!addressAllowed) return false;
-
-        return await TryConsumeAsync(
-            [
-                "syncode:{room-create-global}:10s",
-                "syncode:{room-create-global}:1m",
-                "syncode:{room-create-global}:10s",
-                "syncode:{room-create-global}:1m",
-            ],
-            operationId,
-            100,
-            600,
-            100,
-            600);
+        return TryConsumeAsync(
+            [$"syncode:room-create:rate:{addressHash}:10s", $"syncode:room-create:rate:{addressHash}:1m"],
+            operationId, 5, 30, 5, 30);
     }
 
     public Task<bool> TryConsumeProjectImportAsync(string roomId, string connectionId, string importId) =>

@@ -13,8 +13,16 @@ public sealed class RoomJoinService(
     IProjectTreeStateReader projectTreeState,
     IProjectImportBaselineStore githubRepository,
     IProjectRootNameStore projectRootNames,
+    IRoomRecoveryStore recovery,
     RoomCapacityLimits roomLimits)
 {
+    public Task<bool> TryRestoreExpiredRoomAsync(
+        string roomId,
+        string accessKey,
+        string? creatorToken,
+        string? requestId) =>
+        recovery.TryRestoreExpiredRoomAsync(roomId, accessKey, creatorToken, requestId);
+
     public async Task<RoomJoinRequest> ValidateAsync(
         string roomId,
         string accessKey,
@@ -49,7 +57,12 @@ public sealed class RoomJoinService(
     public async Task<RoomJoinState> JoinAsync(
         RoomJoinRequest request,
         string connectionId,
-        string instanceId)
+        string instanceId,
+        string? joinRequestId = null,
+        bool isReturningMember = false,
+        bool returningMemberIsAdmin = false,
+        bool returningMemberIsLocked = false,
+        bool hasReturningAdmin = false)
     {
         var roomId = request.RoomId;
 
@@ -64,12 +77,17 @@ public sealed class RoomJoinService(
                 false,
                 false,
                 instanceId,
-                request.AvatarUrl),
+                request.AvatarUrl,
+                joinRequestId ?? string.Empty),
             instanceId,
             roomLimits.MaxParticipantsPerRoom,
             roomLimits.MaxActiveRooms,
             roomLimits.MaxConnectionsPerInstance,
-            request.IsRoomCreator);
+            request.IsRoomCreator,
+            isReturningMember,
+            returningMemberIsAdmin,
+            returningMemberIsLocked,
+            hasReturningAdmin);
         if (admission != 1)
             throw new RoomOperationException(admission switch
             {

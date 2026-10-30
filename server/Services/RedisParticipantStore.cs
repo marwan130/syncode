@@ -25,7 +25,7 @@ public sealed class RedisParticipantStore : IRoomParticipantStore
     {
         return (int)await _db.ScriptEvaluateAsync(
             RedisParticipantScripts.AdmitParticipantScript,
-            [RedisRoomKeys.Participants(roomId), RedisRoomKeys.Meta(roomId), RedisRoomKeys.ActiveRooms, RedisRoomKeys.InstanceConnections(instanceId), RedisRoomKeys.ConnectionRoom(participant.ConnectionId)],
+            [RedisRoomKeys.Participants(roomId), RedisRoomKeys.Meta(roomId), RedisRoomKeys.ActiveRooms, RedisRoomKeys.InstanceConnections(instanceId), RedisRoomKeys.ConnectionRoom(participant.ConnectionId), RedisRoomKeys.PreviousApprovedParticipants(roomId)],
             [participant.ConnectionId, JsonSerializer.Serialize(participant), instanceId, maxParticipants, roomId, maxActiveRooms, maxConnections, isRoomCreator ? "1" : "0", isReturningMember ? "1" : "0", returningMemberIsAdmin ? "1" : "0", returningMemberIsLocked ? "1" : "0", hasReturningAdmin ? "1" : "0"]);
     }
 
@@ -69,7 +69,13 @@ public sealed class RedisParticipantStore : IRoomParticipantStore
     {
         var result = await _db.ScriptEvaluateAsync(
             RedisParticipantScripts.KickParticipantScript,
-            [RedisRoomKeys.Participants(roomId), RedisRoomKeys.ActiveRooms, RedisRoomKeys.ConnectionRoom(targetConnectionId)],
+            [
+                RedisRoomKeys.Participants(roomId),
+                RedisRoomKeys.ActiveRooms,
+                RedisRoomKeys.ConnectionRoom(targetConnectionId),
+                RedisRoomKeys.PreviousApprovedParticipants(roomId),
+                RedisRoomKeys.PendingJoinRequests(roomId)
+            ],
             [actorConnectionId, targetConnectionId, roomId]);
         var value = (string?)result;
         if (int.TryParse(value, out var status)) return new ParticipantActionResult(status, null);
@@ -115,7 +121,7 @@ public sealed class RedisParticipantStore : IRoomParticipantStore
     {
         var result = await _db.ScriptEvaluateAsync(
             RedisParticipantScripts.SetParticipantAdminScript,
-            [RedisRoomKeys.Participants(roomId)],
+            [RedisRoomKeys.Participants(roomId), RedisRoomKeys.PreviousApprovedParticipants(roomId)],
             [actorConnectionId, targetConnectionId, isAdmin ? "1" : "0"]);
         var value = (string?)result;
         if (int.TryParse(value, out var status)) return new ParticipantActionResult(status, null);
@@ -125,6 +131,17 @@ public sealed class RedisParticipantStore : IRoomParticipantStore
 
     public async Task<bool> IsParticipantAsync(string roomId, string connectionId) =>
         await _db.HashExistsAsync(RedisRoomKeys.Participants(roomId), connectionId);
+
+    public async Task<Participant?> PromoteToAdminAsync(string roomId, string connectionId)
+    {
+        var result = await _db.ScriptEvaluateAsync(
+            RedisParticipantScripts.PromoteParticipantScript,
+            [RedisRoomKeys.Participants(roomId), RedisRoomKeys.PreviousApprovedParticipants(roomId)],
+            [connectionId]);
+        return result.IsNull
+            ? null
+            : JsonSerializer.Deserialize<Participant>((string)result!, JsonOptions);
+    }
 
     public async Task<IReadOnlyList<Participant>> GetParticipantsAsync(string roomId)
     {

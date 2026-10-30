@@ -8,4 +8,5 @@ public record Participant(
     bool IsAdmin = false,
     bool IsLocked = false,
     string InstanceId = "",
-    string? AvatarUrl = null);
+    string? AvatarUrl = null,
+    string JoinRequestId = "");
