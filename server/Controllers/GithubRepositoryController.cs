@@ -10,6 +10,7 @@ namespace server.Controllers;
 public sealed class GithubRepositoryController(
     GithubRepositoryImportService importService,
     GithubRepositoryPushService pushService,
+    GithubRepositoryCreateService createService,
     GithubRepositoryBrowserService browserService,
     GithubRepositoryAccessStore repositoryAccess,
     IConfiguration configuration,
@@ -35,9 +36,12 @@ public sealed class GithubRepositoryController(
         [FromQuery] string owner,
         [FromQuery] string name,
         [FromQuery] string branch,
-        CancellationToken cancellationToken) =>
-        RunBrowserRequestAsync(
-            () => browserService.ListHistoryAsync(owner, name, branch, GetSessionId(), cancellationToken));
+        CancellationToken cancellationToken,
+        [FromQuery] int page = 1) =>
+        page is < 1 or > 10000
+            ? Task.FromResult<IActionResult>(BadRequest(new { error = "invalid_request" }))
+            : RunBrowserRequestAsync(
+                () => browserService.ListHistoryAsync(owner, name, branch, page, GetSessionId(), cancellationToken));
 
     [HttpGet("commit")]
     public Task<IActionResult> GetCommitDetails(
@@ -139,6 +143,39 @@ public sealed class GithubRepositoryController(
             var result = await pushService.PushAsync(
                 request,
                 GetSessionId(),
+                cancellationToken);
+            return Ok(result);
+        }
+        catch (GithubRepositoryException exception)
+        {
+            return StatusCode(exception.StatusCode, new { error = exception.Code });
+        }
+        catch (GithubOAuthException exception)
+        {
+            return StatusCode(
+                exception.Unauthorized ? StatusCodes.Status401Unauthorized : StatusCodes.Status503ServiceUnavailable,
+                new { error = exception.Unauthorized ? "reauthorize" : "github_unavailable" });
+        }
+    }
+
+    [HttpPost("create")]
+    [RequestSizeLimit(4096)]
+    public async Task<IActionResult> CreateAndPush(
+        [FromBody] GithubRepositoryCreateRequest? request,
+        CancellationToken cancellationToken)
+    {
+        if (!GithubRequestSecurity.HasTrustedOrigin(Request, configuration, environment))
+            return StatusCode(StatusCodes.Status403Forbidden);
+        if (request is null) return BadRequest(new { error = "invalid_request" });
+        var adminConnectionId = await repositoryAccess.ValidateAdminGrantAsync(
+            Request.Headers["X-Syncode-Admin-Grant"].FirstOrDefault(), request.RoomId);
+        if (adminConnectionId is null) return StatusCode(StatusCodes.Status403Forbidden);
+        try
+        {
+            var result = await createService.CreateAndPushAsync(
+                request,
+                GetSessionId(),
+                adminConnectionId,
                 cancellationToken);
             return Ok(result);
         }

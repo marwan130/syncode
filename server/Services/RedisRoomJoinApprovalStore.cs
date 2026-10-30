@@ -80,22 +80,13 @@ public sealed class RedisRoomJoinApprovalStore(IConnectionMultiplexer redis) : I
         member.IsStableRequestId = true
         member.IsAdmin = ARGV[6] == '1'
         member.IsLocked = ARGV[7] == '1' and not member.IsAdmin
+        member.RequiresApproval = false
         redis.call('HSET', KEYS[1], ARGV[1], cjson.encode(member))
         return 1
         """;
 
     private const string RemoveMemberScript = """
         redis.call('HDEL', KEYS[1], ARGV[1])
-        return 1
-        """;
-
-    private const string UpdateMemberRoleScript = """
-        local value = redis.call('HGET', KEYS[1], ARGV[1])
-        if not value then return 0 end
-        local member = cjson.decode(value)
-        member.IsAdmin = ARGV[2] == '1'
-        if member.IsAdmin then member.IsLocked = false end
-        redis.call('HSET', KEYS[1], ARGV[1], cjson.encode(member))
         return 1
         """;
 
@@ -191,15 +182,6 @@ public sealed class RedisRoomJoinApprovalStore(IConnectionMultiplexer redis) : I
             RemoveMemberScript,
             [RedisRoomKeys.PreviousApprovedParticipants(roomId)],
             [requestId]);
-    }
-
-    public async Task UpdateMemberAdminAsync(string roomId, string requestId, bool isAdmin)
-    {
-        if (!IsValidRequestId(requestId)) return;
-        await _db.ScriptEvaluateAsync(
-            UpdateMemberRoleScript,
-            [RedisRoomKeys.PreviousApprovedParticipants(roomId)],
-            [requestId, isAdmin ? "1" : "0"]);
     }
 
     public async Task UpdateMemberLockAsync(string roomId, string requestId, bool isLocked)

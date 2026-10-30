@@ -11,6 +11,12 @@ public sealed class RedisProjectTreeStore : IProjectTreeOperationStore
     private const string AppendProjectTreeOperationScript = """
         local okOperation, operation = pcall(cjson.decode, ARGV[2])
         if not okOperation or type(operation) ~= 'table' then return -2 end
+        local suppliedNameKeys = {}
+        if ARGV[5] and ARGV[5] ~= '' then
+            local okNameKeys
+            okNameKeys, suppliedNameKeys = pcall(cjson.decode, ARGV[5])
+            if not okNameKeys or type(suppliedNameKeys) ~= 'table' then return -2 end
+        end
         local counter = tonumber(ARGV[4])
         if type(operation.opId) ~= 'table' or operation.opId.siteId ~= ARGV[3] or operation.opId.counter ~= counter then return -2 end
         local previousCounter = tonumber(redis.call('HGET', KEYS[5], ARGV[3]) or '0')
@@ -94,18 +100,30 @@ public sealed class RedisProjectTreeStore : IProjectTreeOperationStore
                 selectRegister(deleted, candidate.entryId, {opId = candidate.opId, value = true})
             end
         end
-        local entryParents = {}
+        local entryParents, entryNames = {}, {}
+        for entryId, nameKey in pairs(suppliedNameKeys) do
+            if type(nameKey) == 'string' then redis.call('HSETNX', KEYS[8], entryId, nameKey) end
+        end
         for _, value in ipairs(redis.call('HVALS', KEYS[7])) do
             local okEntry, entry = pcall(cjson.decode, value)
             if not okEntry or type(entry) ~= 'table' then return -2 end
             local id = entry.id or entry.Id
+            local name = entry.name
+            if name == nil then name = entry.Name end
             local parent = entry.parentId
             if parent == nil or parent == cjson.null then parent = entry.ParentId end
             if parent == cjson.null then parent = nil end
-            if id then entryParents[id] = parent end
+            if id then
+                entryParents[id] = parent
+                if type(name) == 'string' then entryNames[id] = name end
+            end
         end
         for entryId, create in pairs(creates) do
             entryParents[entryId] = parents[entryId] and parents[entryId].value or create.value.parentId
+            entryNames[entryId] = create.value.name
+        end
+        for entryId, name in pairs(names) do
+            entryNames[entryId] = name.value
         end
         local activeCount = 0
         local depthRoot = nil
@@ -136,6 +154,58 @@ public sealed class RedisProjectTreeStore : IProjectTreeOperationStore
             if not hidden then activeCount = activeCount + 1 end
         end
         if operation.type == 'create' and activeCount > 500 then return -5 end
+        if operation.type == 'create' or operation.type == 'rename' or operation.type == 'move' then
+            local entryId = operation.type == 'create' and operation.entry.id or operation.entryId
+            local candidateName = entryNames[entryId]
+            local candidateParent = entryParents[entryId]
+            if candidateParent == cjson.null then candidateParent = nil end
+            local candidateNameKey = redis.call('HGET', KEYS[8], entryId)
+            local nameRegister = names[entryId]
+            local nameChangedByOperation = nameRegister and
+                nameRegister.opId.siteId == operation.opId.siteId and
+                nameRegister.opId.counter == operation.opId.counter
+            if nameChangedByOperation and ARGV[6] and ARGV[6] ~= '' then
+                candidateNameKey = ARGV[6]
+            end
+            local candidateHidden = false
+            local current = entryId
+            local visited = {}
+            while current and not visited[current] do
+                visited[current] = true
+                if deleted[current] then
+                    candidateHidden = true
+                    break
+                end
+                current = entryParents[current]
+                if current == cjson.null then current = nil end
+            end
+            if not candidateHidden and type(candidateName) == 'string' then
+                local normalizedName = candidateNameKey or string.lower(candidateName)
+                for otherId, otherName in pairs(entryNames) do
+                    if otherId ~= entryId and type(otherName) == 'string' and
+                        (entryParents[otherId] == cjson.null and candidateParent == nil or
+                            entryParents[otherId] == candidateParent) then
+                        local otherHidden = false
+                        local ancestor = otherId
+                        local ancestors = {}
+                        while ancestor and not ancestors[ancestor] do
+                            ancestors[ancestor] = true
+                            if deleted[ancestor] then
+                                otherHidden = true
+                                break
+                            end
+                            ancestor = entryParents[ancestor]
+                            if ancestor == cjson.null then ancestor = nil end
+                        end
+                        local otherNameKey = redis.call('HGET', KEYS[8], otherId) or string.lower(otherName)
+                        if not otherHidden and otherNameKey == normalizedName then return -7 end
+                    end
+                end
+            end
+            if nameChangedByOperation and ARGV[6] and ARGV[6] ~= '' then
+                redis.call('HSET', KEYS[8], entryId, ARGV[6])
+            end
+        end
         local operations = {}
         for entryId, create in pairs(creates) do
             table.insert(operations, {type = 'create', opId = create.opId, entry = create.value})
@@ -180,6 +250,7 @@ public sealed class RedisProjectTreeStore : IProjectTreeOperationStore
         redis.call('EXPIRE', KEYS[4], 86400)
         redis.call('EXPIRE', KEYS[5], 86400)
         redis.call('EXPIRE', KEYS[6], 86400)
+        redis.call('EXPIRE', KEYS[8], 86400)
         return 1
         """;
     public async Task<int> AppendProjectTreeOperationAsync(
@@ -187,14 +258,17 @@ public sealed class RedisProjectTreeStore : IProjectTreeOperationStore
         string operationId,
         string operationJson,
         string siteId,
-        long counter)
+        long counter,
+        string? entryNameKeysJson = null,
+        string? incomingNameKey = null)
     {
         var result = await _db.ScriptEvaluateAsync(
             AppendProjectTreeOperationScript,
             [ProjectTreeOperationsKey(roomId), ProjectTreeOperationIndexKey(roomId), ProjectTreeSnapshotKey(roomId),
                 ProjectTreeEntryIndexKey(roomId), ProjectTreeSiteCounterKey(roomId), ProjectTreeSiteLastOperationKey(roomId),
-                FilesKey(roomId)],
-            [operationId, operationJson, siteId, counter]);
+                FilesKey(roomId), ProjectTreeNameKeyKey(roomId)],
+            [operationId, operationJson, siteId, counter, entryNameKeysJson ?? string.Empty,
+                incomingNameKey ?? string.Empty]);
         return (int)result;
     }
 
@@ -219,5 +293,6 @@ public sealed class RedisProjectTreeStore : IProjectTreeOperationStore
     private static string ProjectTreeEntryIndexKey(string roomId) => $"room:{roomId}:project-tree:entry-index";
     private static string ProjectTreeSiteCounterKey(string roomId) => $"room:{roomId}:project-tree:site-counters";
     private static string ProjectTreeSiteLastOperationKey(string roomId) => $"room:{roomId}:project-tree:site-last-operations";
+    private static string ProjectTreeNameKeyKey(string roomId) => $"room:{roomId}:project-tree:name-keys";
     private static string FileSnapshotKey(string roomId, string fileId) => $"room:{roomId}:file:{fileId}:snapshot";
 }

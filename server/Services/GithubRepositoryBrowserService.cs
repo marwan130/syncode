@@ -53,13 +53,14 @@ public sealed class GithubRepositoryBrowserService(
         string owner,
         string name,
         string branch,
+        int page,
         string? sessionId,
         CancellationToken cancellationToken)
     {
         ValidateRepositoryAndBranch(owner, name, branch);
         var (token, _) = await GetSessionAsync(sessionId, cancellationToken);
         var commits = await github.GetAsync<List<GithubApiCommitHistoryItem>>(
-            $"repos/{owner}/{name}/commits?sha={Uri.EscapeDataString(branch)}&per_page=50",
+            $"repos/{owner}/{name}/commits?sha={Uri.EscapeDataString(branch)}&per_page=100&page={page}",
             token,
             cancellationToken);
         return commits

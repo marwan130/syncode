@@ -34,7 +34,18 @@ public sealed class ProjectTreeOperationService(
                 roomId, connectionId, Guid.NewGuid().ToString("N")))
             throw new RoomOperationException("File update rate limit reached. Please wait before trying again.");
 
-        var result = await treeStore.AppendProjectTreeOperationAsync(roomId, operationId, json, siteId, counter);
+        var entryNameKeys = (await state.GetEntriesAsync(roomId))
+            .ToDictionary(entry => entry.Key, entry => entry.Value.Name.ToUpperInvariant(), StringComparer.Ordinal);
+        var entryNameKeysJson = JsonSerializer.Serialize(entryNameKeys);
+        var incomingNameKey = type switch
+        {
+            "create" when operation.TryGetProperty("entry", out var entry) &&
+                TryReadString(entry, "name", out var createName) => createName.ToUpperInvariant(),
+            "rename" when TryReadString(operation, "name", out var renameName) => renameName.ToUpperInvariant(),
+            _ => null
+        };
+        var result = await treeStore.AppendProjectTreeOperationAsync(
+            roomId, operationId, json, siteId, counter, entryNameKeysJson, incomingNameKey);
         ThrowForAppendResult(result);
         if (result == 1 && deletedFileIds.Count > 0)
             await snapshots.DeleteFileSnapshotsAsync(roomId, deletedFileIds);
@@ -101,6 +112,7 @@ public sealed class ProjectTreeOperationService(
         var entries = await state.GetEntriesAsync(roomId);
         if (entries.ContainsKey(entry.Id)) throw new RoomOperationException("That project entry already exists.");
         if (entries.Count >= 500) throw new RoomOperationException("A room can contain up to 500 files and folders.");
+        EnsureSiblingNameAvailable(entries, entry.ParentId, entry.Name);
         if (entry.ParentId is { } parentId)
         {
             if (!entries.TryGetValue(parentId, out var parent) || !parent.IsFolder)
@@ -125,6 +137,7 @@ public sealed class ProjectTreeOperationService(
         var entries = await state.GetEntriesAsync(roomId);
         if (!entries.TryGetValue(id, out var entry))
             throw new RoomOperationException("File or folder no longer exists.");
+        EnsureSiblingNameAvailable(entries, entry.ParentId, name, entry.Id);
         var parentPath = entry.ParentId is { } parentId && entries.TryGetValue(parentId, out var parent)
             ? ProjectEntryPaths.GetPath(parent, entries)
             : null;
@@ -150,6 +163,7 @@ public sealed class ProjectTreeOperationService(
             throw new RoomOperationException("Parent folder no longer exists.");
         if (parentId is not null && await state.WouldCreateParentCycleAsync(roomId, id, parentId))
             throw new RoomOperationException("That move would create a folder cycle.");
+        EnsureSiblingNameAvailable(entries, parentId, entry.Name, entry.Id);
 
         var entryPath = ProjectEntryPaths.GetPath(entry, entries);
         var parentPath = parentEntry is null ? null : ProjectEntryPaths.GetPath(parentEntry, entries);
@@ -175,6 +189,19 @@ public sealed class ProjectTreeOperationService(
         var id = ReadEntryId(operation, "Invalid project tree entry.");
         if (!await state.IsKnownEntryAsync(roomId, id))
             throw new RoomOperationException("File or folder no longer exists.");
+    }
+
+    private static void EnsureSiblingNameAvailable(
+        IReadOnlyDictionary<string, ProjectEntry> entries,
+        string? parentId,
+        string name,
+        string? excludedId = null)
+    {
+        if (entries.Values.Any(entry =>
+                entry.Id != excludedId &&
+                entry.ParentId == parentId &&
+                string.Equals(entry.Name, name, StringComparison.OrdinalIgnoreCase)))
+            throw new RoomOperationException("A file or folder with that name already exists here.");
     }
 
     private static (string Type, string SiteId, long Counter) ReadOperationId(JsonElement operation)
@@ -264,5 +291,6 @@ public sealed class ProjectTreeOperationService(
         if (result == -2) throw new RoomOperationException("Invalid project tree update.");
         if (result == -5) throw new RoomOperationException("A room can contain up to 500 files and folders.");
         if (result == -6) throw new RoomOperationException("The project folder depth limit was reached.");
+        if (result == -7) throw new RoomOperationException("A file or folder with that name already exists here.");
     }
 }

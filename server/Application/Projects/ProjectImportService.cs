@@ -5,6 +5,7 @@ namespace server.Application.Projects;
 
 public sealed class ProjectImportService(
     IProjectSnapshotWriter snapshots,
+    IProjectSnapshotReader snapshotReader,
     IRoomParticipantReader participants,
     IProjectImportQuotaStore importQuota,
     IProjectImportRateLimiter rateLimits,
@@ -26,7 +27,8 @@ public sealed class ProjectImportService(
         string? projectRootName = null,
         bool replaceWorkspace = false,
         Func<int, Task>? reportProgress = null,
-        bool allowRecoveryImport = false)
+        bool allowRecoveryImport = false,
+        CancellationToken cancellationToken = default)
     {
         var participant = await participants.GetParticipantAsync(roomId, connectionId);
         if (participant is null || (!participant.IsAdmin && !allowRecoveryImport))
@@ -59,11 +61,31 @@ public sealed class ProjectImportService(
         if (!await rateLimits.TryConsumeProjectImportAsync(
                 roomId, connectionId, Guid.NewGuid().ToString("N")))
             throw new RoomOperationException("Folder import rate limit reached. Wait before importing again.");
+        var fileIds = plan.ImportedFiles.Select(file => file.Entry.Id).Distinct().ToArray();
+        var previousSnapshots = replaceWorkspace
+            ? new Dictionary<string, string?>()
+            : await ReadPreviousSnapshotsAsync(roomId, fileIds);
+        List<ImportedProjectFileSnapshot> importedFiles;
+        try
+        {
+            importedFiles = await SaveSnapshotsAsync(
+                roomId, plan.ImportedFiles, reportProgress, cancellationToken);
+            cancellationToken.ThrowIfCancellationRequested();
+        }
+        catch
+        {
+            await RestoreSnapshotsAsync(roomId, fileIds, previousSnapshots);
+            throw;
+        }
+
         var quotaReserved = replaceWorkspace
             ? await importQuota.TryReplaceProjectImportBytesAsync(roomId, totalStoredBytes, MaxRoomImportBytes)
             : await importQuota.TryReserveProjectImportBytesAsync(roomId, totalStoredBytes, MaxRoomImportBytes);
         if (!quotaReserved)
+        {
+            await RestoreSnapshotsAsync(roomId, fileIds, previousSnapshots);
             throw new RoomOperationException("This room has reached its folder import storage limit.");
+        }
 
         if (replaceWorkspace)
         {
@@ -84,7 +106,6 @@ public sealed class ProjectImportService(
                 .ToArray();
             await snapshots.DeleteFileSnapshotsAsync(roomId, oldFileIds);
         }
-        var importedFiles = await SaveSnapshotsAsync(roomId, plan.ImportedFiles, reportProgress);
         await repositoryBaselineStore.SetAsync(roomId, repositoryBaseline);
         var rootName = requestedRootName ?? await projectRootNames.GetProjectRootNameAsync(roomId);
         if (rootName is not null)
@@ -96,6 +117,31 @@ public sealed class ProjectImportService(
     public Task SetRootNameAsync(string roomId, string name) =>
         projectRootNames.SetProjectRootNameAsync(roomId, ProjectRootName.Normalize(name));
 
+    private async Task<Dictionary<string, string?>> ReadPreviousSnapshotsAsync(
+        string roomId,
+        IReadOnlyCollection<string> fileIds)
+    {
+        var snapshotsById = new Dictionary<string, string?>(StringComparer.Ordinal);
+        foreach (var fileId in fileIds)
+            snapshotsById[fileId] = await snapshotReader.GetFileSnapshotAsync(roomId, fileId);
+        return snapshotsById;
+    }
+
+    private async Task RestoreSnapshotsAsync(
+        string roomId,
+        IReadOnlyCollection<string> fileIds,
+        IReadOnlyDictionary<string, string?> previousSnapshots)
+    {
+        var newFileIds = fileIds.Where(fileId =>
+            !previousSnapshots.TryGetValue(fileId, out var snapshot) || snapshot is null).ToArray();
+        await snapshots.DeleteFileSnapshotsAsync(roomId, newFileIds);
+        foreach (var (fileId, snapshot) in previousSnapshots)
+        {
+            if (snapshot is not null)
+                await snapshots.SaveFileSnapshotAsync(roomId, fileId, snapshot);
+        }
+    }
+
     private async Task PersistOperationsAsync(
         string roomId,
         IReadOnlyList<ProjectTreeMutation> operations,
@@ -106,7 +152,8 @@ public sealed class ProjectImportService(
             var operationJson = JsonSerializer.Serialize(operation, JsonOptions);
             var result = await treeStore.AppendProjectTreeOperationAsync(
                 roomId, $"{operation.OpId.SiteId}:{operation.OpId.Counter}", operationJson,
-                operation.OpId.SiteId, operation.OpId.Counter);
+                operation.OpId.SiteId, operation.OpId.Counter,
+                incomingNameKey: operation.Entry?.Name.ToUpperInvariant());
             if (result < 0)
                 throw new RoomOperationException("The import stopped before all files were added. Some files may already be in the room.");
             if (result == 1) changedOperations.Add(operation);
@@ -116,17 +163,20 @@ public sealed class ProjectImportService(
     private async Task<List<ImportedProjectFileSnapshot>> SaveSnapshotsAsync(
         string roomId,
         List<(string CompressedSnapshot, ProjectTreeEntry Entry)> files,
-        Func<int, Task>? reportProgress)
+        Func<int, Task>? reportProgress,
+        CancellationToken cancellationToken)
     {
         var importedFiles = new List<ImportedProjectFileSnapshot>(files.Count);
         foreach (var (compressedSnapshot, entry) in files)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var storedSnapshot = ImportedSnapshotValidator.StoreCompressed(compressedSnapshot);
             await snapshots.SaveFileSnapshotAsync(roomId, entry.Id, storedSnapshot);
             importedFiles.Add(new ImportedProjectFileSnapshot(entry.Id, storedSnapshot));
             if (reportProgress is not null)
                 await reportProgress(importedFiles.Count);
         }
+        cancellationToken.ThrowIfCancellationRequested();
         return importedFiles;
     }
 }

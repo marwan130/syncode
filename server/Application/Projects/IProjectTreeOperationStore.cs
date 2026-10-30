@@ -7,7 +7,9 @@ public interface IProjectTreeOperationStore
         string operationId,
         string operationJson,
         string siteId,
-        long counter);
+        long counter,
+        string? entryNameKeysJson = null,
+        string? incomingNameKey = null);
 
     Task<IReadOnlyList<string>> GetProjectTreeOperationsAsync(string roomId);
     Task<string?> GetProjectTreeOperationAsync(string roomId, string operationId);

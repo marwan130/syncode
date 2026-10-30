@@ -31,6 +31,13 @@ public sealed record GithubPushRequest(
     IReadOnlyList<GithubFileChange> Changes,
     string? BranchName);
 
+public sealed record GithubRepositoryCreateRequest(
+    string RoomId,
+    string AccessKey,
+    string Name,
+    string Message,
+    bool IsPrivate);
+
 public sealed record GithubPushResponse(
     GithubRepositoryBaseline Baseline,
     string BranchUrl,
