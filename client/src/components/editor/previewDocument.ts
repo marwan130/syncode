@@ -40,11 +40,9 @@ function createHistoryScript(tabId: number): string {
     };
     addEventListener('popstate',changed);
     addEventListener('hashchange',changed);
-    addEventListener('message',event=>{
-      if(event.source!==parent||event.data?.tabId!==tabId)return;
-      if(event.data.type==='syncode-preview-history-state')publish();
-      if(event.data.type==='syncode-preview-history-move'){
-        const direction=event.data.direction;
+    addEventListener('syncode-preview-history-move',event=>{
+      const direction=event.detail;
+      if(direction==='back'||direction==='forward'){
         if((direction==='back'&&index>0)||(direction==='forward'&&index<entries.length-1)){
           pendingMove=direction==='back'?-1:1;
           history[direction]();
@@ -142,7 +140,10 @@ function createHtmlDocument(html: string, injection: string): string {
     return html.replace(/<head\b[^>]*>/i, (head) => `${head}${injection}`);
   }
   if (/<html\b[^>]*>/i.test(html)) {
-    return html.replace(/<html\b[^>]*>/i, (root) => `${root}<head>${injection}</head>`);
+    return html.replace(
+      /<html\b[^>]*>/i,
+      (root) => `${root}<head>${injection}</head>`
+    );
   }
   return `<!doctype html><html><head>${injection}</head><body>${html}</body></html>`;
 }
@@ -163,14 +164,18 @@ export function createPreviewDocument(
   const files = new Map(
     project.files.map((file) => [file.path.toLowerCase(), file.content])
   );
-  const activeDirectory = project.activeFilePath.split('/').slice(0, -1).join('/');
+  const activeDirectory = project.activeFilePath
+    .split('/')
+    .slice(0, -1)
+    .join('/');
   const htmlEntry = findHtmlEntry(project, language, activeDirectory);
   const injection = `${PREVIEW_POLICY}${createHistoryScript(tabId)}`;
 
   if (htmlEntry) {
     const html = htmlEntry.content
-      .replace(/<link\b(?=[^>]*\brel\s*=\s*["']stylesheet["'])[^>]*>/gi, (tag) =>
-        inlineStylesheetTag(tag, htmlEntry.path, files)
+      .replace(
+        /<link\b(?=[^>]*\brel\s*=\s*["']stylesheet["'])[^>]*>/gi,
+        (tag) => inlineStylesheetTag(tag, htmlEntry.path, files)
       )
       .replace(/<script\b(?=[^>]*\bsrc\s*=)[^>]*>\s*<\/script\s*>/gi, (tag) =>
         inlineScriptTag(tag, project, htmlEntry.path, files, javascriptOverride)

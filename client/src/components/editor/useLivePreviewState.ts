@@ -37,7 +37,9 @@ const FIRST_PREVIEW_TAB: PreviewTab = {
   canGoForward: false,
 };
 
-function isHistoryState(value: unknown): value is HistoryState & { type: string } {
+function isHistoryState(
+  value: unknown
+): value is HistoryState & { type: string } {
   if (!value || typeof value !== 'object') return false;
   const state = value as Record<string, unknown>;
   return isHistoryMessage(state) && hasValidHistoryFlags(state);
@@ -61,7 +63,8 @@ function applyHistoryState(
   setTabs: Dispatch<SetStateAction<PreviewTab[]>>
 ): void {
   if (!isHistoryState(event.data)) return;
-  if (event.source !== frameRefs.current.get(event.data.tabId)?.contentWindow) return;
+  if (event.source !== frameRefs.current.get(event.data.tabId)?.contentWindow)
+    return;
   setTabs((current) =>
     current.map((tab) =>
       tab.id === event.data.tabId
@@ -130,15 +133,12 @@ export function usePreviewTabs() {
 
   const moveHistory = useCallback(
     (
-      frameRefs: MutableRefObject<Map<number, HTMLIFrameElement>>,
+      previewPorts: MutableRefObject<Map<number, MessagePort>>,
       direction: 'back' | 'forward'
     ) => {
-      frameRefs.current
+      previewPorts.current
         .get(activeTabId)
-        ?.contentWindow?.postMessage(
-          { type: 'syncode-preview-history-move', tabId: activeTabId, direction },
-          '*'
-        );
+        ?.postMessage({ type: 'syncode-preview-history-move', direction });
     },
     [activeTabId]
   );
@@ -160,14 +160,16 @@ async function compileTypeScript(
   monaco: Monaco,
   model: MonacoEditor.ITextModel
 ): Promise<string> {
-  const typescriptApi = (monaco as unknown as { typescript: MonacoTypeScriptApi })
-    .typescript;
+  const typescriptApi = (
+    monaco as unknown as { typescript: MonacoTypeScriptApi }
+  ).typescript;
   const getWorker = await typescriptApi.getTypeScriptWorker();
   const worker = await getWorker(model.uri);
   const output = await worker.getEmitOutput(model.uri.toString());
   return output.emitSkipped
     ? ''
-    : (output.outputFiles.find((file) => file.name.endsWith('.js'))?.text ?? '');
+    : (output.outputFiles.find((file) => file.name.endsWith('.js'))?.text ??
+        '');
 }
 
 export function useTypeScriptPreview(

@@ -10,19 +10,41 @@
   </head>
   <body>
     <script>
-      window.addEventListener('message', (event) => {
-        if (
-          event.source !== parent ||
-          event.data?.type !== 'syncode-preview-document' ||
-          typeof event.data.document !== 'string'
-        ) {
-          return;
-        }
+      (() => {
+        let port;
 
-        document.open();
-        document.write(event.data.document);
-        document.close();
-      });
+        window.addEventListener('message', (event) => {
+          if (
+            event.source !== parent ||
+            event.data?.type !== 'syncode-preview-connect' ||
+            event.ports.length !== 1 ||
+            port
+          ) {
+            return;
+          }
+
+          port = event.ports[0];
+          port.onmessage = ({ data }) => {
+            if (
+              data?.type === 'syncode-preview-document' &&
+              typeof data.document === 'string'
+            ) {
+              document.open();
+              document.write(data.document);
+              document.close();
+            }
+            if (data?.type === 'syncode-preview-history-move') {
+              window.dispatchEvent(
+                new CustomEvent('syncode-preview-history-move', {
+                  detail: data.direction,
+                })
+              );
+            }
+          };
+          port.start();
+          port.postMessage({ type: 'syncode-preview-ready' });
+        });
+      })();
     </script>
   </body>
 </html>
