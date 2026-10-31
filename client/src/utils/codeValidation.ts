@@ -69,6 +69,17 @@ export function validateCodeForExecution(
     };
   }
 
+  // Isolated language servers often flag missing includes before a project build.
+  if (
+    language === 'c' ||
+    language === 'cpp' ||
+    language === 'csharp' ||
+    language === 'rust' ||
+    language === 'java'
+  ) {
+    return { canRun: true };
+  }
+
   // Native Monaco diagnostic markers (syntax errors, lint/compiler errors)
   if (monacoApi && model) {
     const errorSeverity = monacoApi.MarkerSeverity?.Error ?? 8;

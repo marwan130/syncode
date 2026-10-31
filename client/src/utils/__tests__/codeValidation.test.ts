@@ -56,6 +56,31 @@ describe('validateCodeForExecution', () => {
     ).toBe(false);
   });
 
+  it('does not block compiled languages on language-server markers', () => {
+    const getModelMarkers = vi.fn(() => [
+      { severity: 8, startLineNumber: 1, message: "'iostream' file not found" },
+    ]);
+    const monacoApi = {
+      MarkerSeverity: { Error: 8 },
+      editor: { getModelMarkers },
+    } as unknown as Monaco;
+    const model = {
+      uri: 'file:///src/main.cpp',
+    } as unknown as monaco.editor.ITextModel;
+
+    expect(
+      validateCodeForExecution({
+        code: '#include <iostream>\nint main() { return 0; }',
+        language: 'cpp',
+        filePath: 'main.cpp',
+        isConnected: true,
+        monacoApi,
+        model,
+      })
+    ).toEqual({ canRun: true });
+    expect(getModelMarkers).not.toHaveBeenCalled();
+  });
+
   it('blocks execution when Monaco reports a syntax error', () => {
     const getModelMarkers = vi.fn(() => [
       { severity: 8, startLineNumber: 3, message: 'Unexpected token' },

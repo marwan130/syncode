@@ -6,53 +6,88 @@ import { getEntryPath } from '../components/editor/editorLayoutStorage';
 
 export type DiagnosticSeverity = 'error' | 'warning';
 export type FileDiagnosticsMap = Record<string, DiagnosticSeverity>;
+export interface FileProblem {
+  fileId: string;
+  path: string;
+  line: number;
+  column: number;
+  message: string;
+  severity: DiagnosticSeverity;
+}
+export interface FileDiagnosticsResult {
+  byFile: FileDiagnosticsMap;
+  problems: FileProblem[];
+}
 
 /**
  * Computes diagnostic severities for each room file
  * by querying Monaco's native marker service.
  */
-function computeFileDiagnostics(
-  monacoApi: Monaco,
+export function computeFileDiagnostics(
+  allMarkers: monaco.editor.IMarker[],
   entries: RoomEntry[]
-): FileDiagnosticsMap {
-  const allMarkers = monacoApi.editor.getModelMarkers({});
+): FileDiagnosticsResult {
   const result: FileDiagnosticsMap = {};
+  const problems: FileProblem[] = [];
 
   for (const entry of entries) {
     if (entry.isFolder) continue;
-    const entryPath = getEntryPath(entry, entries)
-      .replace(/^\/+/, '')
-      .toLowerCase();
-
-    const fileMarkers = allMarkers.filter((m: monaco.editor.IMarker) => {
-      const markerPath = m.resource.path.replace(/^\/+/, '').toLowerCase();
-      return (
-        markerPath === entryPath ||
-        markerPath.endsWith('/' + entryPath) ||
-        m.resource.toString().toLowerCase().endsWith(entryPath)
-      );
-    });
-
-    let hasError = false;
-    let hasWarning = false;
-
-    for (const marker of fileMarkers) {
-      if (marker.severity === 8) {
-        hasError = true;
-        break;
-      } else if (marker.severity === 4) {
-        hasWarning = true;
-      }
-    }
-
-    if (hasError) {
-      result[entry.id] = 'error';
-    } else if (hasWarning) {
-      result[entry.id] = 'warning';
+    const path = getEntryPath(entry, entries);
+    const normalizedPath = normalizePath(path);
+    for (const marker of allMarkers) {
+      if (!markerMatchesPath(marker, normalizedPath)) continue;
+      const severity = getDiagnosticSeverity(marker.severity);
+      if (!severity) continue;
+      problems.push({
+        fileId: entry.id,
+        path,
+        line: marker.startLineNumber,
+        column: marker.startColumn,
+        message: marker.message,
+        severity,
+      });
+      result[entry.id] = mostSevere(result[entry.id], severity);
     }
   }
 
-  return result;
+  return { byFile: result, problems };
+}
+
+function normalizePath(path: string): string {
+  let decodedPath: string;
+  try {
+    decodedPath = decodeURIComponent(path);
+  } catch {
+    decodedPath = path;
+  }
+  return decodedPath.replaceAll('\\', '/').replace(/^\/+/, '').toLowerCase();
+}
+
+function markerMatchesPath(
+  marker: monaco.editor.IMarker,
+  path: string
+): boolean {
+  const markerPath = normalizePath(marker.resource.path);
+  const markerUriPath = normalizePath(marker.resource.toString());
+  return (
+    markerPath === path ||
+    markerPath.endsWith(`/${path}`) ||
+    markerUriPath.endsWith(`/${path}`) ||
+    markerUriPath === path
+  );
+}
+
+function getDiagnosticSeverity(severity: number): DiagnosticSeverity | null {
+  if (severity === 8) return 'error';
+  if (severity === 4) return 'warning';
+  return null;
+}
+
+function mostSevere(
+  current: DiagnosticSeverity | undefined,
+  next: DiagnosticSeverity
+): DiagnosticSeverity {
+  return current === 'error' || next === 'error' ? 'error' : 'warning';
 }
 
 export interface UseFileDiagnosticsOptions {
@@ -63,14 +98,19 @@ export interface UseFileDiagnosticsOptions {
 export function useFileDiagnostics({
   monacoApi,
   entries,
-}: UseFileDiagnosticsOptions): FileDiagnosticsMap {
-  const [diagnostics, setDiagnostics] = useState<FileDiagnosticsMap>({});
+}: UseFileDiagnosticsOptions): FileDiagnosticsResult {
+  const [diagnostics, setDiagnostics] = useState<FileDiagnosticsResult>({
+    byFile: {},
+    problems: [],
+  });
 
   useEffect(() => {
     if (!monacoApi) return;
 
     const update = () => {
-      setDiagnostics(computeFileDiagnostics(monacoApi, entries));
+      setDiagnostics(
+        computeFileDiagnostics(monacoApi.editor.getModelMarkers({}), entries)
+      );
     };
 
     update();
