@@ -1,6 +1,5 @@
 import type * as monaco from 'monaco-editor';
 import { useChat } from '../../hooks/useChat';
-import { useExecutionStream } from '../../hooks/useExecutionStream';
 import { useExecutionEligibility } from '../../hooks/useExecutionEligibility';
 import { useEditorRunAction } from '../../hooks/useEditorRunAction';
 import { useEditorShortcuts } from '../../hooks/useEditorShortcuts';
@@ -25,6 +24,7 @@ export function useEditorActivityState({
   canSplitWorkspace,
   splitWorkspace,
   panels,
+  requestRun,
 }: {
   providerRef: RefObject<SignalRCrdtProvider | null>;
   status: ConnectionStatus;
@@ -36,6 +36,7 @@ export function useEditorActivityState({
   canSplitWorkspace: boolean;
   splitWorkspace: () => void;
   panels: ReturnType<typeof useEditorPanelState>;
+  requestRun: (language: ExecutionLanguage, sourcePath: string) => void;
 }) {
   const { executionLanguage, canRunCode, runDisabledReason } =
     useExecutionEligibility({
@@ -47,16 +48,12 @@ export function useEditorActivityState({
       monacoApi,
     });
   const { messages, sendMessage } = useChat({ providerRef, status });
-  const execution = useExecutionStream({ providerRef, status });
   const handleRunCode = useEditorRunAction({
     canRunCode,
-    isRunning: execution.isRunning,
     executionLanguage,
     editor: monacoEditor,
     activeFilePath,
-    runCode: execution.runCode,
-    revealTerminalPanel: panels.revealTerminalPanel,
-    setStartBashOnTerminalOpen: panels.setStartBashOnTerminalOpen,
+    runCode: requestRun,
   });
 
   useEditorShortcuts({
@@ -71,7 +68,7 @@ export function useEditorActivityState({
     setActiveSidebarView: panels.setActiveSidebarView,
     setChatOpen: panels.setChatOpen,
     setNewTerminalRequest: panels.setNewTerminalRequest,
-    setStartBashOnTerminalOpen: panels.setStartBashOnTerminalOpen,
+    setBottomPanelView: panels.setBottomPanelView,
     revealTerminalPanel: panels.revealTerminalPanel,
     language,
     canRunCode,
@@ -86,7 +83,6 @@ export function useEditorActivityState({
     runDisabledReason,
     messages,
     sendMessage,
-    execution,
     handleRunCode,
   };
 }

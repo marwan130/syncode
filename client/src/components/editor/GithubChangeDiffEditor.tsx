@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react';
 import { DiffEditor } from '@monaco-editor/react';
 import type { GithubChangeReviewTab } from '../../github/changeTracker';
 import { getGithubFileContent } from '../../github/repositoryBrowser';
+import { configureMonacoEditor } from '../../utils/configureMonacoEditor';
 import { languageForFileName } from './languageModes';
+import { applySavedTheme } from './themeUtils';
 import { userFacingError } from '../../utils/userFacingError';
 
 export function GithubChangeDiffEditor({
@@ -53,26 +55,28 @@ export function GithubChangeDiffEditor({
       aria-label={`Changes in ${tab.change.path}`}
     >
       {error ? (
-        <p role="alert">{error}</p>
+        <div className="editor-change-diff-state" role="alert">
+          {error}
+        </div>
       ) : loading ? (
-        <p role="status">Loading repository version…</p>
+        <div className="editor-change-diff-state" role="status">
+          Loading repository version…
+        </div>
       ) : (
         <DiffEditor
           height="100%"
+          width="100%"
           language={languageForFileName(tab.change.path)}
-          originalModelPath={createDiffModelPath(
-            'github',
-            `${tab.baseline.owner}-${tab.baseline.name}-${tab.baseline.baseCommitSha}`,
-            tab.change.path
-          )}
-          modifiedModelPath={createDiffModelPath(
-            'syncode',
-            tab.id,
-            tab.change.path
-          )}
           theme="syncode-current-theme"
           original={original}
           modified={tab.change.content ?? ''}
+          beforeMount={(monaco) => {
+            configureMonacoEditor(monaco);
+            applySavedTheme(monaco);
+          }}
+          onMount={(diffEditor) => {
+            diffEditor.layout();
+          }}
           options={{
             automaticLayout: true,
             readOnly: true,
@@ -90,9 +94,4 @@ export function GithubChangeDiffEditor({
       )}
     </div>
   );
-}
-
-function createDiffModelPath(scheme: string, authority: string, path: string) {
-  const encodedPath = path.split('/').map(encodeURIComponent).join('/');
-  return `${scheme}://${encodeURIComponent(authority)}/${encodedPath}`;
 }

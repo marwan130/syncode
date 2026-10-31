@@ -21,10 +21,7 @@ export function useEditorPanelState(
     setPreviewOpen: workspace.setPreviewOpen,
     setTerminalOpen: terminal.setTerminalOpen,
     setNewTerminalRequest: terminal.setNewTerminalRequest,
-    setStartBashOnTerminalOpen: terminal.setStartBashOnTerminalOpen,
-    setSplitWorkspaceOpen: workspace.setSplitWorkspaceOpen,
-    setSplitFileId: workspace.setSplitFileId,
-    setActiveEditorGroup: workspace.setActiveEditorGroup,
+    setBottomPanelView: terminal.setBottomPanelView,
     revealTerminalPanel: terminal.revealTerminalPanel,
   });
   return {
@@ -77,9 +74,11 @@ function useEditorPanelLayoutState() {
 
 function useEditorTerminalState() {
   const [newTerminalRequest, setNewTerminalRequest] = useState(0);
-  const [startBashOnTerminalOpen, setStartBashOnTerminalOpen] = useState(false);
   const [terminalPanelMounted, setTerminalPanelMounted] = useState(false);
   const [isTerminalOpen, setTerminalOpen] = useState(false);
+  const [bottomPanelView, setBottomPanelView] = useState<
+    'terminal' | 'problems'
+  >('terminal');
 
   const revealTerminalPanel = useCallback(() => {
     setTerminalPanelMounted(true);
@@ -89,12 +88,12 @@ function useEditorTerminalState() {
   return {
     newTerminalRequest,
     setNewTerminalRequest,
-    startBashOnTerminalOpen,
-    setStartBashOnTerminalOpen,
     terminalPanelMounted,
     setTerminalPanelMounted,
     isTerminalOpen,
     setTerminalOpen,
+    bottomPanelView,
+    setBottomPanelView,
     revealTerminalPanel,
   };
 }
