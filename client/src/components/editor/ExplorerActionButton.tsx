@@ -6,8 +6,11 @@ export type ExplorerActionKind =
   | 'rename'
   | 'delete'
   | 'import-folder'
+  | 'open-folder'
   | 'github-repository'
-  | 'save-project';
+  | 'save-project'
+  | 'refresh'
+  | 'collapse-all';
 
 export interface ExplorerActionButtonProps {
   kind: ExplorerActionKind;
@@ -37,6 +40,12 @@ const PATHS: Record<ExplorerActionKind, ReactNode> = {
       <path d="M10 13V7m-2 2 2-2 2 2" />
     </>
   ),
+  'open-folder': (
+    <>
+      <path d="M2.75 5A1.75 1.75 0 0 1 4.5 3.25h4l1.75 2h5.25A1.75 1.75 0 0 1 17.25 7v7.5a1.75 1.75 0 0 1-1.75 1.75h-11a1.75 1.75 0 0 1-1.75-1.75z" />
+      <path d="M2.9 9h14.2" />
+    </>
+  ),
   'github-repository': (
     <>
       <path d="M4.25 3.25h8.5l3 3v10.5H4.25z" />
@@ -47,6 +56,16 @@ const PATHS: Record<ExplorerActionKind, ReactNode> = {
     <>
       <path d="M2.75 5A1.75 1.75 0 0 1 4.5 3.25h4l1.75 2h5.25A1.75 1.75 0 0 1 17.25 7v7.5a1.75 1.75 0 0 1-1.75 1.75h-11a1.75 1.75 0 0 1-1.75-1.75z" />
       <path d="M10 7v6m-2-2 2 2 2-2" />
+    </>
+  ),
+  refresh: (
+    <>
+      <path d="M4 10a6 6 0 1 1 1.76 4.24l-2.26.76M3.5 15V11h4" />
+    </>
+  ),
+  'collapse-all': (
+    <>
+      <path d="m4 12 6-6 6 6M4 16l6-6 6 6" />
     </>
   ),
   rename: (
@@ -72,7 +91,9 @@ export const ExplorerActionButton: FC<ExplorerActionButtonProps> = ({
 }) => (
   <button
     type="button"
-    className={className ? `file-explorer-action ${className}` : 'file-explorer-action'}
+    className={
+      className ? `file-explorer-action ${className}` : 'file-explorer-action'
+    }
     title={label}
     aria-label={label}
     disabled={disabled}
