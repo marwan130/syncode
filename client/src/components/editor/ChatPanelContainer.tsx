@@ -30,14 +30,9 @@ export const ChatPanelContainer: FC<ChatPanelContainerProps> = ({
 
   return (
     <>
-      <ChatPanel
-        messages={messages}
-        onSendMessage={onSendMessage}
-        disabled={status !== 'connected'}
-        style={{ flexBasis: width }}
-      />
       <ResizeHandle
         label="Resize chat panel"
+        reverse
         onResize={(delta) => {
           const next = width + delta;
           if (next < MIN_CHAT_WIDTH) {
@@ -47,6 +42,12 @@ export const ChatPanelContainer: FC<ChatPanelContainerProps> = ({
           }
           onWidthChange(Math.max(MIN_CHAT_WIDTH, Math.min(600, next)));
         }}
+      />
+      <ChatPanel
+        messages={messages}
+        onSendMessage={onSendMessage}
+        disabled={status !== 'connected'}
+        style={{ flexBasis: width }}
       />
     </>
   );

@@ -1,67 +1,69 @@
+import { useCallback } from 'react';
 import type { DragEvent, RefObject } from 'react';
 import type { OnMount } from '@monaco-editor/react';
-import type * as monaco from 'monaco-editor';
 import type {
   AwarenessState,
   ConnectionStatus,
   RoomEntry,
   SignalRCrdtProvider,
 } from '../../providers/SignalRCrdtProvider';
+import { getEntryPath } from './editorLayoutStorage';
 import { EditorTabs } from './EditorTabs';
-import { EmptyEditorPane } from './EmptyEditorPane';
+import { EditorWelcomePane } from './EditorWelcomePane';
+import { SplitEditorPane } from './SplitEditorPane';
+import type { EditorWelcomeActions } from './EditorWelcomePane';
 import { EditorCodePane } from './EditorCodePane';
-import { languageForFileName, type LanguageMode } from './languageModes';
+import { languageForFileName } from './languageModes';
+import { canSplitEditorGroup } from './editorGroups';
+import type { EditorGroupState } from './editorGroups';
+import type {
+  GithubChangeReviewTab,
+  GithubChangeStatus,
+} from '../../github/changeTracker';
+import { GithubChangeDiffEditor } from './GithubChangeDiffEditor';
+import type { EditorGroupActions } from './editorGroupTypes';
 
-export interface EditorGroupPaneProps {
-  group: 'primary' | 'secondary';
+export interface EditorGroupPaneProps extends EditorGroupActions {
+  group: EditorGroupState;
   entries: RoomEntry[];
-  activeFileId: string;
-  activeFile?: RoomEntry;
-  activeFilePath: string;
-  fileIds: string[];
+  reviewTabs?: GithubChangeReviewTab[];
+  sourceControlChanges?: GithubChangeStatus[];
+  groupIndex: number;
+  groupCount: number;
+  isActive: boolean;
   canSplitWorkspace: boolean;
-  isSplitWorkspaceOpen: boolean;
-  splitWidth: number;
   status: ConnectionStatus;
   isLocked: boolean;
   autocompleteEnabled: boolean;
-  language: LanguageMode;
   peers: Map<string, AwarenessState>;
   providerRef: RefObject<SignalRCrdtProvider | null>;
-  monacoEditor?: monaco.editor.IStandaloneCodeEditor | null;
-  onMount: OnMount;
-  onOpenFile: (fileId: string, group?: 'primary' | 'secondary') => void;
-  onCloseFileTab: (fileId: string) => void;
-  onSplitWorkspace?: () => void;
-  onCloseGroup?: () => void;
-  onSetActiveGroup: (group: 'primary' | 'secondary') => void;
+  onCloseGroup: (groupId: string) => void;
+  onSetActiveGroup: (groupId: string) => void;
   onDragOver: (event: DragEvent<HTMLDivElement>) => void;
-  onDrop: (
-    event: DragEvent<HTMLDivElement>,
-    group: 'primary' | 'secondary'
-  ) => void;
+  onDrop: (event: DragEvent<HTMLDivElement>, groupId: string) => void;
   fileDiagnostics?: Record<string, 'error' | 'warning'>;
+  fileProblemCounts?: Record<string, number>;
+  welcome?: EditorWelcomeActions;
 }
 
 export function EditorGroupPane({
   group,
   entries,
-  activeFileId,
-  activeFile,
-  activeFilePath,
-  fileIds,
+  reviewTabs = [],
+  sourceControlChanges = [],
+  groupIndex,
+  groupCount,
+  isActive,
   canSplitWorkspace,
-  isSplitWorkspaceOpen,
-  splitWidth,
   status,
   isLocked,
   autocompleteEnabled,
-  language,
   peers,
   providerRef,
-  monacoEditor,
-  onMount,
+  onMountGroup,
+  onDisposeGroup,
   onOpenFile,
+  onOpenReviewTab,
   onCloseFileTab,
   onSplitWorkspace,
   onCloseGroup,
@@ -69,158 +71,78 @@ export function EditorGroupPane({
   onDragOver,
   onDrop,
   fileDiagnostics,
+  fileProblemCounts,
+  welcome,
 }: EditorGroupPaneProps) {
-  const isPrimary = group === 'primary';
+  const activeFile = entries.find(
+    (entry) => entry.id === group.activeFileId && !entry.isFolder
+  );
+  const activeReviewTab = reviewTabs.find(
+    (tab) => tab.id === group.activeFileId
+  );
+  const activeFilePath = activeFile ? getEntryPath(activeFile, entries) : '';
+  const onMount = useCallback<OnMount>(
+    (editor, monacoApi) => onMountGroup(group.id, editor, monacoApi),
+    [group.id, onMountGroup]
+  );
+  const onDispose = useCallback(
+    () => onDisposeGroup(group.id),
+    [group.id, onDisposeGroup]
+  );
+
   return (
     <div
-      className={`editor-pane${isPrimary ? '' : ' split-editor-pane'}`}
-      style={getPaneStyle(group, isSplitWorkspaceOpen, splitWidth)}
-      onFocusCapture={() => onSetActiveGroup(group)}
+      className={`editor-pane${isActive ? ' is-active' : ''}`}
+      style={{ flexBasis: `${group.width}%` }}
+      onFocusCapture={() => onSetActiveGroup(group.id)}
       onDragOver={onDragOver}
-      onDrop={(event) => onDrop(event, group)}
+      onDrop={(event) => onDrop(event, group.id)}
     >
-      <EditorGroupTabBar
-        group={group}
-        activeFileId={activeFileId}
-        activeFile={activeFile}
+      <EditorTabs
+        group={`Editor group ${groupIndex + 1}`}
         entries={entries}
-        fileIds={fileIds}
-        canSplitWorkspace={canSplitWorkspace}
+        reviewTabs={reviewTabs}
+        sourceControlChanges={sourceControlChanges}
+        fileIds={group.fileIds}
+        selectedFileId={group.activeFileId}
         fileDiagnostics={fileDiagnostics}
-        onOpenFile={onOpenFile}
-        onCloseFileTab={onCloseFileTab}
-        onSplitWorkspace={onSplitWorkspace}
-        onCloseGroup={onCloseGroup}
+        fileProblemCounts={fileProblemCounts}
+        onSelectFile={(fileId) => {
+          const reviewTab = reviewTabs.find((tab) => tab.id === fileId);
+          if (reviewTab) onOpenReviewTab(reviewTab, group.id);
+          else onOpenFile(fileId, group.id);
+        }}
+        onCloseFile={(fileId) => onCloseFileTab(fileId, group.id)}
+        canSplitWorkspace={canSplitWorkspace && canSplitEditorGroup(group)}
+        onSplitWorkspace={() => onSplitWorkspace(group.id)}
+        canCloseGroup={groupCount > 1}
+        onCloseGroup={() => onCloseGroup(group.id)}
       />
-      <EditorGroupContent
-        group={group}
-        entries={entries}
-        activeFileId={activeFileId}
-        activeFile={activeFile}
-        activeFilePath={activeFilePath}
-        status={status}
-        isLocked={isLocked}
-        autocompleteEnabled={autocompleteEnabled}
-        language={language}
-        peers={peers}
-        providerRef={providerRef}
-        monacoEditor={monacoEditor}
-        onMount={onMount}
-        onOpenFile={onOpenFile}
-      />
+      {activeReviewTab ? (
+        <GithubChangeDiffEditor tab={activeReviewTab} />
+      ) : activeFile ? (
+        <EditorCodePane
+          fileId={activeFile.id}
+          filePath={activeFilePath}
+          language={languageForFileName(activeFilePath)}
+          status={status}
+          isLocked={isLocked}
+          autocompleteEnabled={autocompleteEnabled}
+          minimapEnabled={group.width >= 30}
+          onMount={onMount}
+          onDispose={onDispose}
+          peers={peers}
+          providerRef={providerRef}
+        />
+      ) : groupIndex === 0 || group.id === 'primary' ? (
+        <EditorWelcomePane welcome={welcome} />
+      ) : (
+        <SplitEditorPane
+          entries={entries}
+          group={group.id}
+          onOpenFile={(fileId) => onOpenFile(fileId, group.id)}
+        />
+      )}
     </div>
-  );
-}
-
-function getPaneStyle(
-  group: 'primary' | 'secondary',
-  isSplitWorkspaceOpen: boolean,
-  splitWidth: number
-) {
-  if (!isSplitWorkspaceOpen) return undefined;
-  const width = group === 'primary' ? 100 - splitWidth : splitWidth;
-  return { flexBasis: `${width}%` };
-}
-
-function EditorGroupTabBar({
-  group,
-  activeFileId,
-  activeFile,
-  entries,
-  fileIds,
-  canSplitWorkspace,
-  fileDiagnostics,
-  onOpenFile,
-  onCloseFileTab,
-  onSplitWorkspace,
-  onCloseGroup,
-}: Pick<
-  EditorGroupPaneProps,
-  | 'group'
-  | 'activeFileId'
-  | 'activeFile'
-  | 'entries'
-  | 'fileIds'
-  | 'canSplitWorkspace'
-  | 'fileDiagnostics'
-  | 'onOpenFile'
-  | 'onCloseFileTab'
-  | 'onSplitWorkspace'
-  | 'onCloseGroup'
->) {
-  const selectedFileId =
-    group === 'primary' ? activeFileId : (activeFile?.id ?? '');
-  return (
-    <EditorTabs
-      group={group}
-      entries={entries}
-      fileIds={fileIds}
-      canSplitWorkspace={canSplitWorkspace}
-      selectedFileId={selectedFileId}
-      fileDiagnostics={fileDiagnostics}
-      onSelectFile={(id) => onOpenFile(id, group)}
-      onCloseFile={onCloseFileTab}
-      onSplitWorkspace={onSplitWorkspace}
-      onCloseGroup={onCloseGroup}
-    />
-  );
-}
-
-function EditorGroupContent({
-  group,
-  entries,
-  activeFileId,
-  activeFile,
-  activeFilePath,
-  status,
-  isLocked,
-  autocompleteEnabled,
-  language,
-  peers,
-  providerRef,
-  monacoEditor,
-  onMount,
-  onOpenFile,
-}: Pick<
-  EditorGroupPaneProps,
-  | 'group'
-  | 'entries'
-  | 'activeFileId'
-  | 'activeFile'
-  | 'activeFilePath'
-  | 'status'
-  | 'isLocked'
-  | 'autocompleteEnabled'
-  | 'language'
-  | 'peers'
-  | 'providerRef'
-  | 'monacoEditor'
-  | 'onMount'
-  | 'onOpenFile'
->) {
-  if (!activeFile)
-    return (
-      <EmptyEditorPane
-        entries={entries}
-        group={group}
-        onOpenFile={onOpenFile}
-      />
-    );
-
-  const isPrimary = group === 'primary';
-  return (
-    <EditorCodePane
-      fileId={isPrimary ? activeFileId : activeFile.id}
-      filePath={activeFilePath}
-      language={isPrimary ? language : languageForFileName(activeFilePath)}
-      status={status}
-      isLocked={isLocked}
-      autocompleteEnabled={autocompleteEnabled}
-      minimapEnabled={isPrimary}
-      onMount={onMount}
-      editor={isPrimary ? monacoEditor : undefined}
-      peers={isPrimary ? peers : undefined}
-      providerRef={isPrimary ? providerRef : undefined}
-    />
   );
 }

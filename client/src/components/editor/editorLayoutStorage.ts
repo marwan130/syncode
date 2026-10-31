@@ -8,7 +8,7 @@ export const DEFAULT_PREVIEW_WIDTH = 420;
 export const DEFAULT_TERMINAL_HEIGHT = 240;
 export const DEFAULT_EXPLORER_WIDTH = 220;
 export const DEFAULT_CHAT_WIDTH = 300;
-export const MIN_PREVIEW_WIDTH = 16;
+export const MIN_PREVIEW_WIDTH = 160;
 export const MIN_SIDE_PANEL_WIDTH = 130;
 export const MIN_CHAT_WIDTH = 180;
 export const MIN_TERMINAL_HEIGHT = 100;
@@ -98,4 +98,9 @@ export function getEntryPath(entry: RoomEntry, entries: RoomEntry[]): string {
     parentId = parent.parentId;
   }
   return path.join('/');
+}
+
+export function getEditorModelPath(roomId: string, filePath: string): string {
+  const path = filePath.split('/').map(encodeURIComponent).join('/');
+  return `syncode://${encodeURIComponent(roomId)}/${path}`;
 }

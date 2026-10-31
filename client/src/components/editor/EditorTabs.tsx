@@ -1,17 +1,27 @@
 import type { FC } from 'react';
 import type { RoomEntry } from '../../providers/SignalRCrdtProvider';
+import type {
+  GithubChangeReviewTab,
+  GithubChangeStatus,
+} from '../../github/changeTracker';
+import { EditorFileTab } from './EditorFileTab';
 import { getEntryPath } from './editorLayoutStorage';
+import { ScrollbarPanel } from '../shared/ScrollbarPanel';
 
 export interface EditorTabsProps {
-  group: 'primary' | 'secondary';
+  group: string;
   entries: RoomEntry[];
   fileIds: string[];
   selectedFileId: string | null;
   fileDiagnostics?: Record<string, 'error' | 'warning'>;
+  fileProblemCounts?: Record<string, number>;
+  reviewTabs?: GithubChangeReviewTab[];
+  sourceControlChanges?: GithubChangeStatus[];
   onSelectFile: (fileId: string) => void;
   onCloseFile: (fileId: string) => void;
   onSplitWorkspace?: () => void;
   canSplitWorkspace: boolean;
+  canCloseGroup: boolean;
   onCloseGroup?: () => void;
 }
 
@@ -21,14 +31,19 @@ export const EditorTabs: FC<EditorTabsProps> = ({
   fileIds,
   selectedFileId,
   fileDiagnostics,
+  fileProblemCounts,
+  reviewTabs = [],
+  sourceControlChanges = [],
   onSelectFile,
   onCloseFile,
   onSplitWorkspace,
   canSplitWorkspace,
+  canCloseGroup,
   onCloseGroup,
 }) => {
   return (
-    <div
+    <ScrollbarPanel
+      orientation="horizontal"
       className="editor-file-tabs"
       role="tablist"
       aria-label={`${group} editor files`}
@@ -37,71 +52,54 @@ export const EditorTabs: FC<EditorTabsProps> = ({
         const entry = entries.find(
           (item) => item.id === fileId && !item.isFolder
         );
-        if (!entry) return null;
-        const isActive = fileId === selectedFileId;
-        const diagnostic = fileDiagnostics?.[fileId];
-        const diagnosticClass =
-          diagnostic === 'error'
-            ? ' has-error'
-            : diagnostic === 'warning'
-              ? ' has-warning'
-              : '';
-        const filePath = getEntryPath(entry, entries);
-        const title =
-          diagnostic === 'error'
-            ? `${filePath} (contains errors)`
-            : diagnostic === 'warning'
-              ? `${filePath} (contains warnings)`
-              : filePath;
-
+        const reviewTab = reviewTabs.find((tab) => tab.id === fileId);
+        const reviewEntry = reviewTab
+          ? entries.find(
+              (item) =>
+                !item.isFolder &&
+                getEntryPath(item, entries) === reviewTab.change.path
+            )
+          : undefined;
         return (
-          <div
-            className={`editor-file-tab${isActive ? ' is-active' : ''}${diagnosticClass}`}
+          <EditorFileTab
             key={fileId}
-          >
-            <button
-              type="button"
-              role="tab"
-              aria-selected={isActive}
-              onClick={() => onSelectFile(fileId)}
-              title={title}
-            >
-              {entry.name}
-            </button>
-            <button
-              type="button"
-              className="editor-file-tab-close"
-              aria-label={`Close ${entry.name}`}
-              onClick={() => onCloseFile(fileId)}
-            >
-              ×
-            </button>
-          </div>
+            fileId={fileId}
+            entry={entry}
+            reviewTab={reviewTab}
+            entries={entries}
+            selected={fileId === selectedFileId}
+            diagnostic={fileDiagnostics?.[fileId]}
+            problemCount={
+              fileProblemCounts?.[entry?.id ?? reviewEntry?.id ?? fileId]
+            }
+            sourceControlChanges={sourceControlChanges}
+            onSelect={onSelectFile}
+            onClose={onCloseFile}
+          />
         );
       })}
       <div className="editor-group-actions">
-        {group === 'primary' ? (
-          canSplitWorkspace && (
-            <button
-              type="button"
-              title="Split workspace"
-              aria-label="Split workspace"
-              onClick={onSplitWorkspace}
-            >
-              <svg viewBox="0 0 16 16" aria-hidden="true">
-                <rect
-                  x="1.5"
-                  y="2"
-                  width="13"
-                  height="12"
-                  fill="none"
-                  stroke="currentColor"
-                />
-                <path d="M8 2v12" stroke="currentColor" />
-              </svg>
-            </button>
-          )
-        ) : (
+        {canSplitWorkspace && (
+          <button
+            type="button"
+            title="Split editor group right"
+            aria-label="Split editor group right"
+            onClick={onSplitWorkspace}
+          >
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <rect
+                x="1.5"
+                y="2"
+                width="13"
+                height="12"
+                fill="none"
+                stroke="currentColor"
+              />
+              <path d="M8 2v12" stroke="currentColor" />
+            </svg>
+          </button>
+        )}
+        {canCloseGroup && (
           <button
             type="button"
             title="Close editor group"
@@ -112,6 +110,6 @@ export const EditorTabs: FC<EditorTabsProps> = ({
           </button>
         )}
       </div>
-    </div>
+    </ScrollbarPanel>
   );
 };
