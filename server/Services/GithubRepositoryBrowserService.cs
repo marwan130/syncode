@@ -103,7 +103,19 @@ public sealed class GithubRepositoryBrowserService(
     {
         if (!IsValidRepository(owner, name) || !Regex.IsMatch(sha, "^[a-fA-F0-9]{40}$"))
             throw new GithubRepositoryException("The GitHub file reference is invalid.", 400);
-        var (token, _) = await GetSessionAsync(sessionId, cancellationToken);
+        string? token = null;
+        if (!string.IsNullOrWhiteSpace(sessionId))
+        {
+            try
+            {
+                var session = await oauth.GetAccessTokenAsync(sessionId, cancellationToken);
+                token = session.AccessToken;
+            }
+            catch (GithubOAuthException)
+            {
+                // Fall back to unauthenticated request for public repositories
+            }
+        }
         var blob = await github.GetAsync<GithubBlobResponse>(
             $"repos/{owner}/{name}/git/blobs/{sha}", token, cancellationToken, 128 * 1024);
         if (!string.Equals(blob.Encoding, "base64", StringComparison.OrdinalIgnoreCase) ||
