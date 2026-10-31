@@ -4,6 +4,8 @@ const PUSH_ERRORS: Record<string, string> = {
   scope_required: 'Authorize GitHub repository access before pushing.',
   branch_moved:
     'The GitHub branch moved. Refresh the repository before pushing.',
+  invalid_branch:
+    'Enter a valid Git branch name without spaces or Git-reserved characters.',
   rate_limited: 'GitHub is limiting repository requests. Try again later.',
   reauthorize: 'Your GitHub session expired. Sign in again and retry.',
 };
@@ -12,7 +14,8 @@ export async function pushGithubChanges(
   roomId: string,
   accessKey: string,
   message: string,
-  changes: GithubFileChange[]
+  changes: GithubFileChange[],
+  branchName: string
 ): Promise<GithubPushResponse> {
   const response = await fetch('/api/github/repository/push', {
     method: 'POST',
@@ -20,16 +23,16 @@ export async function pushGithubChanges(
     credentials: 'include',
     cache: 'no-store',
     redirect: 'error',
-    body: JSON.stringify({ roomId, accessKey, message, changes }),
+    body: JSON.stringify({ roomId, accessKey, message, changes, branchName }),
   });
   if (!response.ok) throw await getPushError(response);
   return (await response.json()) as GithubPushResponse;
 }
 
 async function getPushError(response: Response): Promise<Error> {
-  const result = (await response.json().catch(() => null)) as
-    | { error?: string }
-    | null;
+  const result = (await response.json().catch(() => null)) as {
+    error?: string;
+  } | null;
   return new Error(
     PUSH_ERRORS[result?.error ?? ''] ??
       'Could not push these changes to GitHub.'

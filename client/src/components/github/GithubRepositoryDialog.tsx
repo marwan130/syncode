@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import type { GithubChangeStatus } from '../../github/changeTracker';
 import type { GithubRepositoryBaseline } from '../../github/githubTypes';
 import type { ImportedFileContent } from '../../import/folderImport';
@@ -15,9 +16,12 @@ export interface GithubRepositoryDialogProps {
   onClose: () => void;
   onImport: (
     files: ImportedFileContent[],
-    baseline: GithubRepositoryBaseline
+    baseline: GithubRepositoryBaseline,
+    onProgress?: (completedFiles: number) => void
   ) => Promise<void>;
   onBaselineChange: (baseline: GithubRepositoryBaseline) => void;
+  forceRepositoryPicker?: boolean;
+  initialRepositoryUrl?: string;
 }
 
 export function GithubRepositoryDialog({
@@ -31,6 +35,8 @@ export function GithubRepositoryDialog({
   onClose,
   onImport,
   onBaselineChange,
+  forceRepositoryPicker = false,
+  initialRepositoryUrl = '',
 }: GithubRepositoryDialogProps) {
   const dialog = useGithubRepositoryDialog({
     roomId,
@@ -42,6 +48,27 @@ export function GithubRepositoryDialog({
     onImport,
     onBaselineChange,
   });
+  const { reviewRepositoryUrl, setRepositoryInput } = dialog;
+  const reviewedInitialUrl = useRef('');
+  const appliedInitialUrl = useRef<string | null>(null);
+  useEffect(() => {
+    if (!isOpen) {
+      reviewedInitialUrl.current = '';
+      appliedInitialUrl.current = null;
+      return;
+    }
+    if (appliedInitialUrl.current !== initialRepositoryUrl) {
+      appliedInitialUrl.current = initialRepositoryUrl;
+      setRepositoryInput(initialRepositoryUrl);
+    }
+    if (
+      initialRepositoryUrl &&
+      reviewedInitialUrl.current !== initialRepositoryUrl
+    ) {
+      reviewedInitialUrl.current = initialRepositoryUrl;
+      void reviewRepositoryUrl(initialRepositoryUrl);
+    }
+  }, [initialRepositoryUrl, isOpen, reviewRepositoryUrl, setRepositoryInput]);
   if (!isOpen) return null;
 
   return (
@@ -54,7 +81,7 @@ export function GithubRepositoryDialog({
       }}
     >
       <section
-        className="project-import-dialog github-repository-dialog"
+        className={`project-import-dialog github-repository-dialog${dialog.preview ? ' has-preview' : ''}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby="github-repository-title"
@@ -64,6 +91,7 @@ export function GithubRepositoryDialog({
           changes={changes}
           canImport={canImport}
           dialog={dialog}
+          forceRepositoryPicker={forceRepositoryPicker}
         />
       </section>
     </div>
