@@ -5,32 +5,43 @@ import type {
   RoomEntry,
   SignalRCrdtProvider,
 } from '../../providers/SignalRCrdtProvider';
-import type { GithubChangeStatus } from '../../github/changeTracker';
-import type { GithubStagingState } from '../../github/useGithubStaging';
 import type { GithubRepositoryExplorerProps } from './fileExplorerTypes';
-import { getEntryPath } from './editorLayoutStorage';
+import type { GithubChangeStatus } from '../../github/changeTracker';
 import { SidebarPanel } from './SidebarPanel';
-import { getFileIcon } from './fileExplorerUtils';
-import { GithubRepositoryExplorerAction } from '../github/GithubRepositoryExplorerAction';
-import { GithubRepositoryExplorerStatus } from '../github/GithubRepositoryExplorerStatus';
+import { GithubSourceControlView } from './GithubSourceControlView';
 import type { ActivityView } from './ActivityBar';
+import { getFileIcon } from './fileExplorerUtils';
+import { ScrollbarPanel } from '../shared/ScrollbarPanel';
+import {
+  DEFAULT_SEARCH_OPTIONS,
+  findWorkspaceMatches,
+  groupSearchMatches,
+  highlightSearchLine,
+  replaceMatchInText,
+  replaceAllInText,
+  searchPatternError,
+  type SearchFileGroup,
+  type SearchMatch,
+  type SearchOptions,
+} from './workspaceSearch';
 
-interface ActivityViewPanelProps {
+export interface ActivityViewPanelProps {
   activeView: ActivityView | null;
   width: number;
   entries: RoomEntry[];
   activeFileId: string;
   providerRef: RefObject<SignalRCrdtProvider | null>;
   github?: GithubRepositoryExplorerProps;
-  githubStaging: GithubStagingState;
+  canManageRepositories: boolean;
   canRunCode: boolean;
   runDisabledReason?: string;
-  isRunningCode: boolean;
   onWidthChange: (width: number) => void;
   onClose: () => void;
   onOpenFile: (fileId: string, line: number) => void;
   onRunCode: () => void;
   onOpenTerminal: () => void;
+  onOpenGithub: (repositoryUrl?: string) => void;
+  onOpenChange: (change: GithubChangeStatus) => void;
 }
 
 export function ActivityViewPanel(props: ActivityViewPanelProps) {
@@ -46,12 +57,15 @@ export function ActivityViewPanel(props: ActivityViewPanelProps) {
     >
       {activeView === 'search' && <WorkspaceSearch {...props} />}
       {activeView === 'source-control' && (
-        <SourceControl
-          github={props.github}
-          entries={props.entries}
-          onOpenFile={props.onOpenFile}
-          staging={props.githubStaging}
-        />
+        <aside className="activity-view" aria-label="Source Control">
+          <ViewHeading view="source-control" />
+          <GithubSourceControlView
+            github={props.github}
+            canManageRepositories={props.canManageRepositories}
+            onOpenGithub={props.onOpenGithub}
+            onOpenChange={props.onOpenChange}
+          />
+        </aside>
       )}
       {activeView === 'run' && <RunView {...props} />}
     </SidebarPanel>
@@ -76,16 +90,29 @@ function WorkspaceSearch({
   onOpenFile,
 }: ActivityViewPanelProps) {
   const [query, setQuery] = useState('');
+  const [replacement, setReplacement] = useState('');
+  const [options, setOptions] = useState<SearchOptions>(DEFAULT_SEARCH_OPTIONS);
   const [results, setResults] = useState<SearchMatch[]>([]);
   const [resolvedQuery, setResolvedQuery] = useState('');
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+  const [replaceError, setReplaceError] = useState<string | null>(null);
+
+  const patternError = useMemo(
+    () => searchPatternError(query, options),
+    [query, options]
+  );
+
   useEffect(() => {
     const provider = providerRef.current;
-    if (!provider) return;
+    if (!provider || patternError) {
+      setResults([]);
+      return;
+    }
     let timer: number | undefined;
     const refresh = () => {
       window.clearTimeout(timer);
       timer = window.setTimeout(() => {
-        setResults(findWorkspaceMatches(entries, query, provider));
+        setResults(findWorkspaceMatches(entries, query, provider, options));
         setResolvedQuery(query);
       }, 180);
     };
@@ -95,267 +122,359 @@ function WorkspaceSearch({
       window.clearTimeout(timer);
       unsubscribe();
     };
-  }, [entries, providerRef, query]);
+  }, [entries, providerRef, query, options, patternError]);
+
+  const groups = useMemo(() => groupSearchMatches(results), [results]);
+  const entriesById = useMemo(
+    () => new Map(entries.map((entry) => [entry.id, entry])),
+    [entries]
+  );
+
+  const handleReplaceAll = () => {
+    const provider = providerRef.current;
+    if (!provider || !query.trim() || patternError) return;
+    setReplaceError(null);
+    try {
+      for (const group of groups) {
+        const currentContent = provider.getFileContent(group.fileId);
+        const nextContent = replaceAllInText(
+          currentContent,
+          query,
+          replacement,
+          options
+        );
+        if (nextContent !== currentContent) {
+          provider.replaceFileText(group.fileId, nextContent);
+        }
+      }
+    } catch {
+      setReplaceError('Could not replace text in the workspace. Try again.');
+    }
+  };
+
+  const handleReplaceFile = (fileId: string) => {
+    const provider = providerRef.current;
+    if (!provider || !query.trim() || patternError) return;
+    setReplaceError(null);
+    try {
+      const currentContent = provider.getFileContent(fileId);
+      const nextContent = replaceAllInText(
+        currentContent,
+        query,
+        replacement,
+        options
+      );
+      if (nextContent !== currentContent) {
+        provider.replaceFileText(fileId, nextContent);
+      }
+    } catch {
+      setReplaceError('Could not replace text in this file. Try again.');
+    }
+  };
+
+  const handleReplaceMatch = (match: SearchMatch) => {
+    const provider = providerRef.current;
+    if (!provider || !query.trim() || patternError) return;
+    setReplaceError(null);
+    try {
+      const currentContent = provider.getFileContent(match.fileId);
+      const nextContent = replaceMatchInText(
+        currentContent,
+        query,
+        replacement,
+        options,
+        match.line,
+        match.column
+      );
+      if (nextContent !== currentContent)
+        provider.replaceFileText(match.fileId, nextContent);
+    } catch {
+      setReplaceError('Could not replace this match. Try again.');
+    }
+  };
 
   return (
     <aside className="activity-view" aria-label="Search">
       <ViewHeading view="search" />
-      <label className="activity-search-input">
-        <span className="visually-hidden">Search in files</span>
-        <Icon icon="codicon:search" aria-hidden="true" />
-        <input
-          value={query}
-          onChange={(event) => {
-            const nextQuery = event.target.value;
-            setQuery(nextQuery);
-          }}
-          placeholder="Search"
-          type="search"
-          autoComplete="off"
-        />
-      </label>
-      {query.trim() && resolvedQuery === query && (
-        <div
+      <form
+        className="activity-search-form"
+        onSubmit={(event) => event.preventDefault()}
+      >
+        <div className="activity-search-row">
+          <div className="activity-search-field">
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search"
+              type="text"
+              autoComplete="off"
+              aria-label="Search"
+            />
+            <div className="activity-search-options">
+              <button
+                type="button"
+                className={`activity-search-btn${options.matchCase ? ' is-active' : ''}`}
+                aria-label="Match Case"
+                title="Match Case (Alt+C)"
+                aria-pressed={options.matchCase}
+                onClick={() =>
+                  setOptions((opt) => ({ ...opt, matchCase: !opt.matchCase }))
+                }
+              >
+                <Icon icon="codicon:case-sensitive" aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                className={`activity-search-btn${options.wholeWord ? ' is-active' : ''}`}
+                aria-label="Match Whole Word"
+                title="Match Whole Word (Alt+W)"
+                aria-pressed={options.wholeWord}
+                onClick={() =>
+                  setOptions((opt) => ({ ...opt, wholeWord: !opt.wholeWord }))
+                }
+              >
+                <Icon icon="codicon:whole-word" aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                className={`activity-search-btn${options.isRegex ? ' is-active' : ''}`}
+                aria-label="Use Regular Expression"
+                title="Use Regular Expression (Alt+R)"
+                aria-pressed={options.isRegex}
+                onClick={() =>
+                  setOptions((opt) => ({ ...opt, isRegex: !opt.isRegex }))
+                }
+              >
+                <Icon icon="codicon:regex" aria-hidden="true" />
+              </button>
+            </div>
+          </div>
+          <div style={{ width: 24, flex: '0 0 24px' }} aria-hidden="true" />
+        </div>
+
+        <div className="activity-search-row">
+          <div className="activity-search-field">
+            <input
+              value={replacement}
+              onChange={(event) => setReplacement(event.target.value)}
+              placeholder="Replace"
+              type="text"
+              autoComplete="off"
+              aria-label="Replace"
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && (event.ctrlKey || event.altKey)) {
+                  event.preventDefault();
+                  handleReplaceAll();
+                }
+              }}
+            />
+            <div className="activity-search-options">
+              <button
+                type="button"
+                className={`activity-search-btn${options.preserveCase ? ' is-active' : ''}`}
+                aria-label="Preserve Case"
+                title="Preserve Case (Alt+P)"
+                aria-pressed={options.preserveCase}
+                onClick={() =>
+                  setOptions((opt) => ({
+                    ...opt,
+                    preserveCase: !opt.preserveCase,
+                  }))
+                }
+              >
+                <Icon icon="codicon:preserve-case" aria-hidden="true" />
+              </button>
+            </div>
+          </div>
+          <button
+            type="button"
+            className="activity-search-action-btn"
+            aria-label="Replace All"
+            title="Replace All (Ctrl+Alt+Enter)"
+            disabled={!query.trim() || results.length === 0}
+            onClick={handleReplaceAll}
+          >
+            <Icon icon="codicon:replace-all" aria-hidden="true" />
+          </button>
+        </div>
+      </form>
+
+      {patternError && (
+        <div className="activity-search-error" role="alert">
+          <Icon icon="codicon:error" aria-hidden="true" />
+          <span>{patternError}</span>
+        </div>
+      )}
+
+      {replaceError && (
+        <div className="activity-search-error" role="alert">
+          <Icon icon="codicon:warning" aria-hidden="true" />
+          <span>{replaceError}</span>
+        </div>
+      )}
+
+      {query.trim() && !patternError && resolvedQuery === query && (
+        <ScrollbarPanel
           className="activity-search-results"
-          role="list"
           aria-label="Search results"
         >
-          {results.length ? (
-            results.map((result) => (
-              <button
-                className={`activity-search-result${result.fileId === activeFileId ? ' is-active' : ''}`}
-                key={`${result.fileId}:${result.line}`}
-                type="button"
-                role="listitem"
-                onClick={() => onOpenFile(result.fileId, result.line)}
-                title={`${result.path}, line ${result.line}`}
-              >
-                <strong>
-                  {result.path}
-                  <span>:{result.line}</span>
-                </strong>
-                <span>{result.text}</span>
-              </button>
-            ))
+          {groups.length ? (
+            <>
+              <p className="activity-search-summary">
+                {results.length} {results.length === 1 ? 'result' : 'results'}{' '}
+                in {groups.length} {groups.length === 1 ? 'file' : 'files'}
+              </p>
+              {groups.map((group) => (
+                <SearchFileResults
+                  key={group.fileId}
+                  group={group}
+                  entry={entriesById.get(group.fileId)}
+                  query={resolvedQuery}
+                  options={options}
+                  activeFileId={activeFileId}
+                  collapsed={collapsed.has(group.fileId)}
+                  onToggle={() =>
+                    setCollapsed((current) =>
+                      toggleCollapsed(current, group.fileId)
+                    )
+                  }
+                  onOpenFile={onOpenFile}
+                  onReplaceFile={() => handleReplaceFile(group.fileId)}
+                  onReplaceMatch={handleReplaceMatch}
+                />
+              ))}
+            </>
           ) : (
             <p className="activity-empty">No results found.</p>
           )}
-        </div>
+        </ScrollbarPanel>
       )}
     </aside>
   );
 }
 
-interface SearchMatch {
-  fileId: string;
-  path: string;
-  line: number;
-  text: string;
-}
-
-function findWorkspaceMatches(
-  entries: RoomEntry[],
-  query: string,
-  provider: SignalRCrdtProvider | null
-): SearchMatch[] {
-  const needle = query.trim().toLocaleLowerCase();
-  if (!needle || !provider) return [];
-  const matches: SearchMatch[] = [];
-  for (const entry of entries) {
-    if (entry.isFolder) continue;
-    const content = provider.getFileContent(entry.id);
-    const lines = content.split('\n');
-    for (let index = 0; index < lines.length; index += 1) {
-      if (!lines[index].toLocaleLowerCase().includes(needle)) continue;
-      matches.push({
-        fileId: entry.id,
-        path: getEntryPath(entry, entries),
-        line: index + 1,
-        text: lines[index].trim(),
-      });
-      if (matches.length >= 500) return matches;
-    }
-  }
-  return matches;
-}
-
-function SourceControl({
-  github,
-  entries,
+function SearchFileResults({
+  group,
+  entry,
+  query,
+  options,
+  activeFileId,
+  collapsed,
+  onToggle,
   onOpenFile,
-  staging,
+  onReplaceFile,
+  onReplaceMatch,
 }: {
-  github?: GithubRepositoryExplorerProps;
-  entries: RoomEntry[];
+  group: SearchFileGroup;
+  entry?: RoomEntry;
+  query: string;
+  options: SearchOptions;
+  activeFileId: string;
+  collapsed: boolean;
+  onToggle: () => void;
   onOpenFile: (fileId: string, line: number) => void;
-  staging: GithubStagingState;
-}) {
-  const changes = github?.changes ?? [];
-  const entriesByPath = useMemo(
-    () =>
-      new Map(
-        entries
-          .filter((entry) => !entry.isFolder)
-          .map((entry) => [getEntryPath(entry, entries), entry])
-      ),
-    [entries]
-  );
-  const stagedChanges = changes.filter((change) =>
-    staging.stagedPaths.has(change.path)
-  );
-  const unstagedChanges = changes.filter(
-    (change) => !staging.stagedPaths.has(change.path)
-  );
-
-  return (
-    <aside className="activity-view" aria-label="Source Control">
-      <ViewHeading view="source-control" />
-      {github ? (
-        <div className="activity-source-control">
-          <GithubRepositoryExplorerAction
-            {...github}
-            changes={stagedChanges}
-            triggerClassName="activity-source-control-heading"
-            triggerContent={
-              <>
-                <strong>GITHUB</strong>
-                {github.baseline && (
-                  <span className="source-control-repository-name">
-                    {github.baseline.owner}/{github.baseline.name}
-                  </span>
-                )}
-              </>
-            }
-          />
-          <GithubRepositoryExplorerStatus
-            baseline={github.baseline}
-            changes={changes}
-          />
-          {github.baseline && (
-            <>
-              <SourceControlChangeSection
-                title="Staged Changes"
-                changes={stagedChanges}
-                entriesByPath={entriesByPath}
-                onOpenFile={onOpenFile}
-                onToggleStaged={staging.toggleStaged}
-                onBulkAction={staging.unstageAll}
-                bulkActionLabel="Unstage all changes"
-                bulkActionIcon="codicon:remove"
-              />
-              <SourceControlChangeSection
-                title="Changes"
-                changes={unstagedChanges}
-                entriesByPath={entriesByPath}
-                onOpenFile={onOpenFile}
-                onToggleStaged={staging.toggleStaged}
-                onBulkAction={staging.stageAll}
-                bulkActionLabel="Stage all changes"
-                bulkActionIcon="codicon:add"
-              />
-              {stagedChanges.length > 0 && (
-                <p className="source-control-commit-hint">
-                  Open GITHUB to review and push staged changes.
-                </p>
-              )}
-            </>
-          )}
-          {!github.baseline && (
-            <p className="activity-empty">Open a GitHub repository to start tracking changes.</p>
-          )}
-        </div>
-      ) : (
-        <p className="activity-empty">Source control is unavailable.</p>
-      )}
-    </aside>
-  );
-}
-
-function SourceControlChangeSection({
-  title,
-  changes,
-  entriesByPath,
-  onOpenFile,
-  onToggleStaged,
-  onBulkAction,
-  bulkActionLabel,
-  bulkActionIcon,
-}: {
-  title: string;
-  changes: GithubChangeStatus[];
-  entriesByPath: Map<string, RoomEntry>;
-  onOpenFile: (fileId: string, line: number) => void;
-  onToggleStaged: (path: string) => void;
-  onBulkAction: () => void;
-  bulkActionLabel: string;
-  bulkActionIcon: string;
+  onReplaceFile: () => void;
+  onReplaceMatch: (match: SearchMatch) => void;
 }) {
   return (
-    <section className="source-control-change-section" aria-label={title}>
-      <div className="source-control-section-heading">
-        <strong>{title}</strong>
-        <span>{changes.length}</span>
-        {changes.length > 0 && (
+    <section className="activity-search-file" aria-label={group.path}>
+      <button
+        className={`activity-search-file-header${group.fileId === activeFileId ? ' is-active' : ''}`}
+        type="button"
+        aria-expanded={!collapsed}
+        title={group.path}
+        onClick={onToggle}
+      >
+        <Icon
+          icon={`codicon:chevron-${collapsed ? 'right' : 'down'}`}
+          aria-hidden="true"
+        />
+        <Icon
+          className="activity-search-file-icon"
+          icon={
+            entry ? getFileIcon(entry, false) : 'vscode-icons:file-type-text'
+          }
+          aria-hidden="true"
+        />
+        <span className="activity-search-file-name">{group.name}</span>
+        {group.parentPath ? (
+          <span className="activity-search-file-path">{group.parentPath}</span>
+        ) : null}
+        <span className="activity-search-file-count">
+          {group.matches.length}
+        </span>
+        <span className="activity-search-file-actions">
           <button
             type="button"
-            className="source-control-section-action"
-            aria-label={bulkActionLabel}
-            title={bulkActionLabel}
-            onClick={onBulkAction}
+            className="activity-search-row-action-btn"
+            title="Replace All in File"
+            aria-label={`Replace all in ${group.name}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              onReplaceFile();
+            }}
           >
-            <Icon icon={bulkActionIcon} aria-hidden="true" />
+            <Icon icon="codicon:replace-all" aria-hidden="true" />
           </button>
-        )}
-      </div>
-      {changes.map((change) => {
-        const entry = entriesByPath.get(change.path);
-        const changeLabel = change.kind === 'added' ? 'A' : change.kind === 'deleted' ? 'D' : 'M';
-        return (
-          <div className="source-control-change-row" key={change.path}>
-            <button
-              type="button"
-              className="source-control-change-file"
-              disabled={!entry}
-              title={change.path}
-              onClick={() => entry && onOpenFile(entry.id, 1)}
+        </span>
+      </button>
+      {collapsed
+        ? null
+        : group.matches.map((match) => (
+            <div
+              className="activity-search-match"
+              key={`${match.fileId}:${match.line}:${match.column}`}
+              title={`${match.path}:${match.line}`}
+              onClick={() => onOpenFile(match.fileId, match.line)}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  onOpenFile(match.fileId, match.line);
+                }
+              }}
             >
-              <Icon
-                className="source-control-change-file-icon"
-                icon={entry ? getFileIcon(entry, false) : 'vscode-icons:file-type-text'}
-                aria-hidden="true"
-              />
-              <span>{change.path}</span>
-              <strong className={`source-control-change-status is-${change.kind}`}>
-                {changeLabel}
-              </strong>
-            </button>
-            <button
-              type="button"
-              className="source-control-section-action source-control-change-action"
-              aria-label={`${stagedLabel(title)} ${change.path}`}
-              title={`${stagedLabel(title)} ${change.path}`}
-              onClick={() => onToggleStaged(change.path)}
-            >
-              <Icon
-                icon={title === 'Changes' ? 'codicon:add' : 'codicon:remove'}
-                aria-hidden="true"
-              />
-            </button>
-          </div>
-        );
-      })}
+              <span className="activity-search-match-line">{match.line}</span>
+              <span className="activity-search-match-text">
+                {highlightSearchLine(match.text, query, options).map(
+                  (part, index) =>
+                    part.match ? (
+                      <mark key={`${match.line}-${index}`}>{part.text}</mark>
+                    ) : (
+                      <span key={`${match.line}-${index}`}>{part.text}</span>
+                    )
+                )}
+              </span>
+              <span className="activity-search-match-actions">
+                <button
+                  type="button"
+                  className="activity-search-row-action-btn"
+                  title="Replace"
+                  aria-label={`Replace match on line ${match.line}`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onReplaceMatch(match);
+                  }}
+                >
+                  <Icon icon="codicon:replace" aria-hidden="true" />
+                </button>
+              </span>
+            </div>
+          ))}
     </section>
   );
 }
 
-function stagedLabel(title: string): string {
-  return title === 'Changes' ? 'Stage' : 'Unstage';
+function toggleCollapsed(current: Set<string>, fileId: string): Set<string> {
+  const next = new Set(current);
+  if (next.has(fileId)) next.delete(fileId);
+  else next.add(fileId);
+  return next;
 }
 
 function RunView({
   canRunCode,
   runDisabledReason,
-  isRunningCode,
   onRunCode,
   onOpenTerminal,
 }: ActivityViewPanelProps) {
@@ -367,14 +486,11 @@ function RunView({
           type="button"
           className="activity-action-button"
           onClick={onRunCode}
-          disabled={!canRunCode || isRunningCode}
+          disabled={!canRunCode}
           title={runDisabledReason}
         >
-          <Icon
-            icon={isRunningCode ? 'codicon:loading' : 'codicon:play'}
-            aria-hidden="true"
-          />
-          {isRunningCode ? 'Running…' : 'Run active file'}
+          <Icon icon="codicon:play" aria-hidden="true" />
+          Run active file
         </button>
         <button
           type="button"
