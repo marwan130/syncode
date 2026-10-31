@@ -1,63 +1,46 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 import type {
   ConnectionStatus,
   SignalRCrdtProvider,
 } from '../../providers/SignalRCrdtProvider';
+import type { BottomPanelView } from './terminalTypes';
 import { userFacingError } from '../../utils/userFacingError';
 import type { TerminalTab } from './terminalTypes';
 
-const RUN_OUTPUT_TAB: TerminalTab = {
-  id: 'run-output',
-  label: 'Run Output',
-  kind: 'output',
-  sessionId: null,
-};
-
 export interface UseTerminalTabsOptions {
-  outputRevision: number;
   providerRef: RefObject<SignalRCrdtProvider | null>;
   status: ConnectionStatus;
+  isPanelOpen: boolean;
+  activeView: BottomPanelView;
   newTerminalRequest: number;
-  startBashOnMount: boolean;
   onEmpty: () => void;
 }
 
 export function useTerminalTabs({
-  outputRevision,
   providerRef,
   status,
+  isPanelOpen,
+  activeView,
   newTerminalRequest,
-  startBashOnMount,
   onEmpty,
 }: UseTerminalTabsOptions) {
   const [tabs, setTabs] = useState<TerminalTab[]>([]);
   const [activeId, setActiveId] = useState('');
-  const [activeRevision, setActiveRevision] = useState(outputRevision - 1);
-  const [dismissedOutputRevision, setDismissedOutputRevision] = useState(0);
   const [terminalError, setTerminalError] = useState('');
-  const tabCounter = useRef(0);
+  const allocatedTabNumbers = useRef(new Set<number>());
   const lastNewTerminalRequest = useRef(newTerminalRequest);
-  const startedInitialTerminal = useRef(false);
+  const autoStartRequested = useRef(false);
   const hadTabsBefore = useRef(false);
   const pendingStarts = useRef(0);
+  const cancelledStarts = useRef(new Set<string>());
   const sessionIds = useRef(new Set<string>());
   const mounted = useRef(true);
   const tabsRef = useRef(tabs);
   const createBashTabRef = useRef<() => Promise<void>>(async () => undefined);
   const closeTabRef = useRef<(tab: TerminalTab) => void>(() => undefined);
-  const showOutputTab = outputRevision > dismissedOutputRevision;
-  const visibleTabs = useMemo(
-    () =>
-      showOutputTab && !tabs.some((tab) => tab.kind === 'output')
-        ? [...tabs, RUN_OUTPUT_TAB]
-        : tabs,
-    [showOutputTab, tabs]
-  );
-  const visibleActiveId =
-    showOutputTab && activeRevision !== outputRevision
-      ? 'run-output'
-      : activeId;
+  const visibleTabs = tabs;
+  const visibleActiveId = activeId;
 
   useEffect(() => {
     tabsRef.current = visibleTabs;
@@ -74,26 +57,43 @@ export function useTerminalTabs({
     createBashTabRef.current = async () => {
       const provider = providerRef.current;
       if (!provider || status !== 'connected') return;
-      if (sessionIds.current.size >= 3 || pendingStarts.current > 0) return;
+      const bashCount =
+        tabsRef.current.filter((tab) => tab.kind === 'bash').length +
+        pendingStarts.current;
+      if (bashCount >= 3) return;
       pendingStarts.current++;
+      const pendingId = `pending-${crypto.randomUUID()}`;
+      let tabNumber = 1;
+      while (allocatedTabNumbers.current.has(tabNumber)) tabNumber++;
+      allocatedTabNumbers.current.add(tabNumber);
+      const label = `bash ${tabNumber}`;
+      const pendingTab: TerminalTab = {
+        id: pendingId,
+        label,
+        kind: 'bash',
+        sessionId: null,
+      };
       setTerminalError('');
+      setTabs((current) => [...current, pendingTab]);
+      setActiveId(pendingId);
       try {
         const { sessionId } = await provider.startTerminal();
-        if (!mounted.current) {
+        if (!mounted.current || cancelledStarts.current.delete(pendingId)) {
+          allocatedTabNumbers.current.delete(tabNumber);
           await provider.closeTerminal(sessionId).catch(() => undefined);
           return;
         }
         sessionIds.current.add(sessionId);
-        const tab: TerminalTab = {
-          id: sessionId,
-          label: `bash ${++tabCounter.current}`,
-          kind: 'bash',
-          sessionId,
-        };
-        setTabs((current) => [...current, tab]);
-        setActiveId(tab.id);
-        setActiveRevision(outputRevision);
+        setTabs((current) =>
+          current.map((tab) =>
+            tab.id === pendingId ? { ...tab, id: sessionId, sessionId } : tab
+          )
+        );
+        setActiveId((active) => (active === pendingId ? sessionId : active));
       } catch (error) {
+        allocatedTabNumbers.current.delete(tabNumber);
+        setTabs((current) => current.filter((tab) => tab.id !== pendingId));
+        setActiveId((active) => (active === pendingId ? '' : active));
         if (mounted.current)
           setTerminalError(
             userFacingError(
@@ -105,18 +105,25 @@ export function useTerminalTabs({
         pendingStarts.current--;
       }
     };
-  }, [outputRevision, providerRef, status]);
+  }, [providerRef, status]);
 
   useEffect(() => {
     if (
-      startBashOnMount &&
+      isPanelOpen &&
+      activeView === 'terminal' &&
       status === 'connected' &&
-      !startedInitialTerminal.current
+      visibleTabs.length === 0 &&
+      !autoStartRequested.current
     ) {
-      startedInitialTerminal.current = true;
+      autoStartRequested.current = true;
       void createBashTabRef.current();
     }
-  }, [startBashOnMount, status]);
+  }, [activeView, isPanelOpen, status, visibleTabs.length]);
+
+  useEffect(() => {
+    if (!isPanelOpen || activeView !== 'terminal' || status !== 'connected')
+      autoStartRequested.current = false;
+  }, [activeView, isPanelOpen, status]);
 
   useEffect(() => {
     if (
@@ -131,7 +138,6 @@ export function useTerminalTabs({
   useEffect(() => {
     if (visibleTabs.length > 0) hadTabsBefore.current = true;
     else {
-      startedInitialTerminal.current = false;
       if (hadTabsBefore.current) onEmpty();
     }
   }, [onEmpty, visibleTabs.length]);
@@ -149,7 +155,10 @@ export function useTerminalTabs({
 
   useEffect(() => {
     closeTabRef.current = (tab) => {
-      if (tab.kind === 'output') setDismissedOutputRevision(outputRevision);
+      const tabNumber = Number(tab.label.match(/^bash (\d+)$/)?.[1]);
+      if (Number.isInteger(tabNumber))
+        allocatedTabNumbers.current.delete(tabNumber);
+      if (!tab.sessionId) cancelledStarts.current.add(tab.id);
       if (tab.sessionId) {
         sessionIds.current.delete(tab.sessionId);
         void providerRef.current
@@ -163,9 +172,8 @@ export function useTerminalTabs({
         );
         return remaining;
       });
-      setActiveRevision(outputRevision);
     };
-  }, [outputRevision, providerRef]);
+  }, [providerRef]);
 
   useEffect(() => {
     const closeActive = () => {
@@ -186,7 +194,6 @@ export function useTerminalTabs({
       visibleTabs.filter((tab) => tab.kind === 'bash').length < 3,
     selectTab(tab: TerminalTab) {
       setActiveId(tab.id);
-      setActiveRevision(outputRevision);
     },
     closeTab(tab: TerminalTab) {
       void closeTabRef.current(tab);
