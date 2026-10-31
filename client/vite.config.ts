@@ -1,6 +1,6 @@
 import react from '@vitejs/plugin-react'
 import type { ProxyOptions } from 'vite'
-import { defineConfig } from 'vite'
+import { defineConfig } from 'vitest/config'
 
 const roomServer = 'http://localhost:5111'
 
@@ -66,5 +66,8 @@ export default defineConfig({
       },
       '/api': roomServerProxy(),
     },
+  },
+  test: {
+    pool: 'vmForks',
   },
 })
