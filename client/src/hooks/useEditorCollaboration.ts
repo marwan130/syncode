@@ -7,6 +7,7 @@ import type {
 } from '../providers/SignalRCrdtProvider';
 import { useAwareness } from './useAwareness';
 import { useEditorCrdtBindings } from './useEditorCrdtBindings';
+import type { EditorGroupState } from '../components/editor/editorGroups';
 
 export interface UseEditorCollaborationOptions {
   providerRef: RefObject<SignalRCrdtProvider | null>;
@@ -14,11 +15,8 @@ export interface UseEditorCollaborationOptions {
   localName: string;
   localColor: string;
   entries: RoomEntry[];
-  openFileIds: string[];
-  primaryEditor: monaco.editor.IStandaloneCodeEditor | null;
-  secondaryEditor: monaco.editor.IStandaloneCodeEditor | null;
-  activeFileId: string;
-  splitFileId: string | null;
+  editorGroups: EditorGroupState[];
+  editors: Map<string, monaco.editor.IStandaloneCodeEditor>;
   monacoApi: typeof monaco | null;
 }
 
@@ -28,11 +26,8 @@ export function useEditorCollaboration({
   localName,
   localColor,
   entries,
-  openFileIds,
-  primaryEditor,
-  secondaryEditor,
-  activeFileId,
-  splitFileId,
+  editorGroups,
+  editors,
   monacoApi,
 }: UseEditorCollaborationOptions) {
   const awareness = useAwareness({
@@ -45,13 +40,10 @@ export function useEditorCollaboration({
   useEditorCrdtBindings({
     monacoApi,
     entries,
-    openFileIds,
+    editorGroups,
     providerRef,
     status,
-    primaryEditor,
-    secondaryEditor,
-    activeFileId,
-    splitFileId,
+    editors,
     broadcastCursor: awareness.broadcastCursor,
   });
 

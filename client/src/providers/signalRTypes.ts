@@ -5,6 +5,7 @@ export type ConnectionStatus =
   | 'connecting'
   | 'connected'
   | 'reconnecting'
+  | 'offline'
   | 'awaiting-approval'
   | 'join-rejected';
 

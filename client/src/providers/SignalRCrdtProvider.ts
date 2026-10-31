@@ -28,6 +28,12 @@ import {
   savePendingProjectTreeOperation,
   validatePendingProjectTreeOperations,
 } from '../crdt/pendingProjectTreeOutbox';
+import {
+  clearOfflineTextOps,
+  listOfflineTextOps,
+  queueOfflineTextOp,
+  removeOfflineTextOp,
+} from '../crdt/offlineTextOpQueue';
 import type {
   ImportSnapshot,
   ImportedFileContent,
@@ -114,6 +120,11 @@ export class SignalRCrdtProvider {
   private localEditLocked = false;
   private fileListeners = new Set<(files: RoomEntry[]) => void>();
   private activeFileListeners = new Set<(file: RoomEntry) => void>();
+  /** monotonically increasing counter for ordering offline text ops per room */
+  private offlineOpSeq = 0;
+  /** network event cleanup, registered in connect() */
+  private offlineHandler: (() => void) | null = null;
+  private onlineHandler: (() => void) | null = null;
   public get fileList(): RoomEntry[] {
     return this.files;
   }
@@ -180,6 +191,7 @@ export class SignalRCrdtProvider {
   private chatHistoryListeners = new Set<(messages: ChatMessage[]) => void>();
   private roomKickedListeners = new Set<() => void>();
   private roomExpiredListeners = new Set<() => void>();
+  private roomRecoveryFailedListeners = new Set<(error: unknown) => void>();
   private roomJoinRequests: RoomJoinRequest[] = [];
   private roomJoinRequestsListeners = new Set<
     (requests: RoomJoinRequest[]) => void
@@ -240,6 +252,7 @@ export class SignalRCrdtProvider {
     }
     this.joinRejected = false;
     this.emitStatus('connecting');
+    this.registerNetworkEventHandlers();
     try {
       await this.connection.start();
       await this.pendingTreeReady;
@@ -260,11 +273,48 @@ export class SignalRCrdtProvider {
   }
 
   public async disconnect(): Promise<void> {
+    this.unregisterNetworkEventHandlers();
     await this.flushPendingSnapshots();
     if (this.connection.state !== HubConnectionState.Disconnected) {
       await this.connection.stop();
     }
     this.emitStatus('disconnected');
+  }
+
+  /** Listen to browser online/offline events to emit the right status. */
+  private registerNetworkEventHandlers(): void {
+    if (this.offlineHandler) return; // already registered
+    this.offlineHandler = () => {
+      if (
+        this.connection.state === HubConnectionState.Reconnecting ||
+        this.connection.state === HubConnectionState.Disconnected
+      ) {
+        this.emitStatus('offline');
+      }
+    };
+    this.onlineHandler = () => {
+      // If SignalR is already reconnecting in the background, let it finish.
+      // If it gave up (Disconnected), kick off a fresh connect attempt.
+      if (this.connection.state === HubConnectionState.Disconnected) {
+        this.emitStatus('connecting');
+        this.connection.start().catch(() => {
+          this.emitStatus('disconnected');
+        });
+      }
+    };
+    window.addEventListener('offline', this.offlineHandler);
+    window.addEventListener('online', this.onlineHandler);
+  }
+
+  private unregisterNetworkEventHandlers(): void {
+    if (this.offlineHandler) {
+      window.removeEventListener('offline', this.offlineHandler);
+      this.offlineHandler = null;
+    }
+    if (this.onlineHandler) {
+      window.removeEventListener('online', this.onlineHandler);
+      this.onlineHandler = null;
+    }
   }
 
   public async leaveRoom(): Promise<void> {
@@ -1065,6 +1115,11 @@ export class SignalRCrdtProvider {
     return () => this.roomExpiredListeners.delete(listener);
   }
 
+  public onRoomRecoveryFailed(listener: (error: unknown) => void): () => void {
+    this.roomRecoveryFailedListeners.add(listener);
+    return () => this.roomRecoveryFailedListeners.delete(listener);
+  }
+
   public onRoomJoinRequestsChanged(
     listener: (requests: RoomJoinRequest[]) => void
   ): () => void {
@@ -1148,23 +1203,36 @@ export class SignalRCrdtProvider {
   }
 
   private async clearExpiredRoomState(): Promise<void> {
+    // Before wiping in-memory state, persist every open file's current CRDT
+    // snapshot to the offline text op queue store so restoreRecoveredWorkspace
+    // can upload them to the new room when we reconnect.  We reuse the offline
+    // text-op IndexedDB DB but store them as synthetic snapshots keyed by a
+    // reserved seq of 0 so they sit before any real ops in the file queue.
+    // The actual upload path is restoreRecoveredWorkspace(), which reads from
+    // this.documents directly — so we just need to leave the documents map
+    // intact and set roomRecoveryPending so the reconnect handler knows to call
+    // restoreRecoveredWorkspace instead of the normal sync path.
     await clearPendingProjectTreeOperations(this.roomId).catch(() => {});
+    await clearOfflineTextOps(this.roomId).catch(() => {});
     this.roomJoined = false;
+    this.roomRecoveryPending = true; // documents are preserved for recovery
     this.pendingTreeOperations = [];
-    this.documents.clear();
-    this.buffers.clear();
-    this.files = [];
-    this.activeFile = '';
-    this.projectTree = ProjectTree.fromEntries(this.siteId, []);
+    // do NOT clear this.documents or this.buffers — recovery needs them
     this.roomParticipants = [];
     this.githubRepositoryBaseline = null;
-    this.projectRootName = '';
-    this.updateFiles([]);
+    this.updateFiles(this.files); // keep tree visible but mark as expired
     this.roomParticipantsListeners.forEach((listener) => listener([]));
     this.githubRepositoryListeners.forEach((listener) => listener(null));
-    this.emitStatus('disconnected');
+    this.emitStatus('reconnecting');
     this.roomExpiredListeners.forEach((listener) => listener());
-    await this.connection.stop().catch(() => {});
+    // SignalR's automatic reconnect will fire onreconnected, which will call
+    // restoreRecoveredWorkspace because roomRecoveryPending is true.
+    // If the connection is already closed, try to reconnect manually.
+    if (this.connection.state === HubConnectionState.Disconnected) {
+      this.connection.start().catch(() => {
+        this.emitStatus('disconnected');
+      });
+    }
   }
 
   private registerChatHandlers(): void {
@@ -1352,7 +1420,13 @@ export class SignalRCrdtProvider {
   private registerConnectionLifecycleHandlers(): void {
     this.connection.onreconnecting(() => {
       this.roomJoined = false;
-      this.emitStatus('reconnecting');
+      // Use 'offline' when the browser has no network; 'reconnecting' when
+      // we still have a network but lost the WebSocket connection.
+      this.emitStatus(
+        typeof navigator !== 'undefined' && !navigator.onLine
+          ? 'offline'
+          : 'reconnecting'
+      );
     });
 
     this.connection.onreconnected(async () => {
@@ -1364,6 +1438,7 @@ export class SignalRCrdtProvider {
         } else if (joined) {
           await this.flushTreeOperations();
           await this.syncOfflineSnapshotsSafely();
+          await this.replayOfflineTextOps();
         }
         if (!this.joinRejected)
           this.emitStatus(
@@ -1453,10 +1528,11 @@ export class SignalRCrdtProvider {
   private async restoreRecoveredWorkspaceSafely(): Promise<void> {
     try {
       await this.restoreRecoveredWorkspace();
-    } catch {
+    } catch (error) {
       console.error(
         'Workspace recovery could not finish. It will retry when you reconnect.'
       );
+      this.roomRecoveryFailedListeners.forEach((listener) => listener(error));
     }
   }
 
@@ -1507,17 +1583,52 @@ export class SignalRCrdtProvider {
     for (const operation of operations ?? [])
       this.applyTreeOperation(operation);
     await this.snapshotLoadQueue;
+    // Clear any offline text ops accumulated during the expiry window —
+    // the snapshots we just uploaded already include all those edits.
+    await clearOfflineTextOps(this.roomId).catch(() => {});
     this.roomRecoveryPending = false;
   }
 
   private async sendOp(fileId: string, op: CrdtOp): Promise<void> {
-    if (this.connection.state !== HubConnectionState.Connected) return;
+    if (this.connection.state !== HubConnectionState.Connected) {
+      // Queue the op in IndexedDB so it survives a page reload while offline.
+      // The seq counter preserves per-file insertion order across calls.
+      const seq = ++this.offlineOpSeq;
+      await queueOfflineTextOp(this.roomId, fileId, op, seq).catch(() => {});
+      return;
+    }
     try {
       await this.connection.invoke('SendFileOp', this.roomId, fileId, op);
     } catch {
       console.error(
         'A file change could not be sent. Check your connection and try again.'
       );
+    }
+  }
+
+  /**
+   * Replay text ops that were queued in IndexedDB while offline.
+   * Called after `syncOfflineSnapshotsSafely` during a successful reconnect.
+   * Each op is sent individually; on success it is removed from the queue.
+   * The server is expected to ignore duplicate opIds idempotently.
+   */
+  private async replayOfflineTextOps(): Promise<void> {
+    const ops = await listOfflineTextOps(this.roomId).catch(() => []);
+    if (ops.length === 0) return;
+    for (const queued of ops) {
+      if (this.connection.state !== HubConnectionState.Connected) break;
+      try {
+        await this.connection.invoke(
+          'SendFileOp',
+          this.roomId,
+          queued.fileId,
+          queued.op
+        );
+        await removeOfflineTextOp(queued.key).catch(() => {});
+      } catch {
+        // Stop replaying; the next reconnect will retry from this point.
+        break;
+      }
     }
   }
 

@@ -18,8 +18,7 @@ export function useEditorCollaborationState({
   displayName,
   localColor,
   workspace,
-  monacoEditor,
-  splitMonacoEditor,
+  editors,
   monacoApi,
   accessKey,
   setPreviewOpen,
@@ -31,8 +30,7 @@ export function useEditorCollaborationState({
   displayName: string;
   localColor: string;
   workspace: ReturnType<typeof useEditorWorkspaceState>;
-  monacoEditor: monaco.editor.IStandaloneCodeEditor | null;
-  splitMonacoEditor: monaco.editor.IStandaloneCodeEditor | null;
+  editors: Map<string, monaco.editor.IStandaloneCodeEditor>;
   monacoApi: Monaco | null;
   accessKey: string;
   setPreviewOpen: Dispatch<SetStateAction<boolean>>;
@@ -44,11 +42,8 @@ export function useEditorCollaborationState({
     localName: displayName || 'Anonymous',
     localColor,
     entries: workspace.entries,
-    openFileIds: workspace.openFileIds,
-    primaryEditor: monacoEditor,
-    secondaryEditor: splitMonacoEditor,
-    activeFileId: workspace.activeFileId,
-    splitFileId: workspace.splitFileId,
+    editorGroups: workspace.editorGroups,
+    editors,
     monacoApi,
   });
   const participantActions = useRoomParticipantActions(providerRef);
@@ -75,5 +70,12 @@ export function useEditorCollaborationState({
     entries: workspace.entries,
   });
 
-  return { ...participants, participantActions, githubExplorer, previewSource, fileDiagnostics };
+  return {
+    ...participants,
+    participantActions,
+    githubExplorer,
+    previewSource,
+    fileDiagnostics: fileDiagnostics.byFile,
+    problems: fileDiagnostics.problems,
+  };
 }

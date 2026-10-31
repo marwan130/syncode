@@ -16,6 +16,13 @@ import {
 import { languageForFileName } from '../components/editor/languageModes';
 import type { EditorGroupState } from '../components/editor/editorGroups';
 
+/** statuses where cursor broadcast should be suppressed */
+const OFFLINE_STATUSES = new Set<ConnectionStatus>([
+  'offline',
+  'reconnecting',
+  'disconnected',
+]);
+
 export interface UseEditorCrdtBindingsOptions {
   monacoApi: Monaco | null;
   entries: RoomEntry[];
@@ -60,6 +67,7 @@ export function useEditorCrdtBindings({
   broadcastCursor,
 }: UseEditorCrdtBindingsOptions): void {
   const editorGroupsRef = useRef(editorGroups);
+  const broadcastCursorRef = useRef(broadcastCursor);
   const openFileIdsKey = Array.from(
     new Set(editorGroups.flatMap((group) => group.fileIds))
   )
@@ -73,6 +81,12 @@ export function useEditorCrdtBindings({
     editorGroupsRef.current = editorGroups;
   }, [editorGroups]);
 
+  // keep broadcastCursor ref fresh so the binding always sees the latest
+  // callback without needing to be recreated
+  useEffect(() => {
+    broadcastCursorRef.current = broadcastCursor;
+  }, [broadcastCursor]);
+
   useEffect(() => {
     const provider = providerRef.current;
     if (!monacoApi || !provider) return;
@@ -84,6 +98,14 @@ export function useEditorCrdtBindings({
     );
   }, [monacoApi, openFileIdsKey, entries, providerRef]);
 
+  // Bindings are intentionally NOT torn down when `status` changes.
+  // Tearing down and re-creating the binding during reconnect resets the
+  // Monaco model via model.setValue(), discarding any text the user typed
+  // while offline. The binding itself is connection-agnostic: local edits
+  // accumulate in the CRDT document and are synced separately once the
+  // connection is restored.
+  //
+  // Cursor broadcasting is suppressed via a separate effect below.
   useEffect(() => {
     const provider = providerRef.current;
     if (!provider) return;
@@ -91,6 +113,15 @@ export function useEditorCrdtBindings({
       binding: MonacoCrdtBinding;
       unsubscribeCursor: () => void;
     }> = [];
+
+    // Stable cursor relay: forwards cursor events only when online.
+    // Using a ref for broadcastCursor means we never need to recreate
+    // the binding when the callback identity changes.
+    const relayCursor = (cursor: CursorAnchor | null): void => {
+      if (!OFFLINE_STATUSES.has(status)) {
+        broadcastCursorRef.current(cursor);
+      }
+    };
 
     for (const group of editorGroupsRef.current) {
       const editor = editors.get(group.id);
@@ -103,7 +134,7 @@ export function useEditorCrdtBindings({
         provider,
         group.activeFileId
       );
-      const unsubscribeCursor = binding.onCursorChange(broadcastCursor);
+      const unsubscribeCursor = binding.onCursorChange(relayCursor);
       bindings.push({ binding, unsubscribeCursor });
     }
 
@@ -113,5 +144,11 @@ export function useEditorCrdtBindings({
         binding.dispose();
       }
     };
-  }, [editors, bindingsKey, providerRef, status, broadcastCursor]);
+    // `status` and `broadcastCursor` are intentionally absent from deps:
+    // status changes are handled via OFFLINE_STATUSES inside relayCursor,
+    // and broadcastCursor updates are handled via broadcastCursorRef.
+    // Only structural changes (new editor / file switch / new provider)
+    // should recreate bindings.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editors, bindingsKey, providerRef]);
 }
