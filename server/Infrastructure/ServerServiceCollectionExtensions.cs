@@ -26,6 +26,7 @@ public static class ServerServiceCollectionExtensions
                 throw new InvalidOperationException("Configure Redis before starting Syncode outside Development.");
             redisConnection = "localhost:6379";
         }
+        ProductionConfigurationValidator.ValidateRedisConnection(redisConnection, environment);
 
         services.AddSingleton<IConnectionMultiplexer>(_ => ConnectionMultiplexer.Connect(redisConnection));
         services.AddSignalR(options =>
@@ -51,6 +52,7 @@ public static class ServerServiceCollectionExtensions
 
         var allowedOrigins = AllowedOriginsConfiguration.Resolve(configuration, environment);
         ProductionConfigurationValidator.ValidateGithub(configuration, environment, allowedOrigins);
+        ProductionConfigurationValidator.ValidateExecutionService(configuration, environment);
         services.AddCors(options => options.AddPolicy("client", policy =>
             policy.WithOrigins(allowedOrigins).AllowAnyHeader().AllowAnyMethod().AllowCredentials()));
 
