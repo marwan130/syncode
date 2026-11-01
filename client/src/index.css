@@ -867,7 +867,7 @@ code {
 }
 
 .activity-run-section {
-  padding: 10px 12px;
+  padding: 10px 0;
   border-bottom: 1px solid var(--border);
 }
 
@@ -2235,10 +2235,11 @@ input[type='checkbox'] {
 .activity-action-button {
   display: flex;
   width: 100%;
+  box-sizing: border-box;
   min-height: var(--workbench-control-height);
   align-items: center;
   gap: var(--workbench-panel-gap);
-  padding: 0 7px;
+  padding: 0 calc(var(--workbench-panel-gutter) + 7px);
   color: var(--text);
   background: transparent;
   border: 0;
@@ -4850,11 +4851,12 @@ button.file-explorer-section-header {
   font: 12px var(--sans);
 }
 
-.profile-name-input:focus,
-.profile-name-input:focus-visible {
+input.profile-name-input:focus,
+input.profile-name-input:focus-visible {
   background: var(--control-bg);
   outline: none !important;
   border: 0 !important;
+  border-color: transparent !important;
   box-shadow: none !important;
 }
 

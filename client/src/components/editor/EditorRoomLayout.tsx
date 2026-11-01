@@ -11,7 +11,7 @@ import { ActivityBar } from './ActivityBar';
 import type { ActivityView } from './ActivityBar';
 import { ActivityViewPanel } from './ActivityViewPanel';
 import type { FileProblem } from '../../hooks/useFileDiagnostics';
-import { Icon } from '@iconify/react';
+import { VscError, VscWarning } from 'react-icons/vsc';
 
 export interface EditorRoomLayoutProps {
   roomHeader: ComponentProps<typeof RoomHeader>;
@@ -266,9 +266,9 @@ function WorkspaceStatusBar({
           title="Show Problems"
           onClick={onOpenProblems}
         >
-          <Icon icon="codicon:error" aria-hidden="true" />
+          <VscError aria-hidden="true" />
           <span>{problemCounts.errors}</span>
-          <Icon icon="codicon:warning" aria-hidden="true" />
+          <VscWarning aria-hidden="true" />
           <span>{problemCounts.warnings}</span>
         </button>
       </div>

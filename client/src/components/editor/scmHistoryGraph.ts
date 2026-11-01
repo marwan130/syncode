@@ -35,6 +35,58 @@ export function buildScmHistoryGraphRows(
   currentBranch: string,
   colors: string[]
 ): ScmHistoryGraphRow[] {
+  const colorsByBranch = createBranchColorMap(branches, currentBranch, colors);
+  const branchesByCommit = groupBranchesByCommit(branches);
+  const nextLaneColor = createNextLaneColor(colors);
+  const currentHeadSha = branches.find(
+    (branch) => branch.name === currentBranch
+  )?.sha;
+  const rows: ScmHistoryGraphRow[] = [];
+
+  for (const commit of history) {
+    const inputLanes = rows.at(-1)?.outputLanes ?? [];
+    const commitRefs = branchesByCommit.get(commit.sha) ?? [];
+    const commitColor = getCommitColor(
+      commitRefs,
+      currentBranch,
+      colorsByBranch
+    );
+    const outputLanes = buildOutputLanes(
+      commit,
+      inputLanes,
+      commitColor,
+      branchesByCommit,
+      colorsByBranch,
+      nextLaneColor
+    );
+
+    const inputIndex = inputLanes.findIndex((lane) => lane.id === commit.sha);
+    const circleIndex = inputIndex >= 0 ? inputIndex : inputLanes.length;
+
+    rows.push({
+      commit,
+      inputLanes: inputLanes.map((lane) => ({ ...lane })),
+      outputLanes,
+      circleIndex,
+      circleColor: getCircleColor(
+        outputLanes,
+        inputLanes,
+        circleIndex,
+        commitColor,
+        colors
+      ),
+      isHead: commit.sha === currentHeadSha,
+    });
+  }
+
+  return rows;
+}
+
+function createBranchColorMap(
+  branches: GithubBranchOption[],
+  currentBranch: string,
+  colors: string[]
+): Map<string, string> {
   const colorsByBranch = new Map<string, string>();
   let nextBranchColor = 0;
   for (const branch of branches) {
@@ -46,87 +98,108 @@ export function buildScmHistoryGraphRows(
     colorsByBranch.set(branch.name, color ?? colors[0] ?? 'rgb(0, 122, 204)');
     if (branch.name !== currentBranch) nextBranchColor++;
   }
+  return colorsByBranch;
+}
 
+function groupBranchesByCommit(
+  branches: GithubBranchOption[]
+): Map<string, GithubBranchOption[]> {
   const branchesByCommit = new Map<string, GithubBranchOption[]>();
   for (const branch of branches) {
     const refs = branchesByCommit.get(branch.sha) ?? [];
     refs.push(branch);
     branchesByCommit.set(branch.sha, refs);
   }
+  return branchesByCommit;
+}
 
-  const rows: ScmHistoryGraphRow[] = [];
-  let nextLaneColor = 0;
+function createNextLaneColor(colors: string[]): () => string {
+  let index = 0;
+  return () => {
+    const color = colors[index % colors.length] ?? 'rgb(0, 122, 204)';
+    index++;
+    return color;
+  };
+}
 
-  for (const commit of history) {
-    const inputLanes = rows.at(-1)?.outputLanes ?? [];
-    const outputLanes: ScmHistoryLane[] = [];
-    const commitRefs = branchesByCommit.get(commit.sha) ?? [];
-    const commitColor =
-      colorsByBranch.get(currentBranch) &&
-      commitRefs.some((branch) => branch.name === currentBranch)
-        ? colorsByBranch.get(currentBranch)
-        : commitRefs.length > 0
-          ? colorsByBranch.get(commitRefs[0].name)
-          : undefined;
-    let firstParentAdded = false;
+function getCommitColor(
+  commitRefs: GithubBranchOption[],
+  currentBranch: string,
+  colorsByBranch: Map<string, string>
+): string | undefined {
+  if (
+    colorsByBranch.get(currentBranch) &&
+    commitRefs.some((branch) => branch.name === currentBranch)
+  ) {
+    return colorsByBranch.get(currentBranch);
+  }
+  return commitRefs.length > 0
+    ? colorsByBranch.get(commitRefs[0].name)
+    : undefined;
+}
 
-    if (commit.parents.length > 0) {
-      for (const lane of inputLanes) {
-        if (lane.id === commit.sha) {
-          if (!firstParentAdded) {
-            outputLanes.push({
-              id: commit.parents[0],
-              color: commitColor ?? lane.color,
-            });
-            firstParentAdded = true;
-          }
-        } else {
-          outputLanes.push({ ...lane });
-        }
+function buildOutputLanes(
+  commit: GithubCommitHistoryItem,
+  inputLanes: ScmHistoryLane[],
+  commitColor: string | undefined,
+  branchesByCommit: Map<string, GithubBranchOption[]>,
+  colorsByBranch: Map<string, string>,
+  nextLaneColor: () => string
+): ScmHistoryLane[] {
+  const outputLanes: ScmHistoryLane[] = [];
+  let firstParentAdded = false;
+
+  if (commit.parents.length === 0) return outputLanes;
+
+  for (const lane of inputLanes) {
+    if (lane.id === commit.sha) {
+      if (!firstParentAdded) {
+        outputLanes.push({
+          id: commit.parents[0],
+          color: commitColor ?? lane.color,
+        });
+        firstParentAdded = true;
       }
-
-      const firstUnprocessedParent = firstParentAdded ? 1 : 0;
-      for (
-        let parentIndex = firstUnprocessedParent;
-        parentIndex < commit.parents.length;
-        parentIndex++
-      ) {
-        const parentId = commit.parents[parentIndex];
-        const parentRef = branchesByCommit.get(parentId)?.[0];
-        let color =
-          parentIndex === 0
-            ? commitColor
-            : parentRef && colorsByBranch.get(parentRef.name);
-        if (!color) {
-          color = colors[nextLaneColor % colors.length] ?? 'rgb(0, 122, 204)';
-          nextLaneColor++;
-        }
-        outputLanes.push({ id: parentId, color });
-      }
+    } else {
+      outputLanes.push({ ...lane });
     }
+  }
 
-    const inputIndex = inputLanes.findIndex((lane) => lane.id === commit.sha);
-    const circleIndex = inputIndex >= 0 ? inputIndex : inputLanes.length;
-    const circleColor =
-      outputLanes[circleIndex]?.color ??
-      inputLanes[circleIndex]?.color ??
-      commitColor ??
-      colors[0] ??
-      'rgb(0, 122, 204)';
-
-    rows.push({
-      commit,
-      inputLanes: inputLanes.map((lane) => ({ ...lane })),
-      outputLanes,
-      circleIndex,
-      circleColor,
-      isHead:
-        commit.sha ===
-        branches.find((branch) => branch.name === currentBranch)?.sha,
+  const firstUnprocessedParent = firstParentAdded ? 1 : 0;
+  for (
+    let parentIndex = firstUnprocessedParent;
+    parentIndex < commit.parents.length;
+    parentIndex++
+  ) {
+    const parentId = commit.parents[parentIndex];
+    const parentRef = branchesByCommit.get(parentId)?.[0];
+    const parentColor =
+      parentIndex === 0
+        ? commitColor
+        : parentRef && colorsByBranch.get(parentRef.name);
+    outputLanes.push({
+      id: parentId,
+      color: parentColor || nextLaneColor(),
     });
   }
 
-  return rows;
+  return outputLanes;
+}
+
+function getCircleColor(
+  outputLanes: ScmHistoryLane[],
+  inputLanes: ScmHistoryLane[],
+  circleIndex: number,
+  commitColor: string | undefined,
+  colors: string[]
+): string {
+  return (
+    outputLanes[circleIndex]?.color ??
+    inputLanes[circleIndex]?.color ??
+    commitColor ??
+    colors[0] ??
+    'rgb(0, 122, 204)'
+  );
 }
 
 export function getScmHistoryGraphWidth(rows: ScmHistoryGraphRow[]): number {
@@ -141,9 +214,16 @@ export function getScmHistoryGraphWidth(rows: ScmHistoryGraphRow[]): number {
 export function getScmHistoryGraphPaths(
   row: ScmHistoryGraphRow
 ): ScmHistoryGraphPath[] {
+  return [
+    ...getLanePaths(row),
+    ...getMergePaths(row),
+    ...getNodePaths(row),
+  ];
+}
+
+function getLanePaths(row: ScmHistoryGraphRow): ScmHistoryGraphPath[] {
   const paths: ScmHistoryGraphPath[] = [];
   const { commit, inputLanes, outputLanes, circleIndex } = row;
-  const inputIndex = inputLanes.findIndex((lane) => lane.id === commit.sha);
   let outputIndex = 0;
 
   for (let index = 0; index < inputLanes.length; index++) {
@@ -189,7 +269,12 @@ export function getScmHistoryGraphPaths(
     }
     outputIndex++;
   }
+  return paths;
+}
 
+function getMergePaths(row: ScmHistoryGraphRow): ScmHistoryGraphPath[] {
+  const { commit, outputLanes, circleIndex } = row;
+  const paths: ScmHistoryGraphPath[] = [];
   for (
     let parentIndex = 1;
     parentIndex < commit.parents.length;
@@ -208,12 +293,18 @@ export function getScmHistoryGraphPaths(
       d: `M ${startX} ${SWIMLANE_HEIGHT / 2} A ${SWIMLANE_WIDTH} ${SWIMLANE_WIDTH} 0 0 1 ${startX + SWIMLANE_WIDTH} ${SWIMLANE_HEIGHT} M ${startX} ${SWIMLANE_HEIGHT / 2} H ${circleX}`,
     });
   }
+  return paths;
+}
 
+function getNodePaths(row: ScmHistoryGraphRow): ScmHistoryGraphPath[] {
+  const { commit, inputLanes, circleIndex, circleColor } = row;
+  const paths: ScmHistoryGraphPath[] = [];
+  const inputIndex = inputLanes.findIndex((lane) => lane.id === commit.sha);
   if (inputIndex >= 0) {
     const x = SWIMLANE_WIDTH * (circleIndex + 1);
     paths.push({
       key: 'node-in',
-      color: inputLanes[inputIndex]?.color ?? row.circleColor,
+      color: inputLanes[inputIndex]?.color ?? circleColor,
       d: `M ${x} 0 V ${SWIMLANE_HEIGHT / 2}`,
     });
   }
@@ -222,7 +313,7 @@ export function getScmHistoryGraphPaths(
     const x = SWIMLANE_WIDTH * (circleIndex + 1);
     paths.push({
       key: 'node-out',
-      color: row.circleColor,
+      color: circleColor,
       d: `M ${x} ${SWIMLANE_HEIGHT / 2} V ${SWIMLANE_HEIGHT}`,
     });
   }

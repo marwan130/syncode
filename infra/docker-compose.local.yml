@@ -103,6 +103,7 @@ services:
     networks:
       - service-network
       - docker-control
+      - execution-host-access
     restart: unless-stopped
 
   room-server:
@@ -149,6 +150,7 @@ services:
     networks:
       frontend-network:
         ipv4_address: ${SYNCODE_FRONTEND_PROXY_IP:-172.30.10.3}
+      client-host-access:
     restart: unless-stopped
 
 networks:
@@ -163,6 +165,8 @@ networks:
     internal: true
   docker-egress:
   github-egress:
+  client-host-access:
+  execution-host-access:
 
 volumes:
   redis-data:

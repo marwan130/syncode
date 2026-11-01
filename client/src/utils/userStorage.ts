@@ -11,7 +11,6 @@ export interface StoredRoomInvite {
   roomId: string;
   accessKey: string;
 }
-
 const participantKey = (roomId: string) => `syncode_participant_id:${roomId}`;
 const joinRequestKey = (roomId: string) => `syncode_join_request_id:${roomId}`;
 const joinRejectedKey = (roomId: string) => `syncode_join_rejected:${roomId}`;
@@ -182,38 +181,29 @@ export function createSiteId(): string {
 }
 
 export function getOrCreateParticipantId(roomId: string): string {
-  try {
-    const key = participantKey(roomId);
-    const existing = localStorage.getItem(key) ?? sessionStorage.getItem(key);
-    if (existing) {
-      localStorage.setItem(key, existing);
-      sessionStorage.setItem(key, existing);
-      return existing;
-    }
-    const id = uuidv4();
-    localStorage.setItem(key, id);
-    sessionStorage.setItem(key, id);
-    return id;
-  } catch {
-    return uuidv4();
-  }
+  return getOrCreateStoredId(participantKey(roomId), uuidv4);
 }
 
 export function getOrCreateJoinRequestId(roomId: string): string {
+  return getOrCreateStoredId(joinRequestKey(roomId), () =>
+    uuidv4().replaceAll('-', '')
+  );
+}
+
+function getOrCreateStoredId(key: string, createId: () => string): string {
   try {
-    const key = joinRequestKey(roomId);
     const existing = localStorage.getItem(key) ?? sessionStorage.getItem(key);
     if (existing) {
       localStorage.setItem(key, existing);
       sessionStorage.setItem(key, existing);
       return existing;
     }
-    const id = uuidv4().replaceAll('-', '');
+    const id = createId();
     localStorage.setItem(key, id);
     sessionStorage.setItem(key, id);
     return id;
   } catch {
-    return uuidv4().replaceAll('-', '');
+    return createId();
   }
 }
 
@@ -253,31 +243,3 @@ export function markJoinRequestRejected(roomId: string): void {
   }
 }
 
-export function clearStoredRoomProfile(roomId: string): void {
-  try {
-    const pKey = participantKey(roomId);
-    const jKey = joinRequestKey(roomId);
-    const rKey = joinRejectedKey(roomId);
-    const cKey = roomCreatorTokenKey(roomId);
-    const nameKey = `${STORAGE_KEYS.DISPLAY_NAME}:${roomId}`;
-    const participantId =
-      localStorage.getItem(pKey) ?? sessionStorage.getItem(pKey);
-
-    sessionStorage.removeItem(pKey);
-    sessionStorage.removeItem(jKey);
-    sessionStorage.removeItem(rKey);
-    sessionStorage.removeItem(cKey);
-    sessionStorage.removeItem(nameKey);
-
-    localStorage.removeItem(pKey);
-    localStorage.removeItem(jKey);
-    localStorage.removeItem(rKey);
-    localStorage.removeItem(cKey);
-    localStorage.removeItem(nameKey);
-
-    if (participantId)
-      localStorage.removeItem(getColorStorageKey(participantId));
-  } catch {
-    return;
-  }
-}

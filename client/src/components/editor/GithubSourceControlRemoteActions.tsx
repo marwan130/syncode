@@ -9,13 +9,10 @@ import { createPortal } from 'react-dom';
 import { Icon } from '@iconify/react';
 import type { GithubRepositoryExplorerProps } from './fileExplorerTypes';
 import {
-  createGithubBranch,
-  deleteGithubBranch,
   getGithubCommitDetails,
   listGithubBranches,
   listGithubHistory,
   listGithubRepositories,
-  renameGithubBranch,
 } from '../../github/repositoryBrowser';
 import type {
   GithubBranchOption,
@@ -24,13 +21,11 @@ import type {
   GithubRepositoryOption,
 } from '../../github/repositoryBrowser';
 import { useGithubAuth } from '../../github/useGithubAuth';
-import { useAppFeedback } from '../shared/useAppFeedback';
 import { useAppActivity } from '../shared/useAppActivity';
 import { userFacingError } from '../../utils/userFacingError';
 import { GithubLoginButton } from '../github/GithubLoginButton';
 import { ScrollbarPanel } from '../shared/ScrollbarPanel';
 import { SourceControlPanel } from './SourceControlPanel';
-import { createGithubRepository } from '../../github/repositoryBrowser';
 import { useOutsidePointerDismiss } from '../../hooks/useOutsidePointerDismiss';
 import { moveMenuRadioFocus } from './menuKeyboardNavigation';
 import { CommitHistoryGraph } from './CommitHistoryGraph';
@@ -38,6 +33,10 @@ import {
   buildScmHistoryGraphRows,
   getScmHistoryGraphWidth,
 } from './scmHistoryGraph';
+import { formatCommitAge } from '../../github/commitAge';
+import { GithubRepositorySetup } from './GithubRepositorySetup';
+import { GithubRepositoryUrlForm } from './GithubRepositoryUrlForm';
+import { useGithubBranchActions } from './useGithubBranchActions';
 
 export function GithubSourceControlRemoteActions({
   github,
@@ -51,7 +50,6 @@ export function GithubSourceControlRemoteActions({
   onTargetBranchChange: (branch: string) => void;
 }) {
   const { account } = useGithubAuth();
-  const { confirm } = useAppFeedback();
   const { runActivity } = useAppActivity();
   const [repositories, setRepositories] = useState<GithubRepositoryOption[]>(
     []
@@ -62,23 +60,39 @@ export function GithubSourceControlRemoteActions({
   const [historyHasMore, setHistoryHasMore] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const historyLoadingRef = useRef(false);
-  const [branchDraft, setBranchDraft] = useState('');
-  const [renaming, setRenaming] = useState('');
-  const [renameDraft, setRenameDraft] = useState('');
   const [selectedBranch, setSelectedBranch] = useState(
     github.baseline?.branch ?? ''
   );
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [newRepositoryName, setNewRepositoryName] = useState('');
-  const [initialCommitMessage, setInitialCommitMessage] =
-    useState('Initial commit');
-  const [isPrivateRepository, setPrivateRepository] = useState(true);
   const [isRepositoryPickerOpen, setRepositoryPickerOpen] = useState(false);
   const baseline = github.baseline;
   const repositoryOwner = baseline?.owner;
   const repositoryName = baseline?.name;
   const defaultBranch = baseline?.branch;
+  const branchActions = useGithubBranchActions({
+    baseline,
+    repositories,
+    selectedBranch,
+    setSelectedBranch,
+    setBranches,
+    onTargetBranchChange,
+    setError,
+    canImport: github.canImport,
+    onSelectBranch: github.onSelectBranch,
+  });
+  const {
+    busy,
+    branchDraft,
+    setBranchDraft,
+    renaming,
+    setRenaming,
+    renameDraft,
+    setRenameDraft,
+    openBranch,
+    createBranch,
+    saveRename,
+    removeBranch,
+  } = branchActions;
 
   useEffect(() => {
     onTargetBranchChange(defaultBranch ?? '');
@@ -248,120 +262,6 @@ export function GithubSourceControlRemoteActions({
     }
   };
 
-  const openBranch = async (branch: string) => {
-    if (!github.canImport) {
-      setError(
-        'Only room admins can replace the shared project from a branch.'
-      );
-      return;
-    }
-    if (
-      !(await confirm(
-        `Switch the shared project to ${branch}? This replaces the current room files for everyone.`
-      ))
-    )
-      return;
-    setBusy(true);
-    setError('');
-    try {
-      await runActivity('Switching branch…', () =>
-        github.onSelectBranch(branch)
-      );
-    } catch (reason) {
-      setError(userFacingError(reason, 'Could not open that GitHub branch.'));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const createBranch = async () => {
-    if (!baseline || !branchDraft.trim()) return;
-    setBusy(true);
-    setError('');
-    try {
-      await runActivity('Creating branch…', async () => {
-        const name = branchDraft.trim();
-        await createGithubBranch(
-          baseline.owner,
-          baseline.name,
-          name,
-          baseline.branch
-        );
-        setBranchDraft('');
-        setSelectedBranch(name);
-        onTargetBranchChange(name);
-        setBranches(await listGithubBranches(baseline.owner, baseline.name));
-      });
-    } catch (reason) {
-      setError(userFacingError(reason, 'Could not create the branch.'));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const saveRename = async () => {
-    if (!baseline || !renaming || !renameDraft.trim()) return;
-    setBusy(true);
-    setError('');
-    try {
-      await runActivity('Renaming branch…', async () => {
-        const oldName = renaming;
-        const newName = renameDraft.trim();
-        await renameGithubBranch(
-          baseline.owner,
-          baseline.name,
-          oldName,
-          newName
-        );
-        setRenaming('');
-        setRenameDraft('');
-        if (selectedBranch === oldName) {
-          setSelectedBranch(newName);
-          onTargetBranchChange(newName);
-        }
-        setBranches(await listGithubBranches(baseline.owner, baseline.name));
-      });
-    } catch (reason) {
-      setError(userFacingError(reason, 'Could not rename the branch.'));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const removeBranch = async (branch: GithubBranchOption) => {
-    if (!baseline) return;
-    const defaultBranch = repositories.find(
-      (repository) =>
-        repository.owner === baseline.owner && repository.name === baseline.name
-    )?.defaultBranch;
-    if (branch.name === defaultBranch) {
-      setError('The default branch cannot be deleted.');
-      return;
-    }
-    if (
-      !(await confirm(
-        `Delete the GitHub branch ${branch.name}? This cannot be undone.`
-      ))
-    )
-      return;
-    setBusy(true);
-    setError('');
-    try {
-      await runActivity('Deleting branch…', async () => {
-        await deleteGithubBranch(baseline.owner, baseline.name, branch.name);
-        setBranches(await listGithubBranches(baseline.owner, baseline.name));
-        if (branch.name === selectedBranch && defaultBranch) {
-          setSelectedBranch(defaultBranch);
-          onTargetBranchChange(defaultBranch);
-        }
-      });
-    } catch (reason) {
-      setError(userFacingError(reason, 'Could not delete the branch.'));
-    } finally {
-      setBusy(false);
-    }
-  };
-
   return (
     <>
       <SourceControlPanel
@@ -392,147 +292,16 @@ export function GithubSourceControlRemoteActions({
             </button>
           )}
           {!baseline ? (
-            <div className="source-control-empty-repository">
-              {!account ? (
-                <>
-                  <GithubRepositoryUrlForm
-                    onOpenGithub={onOpenGithub}
-                    disabled={!canManageRepositories}
-                  />
-                  <div className="source-control-connect">
-                    <GithubLoginButton
-                      returnTo={`${window.location.pathname}${window.location.search}`}
-                      pushScope="public_repo"
-                      className="profile-github-button"
-                      disabled={!canManageRepositories}
-                    />
-                    <p>
-                      Sign in to browse your repositories or create one for this
-                      workspace.
-                    </p>
-                  </div>
-                </>
-              ) : (
-                <>
-                  {repositoryPickerButton}
-                  <GithubRepositoryUrlForm
-                    onOpenGithub={onOpenGithub}
-                    disabled={!canManageRepositories}
-                  />
-                  {github.hasWorkspaceFiles && (
-                    <form
-                      className="source-control-create-repository"
-                      onSubmit={(event) => {
-                        event.preventDefault();
-                        if (
-                          !github.canImport ||
-                          !newRepositoryName.trim() ||
-                          !initialCommitMessage.trim()
-                        )
-                          return;
-                        setBusy(true);
-                        setError('');
-                        void runActivity(
-                          'Creating GitHub repository…',
-                          async () => {
-                            const grant = await github.onRequestAdminGrant();
-                            return createGithubRepository(
-                              {
-                                roomId: github.roomId,
-                                accessKey: github.accessKey,
-                                name: newRepositoryName.trim(),
-                                message: initialCommitMessage.trim(),
-                                isPrivate: isPrivateRepository,
-                              },
-                              grant
-                            );
-                          }
-                        )
-                          .then((result) => {
-                            github.onBaselineChange(result.baseline);
-                            onTargetBranchChange(result.baseline.branch);
-                            setNewRepositoryName('');
-                          })
-                          .catch((reason: unknown) =>
-                            setError(
-                              userFacingError(
-                                reason,
-                                'Could not create and push the repository.'
-                              )
-                            )
-                          )
-                          .finally(() => setBusy(false));
-                      }}
-                    >
-                      <div className="source-control-create-repository-heading">
-                        Create a repository from this workspace
-                      </div>
-                      <input
-                        aria-label="New GitHub repository name"
-                        placeholder="Repository name"
-                        maxLength={100}
-                        value={newRepositoryName}
-                        onChange={(event) =>
-                          setNewRepositoryName(event.currentTarget.value)
-                        }
-                        disabled={busy || !github.canImport}
-                      />
-                      <input
-                        aria-label="First commit message"
-                        placeholder="First commit message"
-                        maxLength={200}
-                        value={initialCommitMessage}
-                        onChange={(event) =>
-                          setInitialCommitMessage(event.currentTarget.value)
-                        }
-                        disabled={busy || !github.canImport}
-                      />
-                      <label className="source-control-repository-visibility">
-                        <input
-                          type="checkbox"
-                          checked={isPrivateRepository}
-                          onChange={(event) =>
-                            setPrivateRepository(event.currentTarget.checked)
-                          }
-                          disabled={busy || !github.canImport}
-                        />
-                        Private repository
-                      </label>
-                      <button
-                        type="submit"
-                        disabled={
-                          busy ||
-                          !github.canImport ||
-                          !newRepositoryName.trim() ||
-                          !initialCommitMessage.trim()
-                        }
-                      >
-                        {busy ? 'Creating and pushing…' : 'Create and push'}
-                      </button>
-                      {!github.canImport && (
-                        <p>
-                          Only a room admin can connect a repository for
-                          everyone.
-                        </p>
-                      )}
-                      {isPrivateRepository && (
-                        <GithubLoginButton
-                          returnTo={`${window.location.pathname}${window.location.search}`}
-                          authorizeScope="repo"
-                          label="Grant GitHub access"
-                          className="source-control-grant-access-button"
-                        />
-                      )}
-                    </form>
-                  )}
-                  {error && (
-                    <p className="source-control-message" role="alert">
-                      {error}
-                    </p>
-                  )}
-                </>
-              )}
-            </div>
+            <GithubRepositorySetup
+              accountSignedIn={Boolean(account)}
+              canManageRepositories={canManageRepositories}
+              github={github}
+              onOpenGithub={onOpenGithub}
+              onTargetBranchChange={onTargetBranchChange}
+              repositoryPickerButton={repositoryPickerButton}
+              error={error}
+              setError={setError}
+            />
           ) : account ? (
             <div
               className="source-control-remote-actions"
@@ -689,7 +458,6 @@ export function GithubSourceControlRemoteActions({
     </>
   );
 }
-
 function BranchPicker({
   branches,
   selectedBranch,
@@ -839,38 +607,6 @@ function BranchPicker({
           document.body
         )}
     </div>
-  );
-}
-
-function GithubRepositoryUrlForm({
-  onOpenGithub,
-  disabled,
-}: {
-  onOpenGithub: (repositoryUrl?: string) => void;
-  disabled: boolean;
-}) {
-  const [repositoryUrl, setRepositoryUrl] = useState('');
-
-  return (
-    <form
-      className="source-control-repository-url"
-      onSubmit={(event) => {
-        event.preventDefault();
-        if (!disabled && repositoryUrl.trim())
-          onOpenGithub(repositoryUrl.trim());
-      }}
-    >
-      <input
-        aria-label="GitHub repository URL"
-        placeholder="https://github.com/owner/repository"
-        value={repositoryUrl}
-        disabled={disabled}
-        onChange={(event) => setRepositoryUrl(event.currentTarget.value)}
-      />
-      <button type="submit" disabled={disabled || !repositoryUrl.trim()}>
-        Review
-      </button>
-    </form>
   );
 }
 
@@ -1223,19 +959,3 @@ function formatCommitDate(value: string | null): string {
   return value ? new Date(value).toLocaleString() : 'Unknown date';
 }
 
-function formatCommitAge(value: string | null): string {
-  if (!value) return 'Date unknown';
-  const elapsed = Math.max(0, Date.now() - new Date(value).getTime());
-  const minutes = Math.floor(elapsed / 60_000);
-  if (minutes < 1) return 'just now';
-  if (minutes < 60)
-    return `${minutes} ${minutes === 1 ? 'minute' : 'minutes'} ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours} ${hours === 1 ? 'hour' : 'hours'} ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 30) return `${days} ${days === 1 ? 'day' : 'days'} ago`;
-  const months = Math.floor(days / 30);
-  if (months < 12) return `${months} ${months === 1 ? 'month' : 'months'} ago`;
-  const years = Math.floor(days / 365);
-  return `${years} ${years === 1 ? 'year' : 'years'} ago`;
-}

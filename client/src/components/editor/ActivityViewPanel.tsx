@@ -1,6 +1,20 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { RefObject } from 'react';
-import { Icon } from '@iconify/react';
+import {
+  VscCaseSensitive,
+  VscChevronDown,
+  VscChevronRight,
+  VscError,
+  VscFile,
+  VscPlay,
+  VscPreserveCase,
+  VscRegex,
+  VscReplace,
+  VscReplaceAll,
+  VscTerminal,
+  VscWarning,
+  VscWholeWord,
+} from 'react-icons/vsc';
 import type {
   RoomEntry,
   SignalRCrdtProvider,
@@ -10,7 +24,6 @@ import type { GithubChangeStatus } from '../../github/changeTracker';
 import { SidebarPanel } from './SidebarPanel';
 import { GithubSourceControlView } from './GithubSourceControlView';
 import type { ActivityView } from './ActivityBar';
-import { getFileIcon } from './fileExplorerUtils';
 import { ScrollbarPanel } from '../shared/ScrollbarPanel';
 import {
   DEFAULT_SEARCH_OPTIONS,
@@ -125,11 +138,6 @@ function WorkspaceSearch({
   }, [entries, providerRef, query, options, patternError]);
 
   const groups = useMemo(() => groupSearchMatches(results), [results]);
-  const entriesById = useMemo(
-    () => new Map(entries.map((entry) => [entry.id, entry])),
-    [entries]
-  );
-
   const handleReplaceAll = () => {
     const provider = providerRef.current;
     if (!provider || !query.trim() || patternError) return;
@@ -221,7 +229,7 @@ function WorkspaceSearch({
                   setOptions((opt) => ({ ...opt, matchCase: !opt.matchCase }))
                 }
               >
-                <Icon icon="codicon:case-sensitive" aria-hidden="true" />
+                <VscCaseSensitive aria-hidden="true" />
               </button>
               <button
                 type="button"
@@ -233,7 +241,7 @@ function WorkspaceSearch({
                   setOptions((opt) => ({ ...opt, wholeWord: !opt.wholeWord }))
                 }
               >
-                <Icon icon="codicon:whole-word" aria-hidden="true" />
+                <VscWholeWord aria-hidden="true" />
               </button>
               <button
                 type="button"
@@ -245,7 +253,7 @@ function WorkspaceSearch({
                   setOptions((opt) => ({ ...opt, isRegex: !opt.isRegex }))
                 }
               >
-                <Icon icon="codicon:regex" aria-hidden="true" />
+                <VscRegex aria-hidden="true" />
               </button>
             </div>
           </div>
@@ -282,7 +290,7 @@ function WorkspaceSearch({
                   }))
                 }
               >
-                <Icon icon="codicon:preserve-case" aria-hidden="true" />
+                <VscPreserveCase aria-hidden="true" />
               </button>
             </div>
           </div>
@@ -294,21 +302,21 @@ function WorkspaceSearch({
             disabled={!query.trim() || results.length === 0}
             onClick={handleReplaceAll}
           >
-            <Icon icon="codicon:replace-all" aria-hidden="true" />
+            <VscReplaceAll aria-hidden="true" />
           </button>
         </div>
       </form>
 
       {patternError && (
         <div className="activity-search-error" role="alert">
-          <Icon icon="codicon:error" aria-hidden="true" />
+          <VscError aria-hidden="true" />
           <span>{patternError}</span>
         </div>
       )}
 
       {replaceError && (
         <div className="activity-search-error" role="alert">
-          <Icon icon="codicon:warning" aria-hidden="true" />
+          <VscWarning aria-hidden="true" />
           <span>{replaceError}</span>
         </div>
       )}
@@ -328,7 +336,6 @@ function WorkspaceSearch({
                 <SearchFileResults
                   key={group.fileId}
                   group={group}
-                  entry={entriesById.get(group.fileId)}
                   query={resolvedQuery}
                   options={options}
                   activeFileId={activeFileId}
@@ -355,7 +362,6 @@ function WorkspaceSearch({
 
 function SearchFileResults({
   group,
-  entry,
   query,
   options,
   activeFileId,
@@ -366,7 +372,6 @@ function SearchFileResults({
   onReplaceMatch,
 }: {
   group: SearchFileGroup;
-  entry?: RoomEntry;
   query: string;
   options: SearchOptions;
   activeFileId: string;
@@ -385,15 +390,13 @@ function SearchFileResults({
         title={group.path}
         onClick={onToggle}
       >
-        <Icon
-          icon={`codicon:chevron-${collapsed ? 'right' : 'down'}`}
-          aria-hidden="true"
-        />
-        <Icon
+        {collapsed ? (
+          <VscChevronRight aria-hidden="true" />
+        ) : (
+          <VscChevronDown aria-hidden="true" />
+        )}
+        <VscFile
           className="activity-search-file-icon"
-          icon={
-            entry ? getFileIcon(entry, false) : 'vscode-icons:file-type-text'
-          }
           aria-hidden="true"
         />
         <span className="activity-search-file-name">{group.name}</span>
@@ -414,7 +417,7 @@ function SearchFileResults({
               onReplaceFile();
             }}
           >
-            <Icon icon="codicon:replace-all" aria-hidden="true" />
+            <VscReplaceAll aria-hidden="true" />
           </button>
         </span>
       </button>
@@ -456,7 +459,7 @@ function SearchFileResults({
                     onReplaceMatch(match);
                   }}
                 >
-                  <Icon icon="codicon:replace" aria-hidden="true" />
+                  <VscReplace aria-hidden="true" />
                 </button>
               </span>
             </div>
@@ -489,7 +492,7 @@ function RunView({
           disabled={!canRunCode}
           title={runDisabledReason}
         >
-          <Icon icon="codicon:play" aria-hidden="true" />
+          <VscPlay aria-hidden="true" />
           Run active file
         </button>
         <button
@@ -497,7 +500,7 @@ function RunView({
           className="activity-action-button"
           onClick={onOpenTerminal}
         >
-          <Icon icon="codicon:terminal" aria-hidden="true" />
+          <VscTerminal aria-hidden="true" />
           New terminal
         </button>
       </section>

@@ -1,4 +1,11 @@
-import { Icon } from '@iconify/react';
+import type { IconType } from 'react-icons';
+import {
+  VscCommentDiscussion,
+  VscFiles,
+  VscPlay,
+  VscSearch,
+  VscSourceControl,
+} from 'react-icons/vsc';
 import { SHORTCUT_DEFINITIONS } from './shortcutDefinitions';
 
 export type ActivityView = 'explorer' | 'search' | 'source-control' | 'run';
@@ -10,15 +17,19 @@ export interface ActivityBarProps {
   onToggleChat: () => void;
 }
 
-const ACTIVITIES: Array<{ id: ActivityView; label: string; icon: string }> = [
-  { id: 'explorer', label: 'Explorer', icon: 'codicon:files' },
-  { id: 'search', label: 'Search', icon: 'codicon:search' },
+const ACTIVITIES: Array<{
+  id: ActivityView;
+  label: string;
+  icon: IconType;
+}> = [
+  { id: 'explorer', label: 'Explorer', icon: VscFiles },
+  { id: 'search', label: 'Search', icon: VscSearch },
   {
     id: 'source-control',
     label: 'Source Control',
-    icon: 'codicon:source-control',
+    icon: VscSourceControl,
   },
-  { id: 'run', label: 'Run', icon: 'codicon:play' },
+  { id: 'run', label: 'Run', icon: VscPlay },
 ];
 
 export function ActivityBar({
@@ -29,7 +40,7 @@ export function ActivityBar({
 }: ActivityBarProps) {
   return (
     <nav className="activity-bar" aria-label="Activity bar">
-      {ACTIVITIES.map(({ id, label, icon }) => (
+      {ACTIVITIES.map(({ id, label, icon: ActivityIcon }) => (
         <button
           key={id}
           className={`activity-bar-button${activeView === id ? ' is-active' : ''}`}
@@ -40,7 +51,7 @@ export function ActivityBar({
           title={`${label} (${activityShortcutLabel(id)})`}
           onClick={() => onSelect(id)}
         >
-          <Icon icon={icon} aria-hidden="true" />
+          <ActivityIcon size={24} aria-hidden="true" />
         </button>
       ))}
       <button
@@ -52,7 +63,7 @@ export function ActivityBar({
         title="Chat (Ctrl+Alt+C)"
         onClick={onToggleChat}
       >
-        <Icon icon="codicon:comment-discussion" aria-hidden="true" />
+        <VscCommentDiscussion size={24} aria-hidden="true" />
       </button>
     </nav>
   );

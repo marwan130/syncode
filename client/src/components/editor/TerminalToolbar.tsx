@@ -1,5 +1,5 @@
 import type { KeyboardEvent } from 'react';
-import { Icon } from '@iconify/react';
+import { VscAdd, VscClose, VscTerminal } from 'react-icons/vsc';
 import { ScrollbarPanel } from '../shared/ScrollbarPanel';
 import type { TerminalTab } from './terminalTypes';
 
@@ -47,11 +47,7 @@ export function TerminalTabsVertical({
                 onClick={() => onSelectTab(tab)}
                 onKeyDown={focusAdjacentTerminalTab}
               >
-                <Icon
-                  icon="codicon:terminal"
-                  className="terminal-tab-icon"
-                  aria-hidden="true"
-                />
+                <VscTerminal className="terminal-tab-icon" aria-hidden="true" />
                 <span className="terminal-tab-label">{tab.label}</span>
               </button>
               <button
@@ -60,7 +56,7 @@ export function TerminalTabsVertical({
                 onClick={() => onCloseTab(tab)}
                 title="Kill terminal"
               >
-                <Icon icon="codicon:close" aria-hidden="true" />
+                <VscClose aria-hidden="true" />
               </button>
             </div>
           ))}
@@ -71,7 +67,7 @@ export function TerminalTabsVertical({
           disabled={!canStartBash}
           title="New Bash terminal"
         >
-          <Icon icon="codicon:add" aria-hidden="true" />
+          <VscAdd aria-hidden="true" />
           <span>New Terminal</span>
         </button>
       </div>

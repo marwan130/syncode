@@ -132,7 +132,7 @@ async function request<T = { success: true }>(
   path: string,
   options: { method?: string; body?: string; headers?: HeadersInit } = {}
 ): Promise<T> {
-  const response = await fetch(path, {
+  const response = await fetch(getRepositoryApiPath(path), {
     method: options.method ?? 'GET',
     ...(options.body
       ? {
@@ -150,6 +150,18 @@ async function request<T = { success: true }>(
   if (!response.ok) throw await repositoryBrowserError(response);
   if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
+}
+
+function getRepositoryApiPath(path: string): string {
+  const repositoryApiOrigin = 'https://syncode.invalid';
+  const requestUrl = new URL(path, repositoryApiOrigin);
+  if (
+    requestUrl.origin !== repositoryApiOrigin ||
+    !requestUrl.pathname.startsWith('/api/github/repository/')
+  ) {
+    throw new Error('Invalid repository request.');
+  }
+  return `${requestUrl.pathname}${requestUrl.search}`;
 }
 
 async function repositoryBrowserError(response: Response): Promise<Error> {

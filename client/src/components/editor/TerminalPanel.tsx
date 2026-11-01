@@ -13,7 +13,7 @@ import type {
 import type { FileProblem } from '../../hooks/useFileDiagnostics';
 import type { BottomPanelView } from './terminalTypes';
 import type { TerminalRunRequest } from './terminalTypes';
-import { Icon } from '@iconify/react';
+import { VscClose, VscError, VscPlay, VscWarning } from 'react-icons/vsc';
 import { ScrollbarPanel } from '../shared/ScrollbarPanel';
 
 const Terminal = lazy(() =>
@@ -123,7 +123,7 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
                   disabled={canRun === false}
                   title={runDisabledReason || 'Run code'}
                 >
-                  <Icon icon="codicon:play" aria-hidden="true" />
+                  <VscPlay aria-hidden="true" />
                   <span>Run</span>
                 </button>
               )}
@@ -134,7 +134,7 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
                 title="Close panel"
                 aria-label="Close panel"
               >
-                <Icon icon="codicon:close" aria-hidden="true" />
+                <VscClose aria-hidden="true" />
               </button>
             </div>
           </div>
@@ -174,14 +174,11 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
                     key={`${problem.fileId}:${problem.line}:${problem.column}:${index}`}
                     onClick={() => onOpenProblem(problem.fileId, problem.line)}
                   >
-                    <Icon
-                      icon={
-                        problem.severity === 'error'
-                          ? 'codicon:error'
-                          : 'codicon:warning'
-                      }
-                      aria-hidden="true"
-                    />
+                    {problem.severity === 'error' ? (
+                      <VscError aria-hidden="true" />
+                    ) : (
+                      <VscWarning aria-hidden="true" />
+                    )}
                     <span>{problem.message}</span>
                     <strong>
                       {problem.path}:{problem.line}
