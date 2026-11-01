@@ -17,9 +17,9 @@ describe('language selection', () => {
     expect(languageForFileName(name)).toBe(language);
   });
 
-  it('uses the existing default for unknown extensions', () => {
-    expect(languageForFileName('notes.unknown')).toBe('cpp');
-    expect(languageForFileName('untitled')).toBe('cpp');
+  it('uses plain text for unknown extensions', () => {
+    expect(languageForFileName('notes.unknown')).toBe('plaintext');
+    expect(languageForFileName('untitled')).toBe('plaintext');
   });
 
   it('identifies only languages supported by the live preview', () => {

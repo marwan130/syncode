@@ -8,7 +8,8 @@ public sealed class RoomFileService(
     IRoomActivityStore rooms,
     IRoomParticipantReader participants,
     RoomAuthorizationService authorization,
-    ProjectTreeOperationService projectTreeOperations)
+    ProjectTreeOperationService projectTreeOperations,
+    IRoomRateLimiter rateLimits)
 {
     private const int MaxOfflineSnapshotCount = 500;
     private const int MaxOfflineSnapshotCompressedBytes = 10 * 1024 * 1024;
@@ -107,9 +108,12 @@ public sealed class RoomFileService(
     public async Task SendOperationAsync(
         string roomId,
         string fileId,
-        string connectionId)
+        string connectionId,
+        string operationId)
     {
         await authorization.EnsureFileParticipantAsync(roomId, fileId, connectionId);
+        if (!await rateLimits.TryConsumeRealtimeRelayAsync(roomId, connectionId, operationId))
+            throw new RoomOperationException("The room is receiving too many editor updates. Try again shortly.");
         await rooms.TouchRoomAsync(roomId);
     }
 

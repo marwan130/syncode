@@ -15,7 +15,7 @@ interface LanguageCompletions {
   snippets: CompletionSnippet[];
 }
 
-const COMPLETIONS: Record<LanguageMode, LanguageCompletions> = {
+const COMPLETIONS: Partial<Record<LanguageMode, LanguageCompletions>> = {
   html: {
     keywords: [
       'doctype',
@@ -406,10 +406,8 @@ export function configureMonacoCompletions(monaco: Monaco): void {
   if (configuredMonacoInstances.has(monaco)) return;
   configuredMonacoInstances.add(monaco);
 
-  for (const [language, completions] of Object.entries(COMPLETIONS) as [
-    LanguageMode,
-    LanguageCompletions,
-  ][]) {
+  for (const [language, completions] of Object.entries(COMPLETIONS)) {
+    if (!completions) continue;
     monaco.languages.registerCompletionItemProvider(language, {
       triggerCharacters: ['.', '#'],
       provideCompletionItems(

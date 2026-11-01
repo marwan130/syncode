@@ -70,6 +70,15 @@ const clientsByProvider = new WeakMap<
 >();
 const bindingsByModel = new Map<string, ModelBinding>();
 const configuredMonaco = new WeakSet<object>();
+const LANGUAGE_SERVER_LANGUAGES: LanguageMode[] = [
+  'html',
+  'python',
+  'csharp',
+  'c',
+  'cpp',
+  'rust',
+  'java',
+];
 
 export async function connectModelToLanguageServer(
   monacoApi: Monaco,
@@ -79,12 +88,7 @@ export async function connectModelToLanguageServer(
   fileId: string,
   filePath: string
 ): Promise<() => void> {
-  if (
-    language === 'javascript' ||
-    language === 'typescript' ||
-    language === 'css'
-  )
-    return () => {};
+  if (!LANGUAGE_SERVER_LANGUAGES.includes(language)) return () => {};
   configureLanguageServerProviders(monacoApi);
   const clients =
     clientsByProvider.get(provider) ??
@@ -474,15 +478,7 @@ function configureLanguageServerProviders(monacoApi: Monaco): void {
   if (configuredMonaco.has(monacoApi)) return;
   configuredMonaco.add(monacoApi);
 
-  for (const language of [
-    'html',
-    'python',
-    'csharp',
-    'c',
-    'cpp',
-    'rust',
-    'java',
-  ] as LanguageMode[]) {
+  for (const language of LANGUAGE_SERVER_LANGUAGES) {
     monacoApi.languages.registerCompletionItemProvider(language, {
       triggerCharacters: ['.', ':', '<', '"', "'", '/', '#'],
       provideCompletionItems: async (

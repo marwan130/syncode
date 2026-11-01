@@ -70,6 +70,16 @@ public sealed class RedisRoomRateLimitStore(IConnectionMultiplexer redis) :
             [FileConnectionKey(roomId, connectionId, "10s"), FileConnectionKey(roomId, connectionId, "1m"), FileRoomKey(roomId, "10s"), FileRoomKey(roomId, "1m")],
             operationId, 20, 120, 200, 500);
 
+    public Task<bool> TryConsumeRealtimeRelayAsync(string roomId, string connectionId, string operationId) =>
+        TryConsumeAsync(
+            [RealtimeConnectionKey(roomId, connectionId, "10s"), RealtimeConnectionKey(roomId, connectionId, "1m"), RealtimeRoomKey(roomId, "10s"), RealtimeRoomKey(roomId, "1m")],
+            operationId, 6_000, 30_000, 30_000, 180_000);
+
+    public Task<bool> TryConsumeAwarenessAsync(string roomId, string connectionId, string operationId) =>
+        TryConsumeAsync(
+            [AwarenessConnectionKey(roomId, connectionId, "10s"), AwarenessConnectionKey(roomId, connectionId, "1m"), AwarenessRoomKey(roomId, "10s"), AwarenessRoomKey(roomId, "1m")],
+            operationId, 300, 1_800, 6_000, 30_000);
+
     private async Task<bool> TryConsumeAsync(
         RedisKey[] keys,
         string operationId,
@@ -94,6 +104,14 @@ public sealed class RedisRoomRateLimitStore(IConnectionMultiplexer redis) :
         $"room:{{{roomId}}}:files:create:rate:connection:{connectionId}:{window}";
     private static string FileRoomKey(string roomId, string window) =>
         $"room:{{{roomId}}}:files:create:rate:{window}";
+    private static string RealtimeConnectionKey(string roomId, string connectionId, string window) =>
+        $"room:{{{roomId}}}:realtime:connection:{connectionId}:{window}";
+    private static string RealtimeRoomKey(string roomId, string window) =>
+        $"room:{{{roomId}}}:realtime:rate:{window}";
+    private static string AwarenessConnectionKey(string roomId, string connectionId, string window) =>
+        $"room:{{{roomId}}}:awareness:connection:{connectionId}:{window}";
+    private static string AwarenessRoomKey(string roomId, string window) =>
+        $"room:{{{roomId}}}:awareness:rate:{window}";
 
     private static string HashAddress(string clientAddress) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(clientAddress)));

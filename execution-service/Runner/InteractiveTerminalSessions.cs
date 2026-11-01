@@ -20,6 +20,7 @@ public sealed class TerminalSessionLimitException(string message) : Exception(me
 public sealed class InteractiveTerminalSessions : IHostedService, IAsyncDisposable
 {
     private const int MaxSessions = 8;
+    private const int MaxSessionsPerRoom = 4;
     private const int MaxOutputCharacters = 256 * 1024;
     private const int MaxInputCharacters = 4096;
     private static readonly TimeSpan IdleLifetime = TimeSpan.FromMinutes(15);
@@ -33,6 +34,7 @@ public sealed class InteractiveTerminalSessions : IHostedService, IAsyncDisposab
     private readonly PackageEgressBoundary _packageEgress;
     private readonly RoomDependencyStore _dependencies;
     private readonly SemaphoreSlim _sessionSlots = new(MaxSessions, MaxSessions);
+    private readonly RoomSessionCapacity _roomSessionCapacity = new();
     private readonly CancellationTokenSource _shutdown = new();
     private Task? _cleanupTask;
 
@@ -62,8 +64,13 @@ public sealed class InteractiveTerminalSessions : IHostedService, IAsyncDisposab
         IReadOnlyList<TerminalWorkspaceEntry> entries,
         CancellationToken cancellationToken)
     {
-        if (!await _sessionSlots.WaitAsync(0, cancellationToken))
+        if (!_roomSessionCapacity.TryAcquire(roomId, MaxSessionsPerRoom))
+            throw new TerminalSessionLimitException("This room has reached its terminal limit. Close an unused terminal and try again.");
+        if (!_sessionSlots.Wait(0))
+        {
+            _roomSessionCapacity.Release(roomId);
             throw new TerminalSessionLimitException("The terminal session limit has been reached. Close an unused terminal and try again.");
+        }
 
         var id = Guid.NewGuid().ToString("N");
         var containerName = $"syncode-terminal-{id}";
@@ -88,6 +95,7 @@ public sealed class InteractiveTerminalSessions : IHostedService, IAsyncDisposab
         catch
         {
             _sessionSlots.Release();
+            _roomSessionCapacity.Release(roomId);
             TryDeleteWorkspace(workspaceDirectory);
             throw;
         }
@@ -95,10 +103,11 @@ public sealed class InteractiveTerminalSessions : IHostedService, IAsyncDisposab
 
         var process = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
         _activeContainers.Add(containerName);
+        Session? session = null;
         try
         {
             if (!process.Start()) throw new InvalidOperationException("Could not start the isolated Bash terminal.");
-            var session = new Session(id, roomId, containerName, process, workspaceDirectory, initialWorkspace, runnerNetwork);
+            session = new Session(id, roomId, containerName, process, workspaceDirectory, initialWorkspace, runnerNetwork);
             if (!_sessions.TryAdd(id, session))
             {
                 _activeContainers.Remove(containerName);
@@ -117,7 +126,12 @@ public sealed class InteractiveTerminalSessions : IHostedService, IAsyncDisposab
             await KillContainerAsync(containerName);
             process.Dispose();
             await _packageEgress.RemoveSessionNetworkAsync(runnerNetwork);
-            _sessionSlots.Release();
+            if (session is null)
+            {
+                _sessionSlots.Release();
+                _roomSessionCapacity.Release(roomId);
+            }
+            else ReleaseSlot(session);
             throw;
         }
     }
@@ -726,7 +740,9 @@ public sealed class InteractiveTerminalSessions : IHostedService, IAsyncDisposab
 
     private void ReleaseSlot(Session session)
     {
-        if (session.TryReleaseSlot()) _sessionSlots.Release();
+        if (!session.TryReleaseSlot()) return;
+        _sessionSlots.Release();
+        _roomSessionCapacity.Release(session.RoomId);
     }
 
     private async Task KillContainerAsync(string name)

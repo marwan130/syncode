@@ -27,6 +27,7 @@ public class CollabHub : Hub
     private readonly LanguageServerSessionService _languageServers;
     private readonly RoomInteractionService _interactions;
     private readonly IRoomJoinApprovalStore _joinApprovals;
+    private readonly IRoomRateLimiter _rateLimits;
     public CollabHub(
         IRoomParticipantStore participants,
         RoomJoinService join,
@@ -41,7 +42,8 @@ public class CollabHub : Hub
         RoomFileService roomFiles,
         RoomAuthorizationService authorization,
         ProjectImportCancellationRegistry projectImportCancellations,
-        IRoomRecoveryStore roomRecovery)
+        IRoomRecoveryStore roomRecovery,
+        IRoomRateLimiter rateLimits)
     {
         _roomLimits = roomLimits.Value;
         _instanceId = instanceIdentity.Id;
@@ -57,6 +59,7 @@ public class CollabHub : Hub
         _authorization = authorization;
         _projectImportCancellations = projectImportCancellations;
         _roomRecovery = roomRecovery;
+        _rateLimits = rateLimits;
     }
 
     public Task<TerminalSessionStartResult> StartTerminal() =>
@@ -464,8 +467,32 @@ public class CollabHub : Hub
 
     public async Task SendFileOp(string roomId, string fileId, CrdtOpDto op)
     {
-        await _roomFiles.SendOperationAsync(roomId, fileId, Context.ConnectionId);
+        if (!IsValidCrdtOperation(op))
+            throw new RoomOperationException("The editor update is invalid.");
+        await _roomFiles.SendOperationAsync(
+            roomId,
+            fileId,
+            Context.ConnectionId,
+            Guid.NewGuid().ToString("N"));
         await Clients.OthersInGroup(roomId).SendAsync("ReceiveFileOp", fileId, op);
+    }
+
+    private static bool IsValidCrdtOperation(CrdtOpDto? operation)
+    {
+        static bool IsValidId(CrdtIdDto? id) => id is not null &&
+            !string.IsNullOrWhiteSpace(id.SiteId) && id.SiteId.Length <= 128 &&
+            id.Counter is > 0 and <= 9_007_199_254_740_991;
+
+        if (operation is null) return false;
+        return operation.Type switch
+        {
+            "insert" => operation.Id is null &&
+                operation.Char is { Value.Length: > 0 and <= 2, IsDeleted: false } character &&
+                IsValidId(character.Id) &&
+                (character.OriginId is null || IsValidId(character.OriginId)),
+            "delete" => operation.Char is null && IsValidId(operation.Id),
+            _ => false
+        };
     }
 
     public async Task ApplyProjectTreeOperation(string roomId, JsonElement operation)
@@ -568,9 +595,13 @@ public class CollabHub : Hub
             "RoomParticipants",
             participants.Select(RoomParticipantView.From));
     }
-    public async Task UpdateAwareness(string roomId, object awarenessState)
+    public async Task UpdateAwareness(string roomId, JsonElement awarenessState)
     {
         await _authorization.EnsureParticipantAsync(roomId, Context.ConnectionId);
+        if (awarenessState.ValueKind != JsonValueKind.Object || awarenessState.GetRawText().Length > 8192)
+            throw new RoomOperationException("The presence update is invalid.");
+        if (!await _rateLimits.TryConsumeAwarenessAsync(roomId, Context.ConnectionId, Guid.NewGuid().ToString("N")))
+            throw new RoomOperationException("Presence updates are temporarily limited. Try again shortly.");
         await Clients.OthersInGroup(roomId)
             .SendAsync("AwarenessUpdate", Context.ConnectionId, awarenessState);
     }

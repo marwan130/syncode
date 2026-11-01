@@ -19,10 +19,12 @@ public sealed class LanguageServerSessions : IHostedService, IAsyncDisposable
     private const int MaximumFileBytes = 16 * 1024 * 1024;
     private const long MaximumWorkspaceBytes = 32L * 1024 * 1024;
     private const int MaximumMessageBytes = 4 * 1024 * 1024;
+    private const int MaximumSessionsPerRoom = 8;
     private static readonly TimeSpan MaximumSessionDuration = TimeSpan.FromMinutes(30);
     private static readonly Regex ValidRoomId = new("^[a-zA-Z0-9_-]{1,128}$", RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private readonly ConcurrentDictionary<string, Session> _sessions = new(StringComparer.Ordinal);
     private readonly SemaphoreSlim _slots;
+    private readonly RoomSessionCapacity _roomSessionCapacity = new();
     private readonly RoomDependencyStore _dependencies;
     private readonly ILogger<LanguageServerSessions> _logger;
     private readonly string _runtime;
@@ -61,8 +63,13 @@ public sealed class LanguageServerSessions : IHostedService, IAsyncDisposable
     {
         if (!ValidRoomId.IsMatch(roomId) || !TryResolveServer(language, out var server))
             throw new ArgumentException("Invalid language server request.");
-        if (!await _slots.WaitAsync(0, cancellationToken))
+        if (!_roomSessionCapacity.TryAcquire(roomId, MaximumSessionsPerRoom))
+            throw new LanguageServerCapacityException("This room has reached its language server limit.");
+        if (!_slots.Wait(0))
+        {
+            _roomSessionCapacity.Release(roomId);
             throw new LanguageServerCapacityException();
+        }
 
         var id = Guid.NewGuid().ToString("N");
         var containerName = $"syncode-lsp-{id}";
@@ -76,7 +83,7 @@ public sealed class LanguageServerSessions : IHostedService, IAsyncDisposable
                 Directory.CreateDirectory(Path.Combine(workspace, "node_modules"));
             }
             process = StartContainer(containerName, server, workspace, _dependencies.GetRoomPath(roomId));
-            var session = new Session(id, containerName, workspace, process, DateTimeOffset.UtcNow);
+            var session = new Session(id, roomId, containerName, workspace, process, DateTimeOffset.UtcNow);
             if (!_sessions.TryAdd(id, session)) throw new InvalidOperationException("Could not create language server session.");
             process = null;
             return new LanguageServerStart(id);
@@ -86,6 +93,7 @@ public sealed class LanguageServerSessions : IHostedService, IAsyncDisposable
             if (process is not null) KillProcess(process);
             TryDeleteWorkspace(workspace);
             _slots.Release();
+            _roomSessionCapacity.Release(roomId);
             throw;
         }
     }
@@ -126,6 +134,7 @@ public sealed class LanguageServerSessions : IHostedService, IAsyncDisposable
         TryDeleteWorkspace(session.WorkspaceDirectory);
         session.Dispose();
         _slots.Release();
+        _roomSessionCapacity.Release(session.RoomId);
     }
 
     public async Task StopAsync(CancellationToken cancellationToken)
@@ -374,10 +383,11 @@ public sealed class LanguageServerSessions : IHostedService, IAsyncDisposable
 
     private sealed record LanguageServer(string Image, IReadOnlyList<string> Command);
 
-    private sealed class Session(string id, string containerName, string workspaceDirectory, Process process, DateTimeOffset createdAt) : IDisposable
+    private sealed class Session(string id, string roomId, string containerName, string workspaceDirectory, Process process, DateTimeOffset createdAt) : IDisposable
     {
         private int _connected;
         internal string Id { get; } = id;
+        internal string RoomId { get; } = roomId;
         internal string ContainerName { get; } = containerName;
         internal string WorkspaceDirectory { get; } = workspaceDirectory;
         internal Process Process { get; } = process;
