@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { CURSOR_COLORS, getStoredColor, setStoredColor } from '../userStorage';
+import {
+  clearStoredRoomInvite,
+  CURSOR_COLORS,
+  getStoredColor,
+  getStoredRoomInvite,
+  setStoredColor,
+  storeRoomInvite,
+} from '../userStorage';
 
 function createStorage(entries: Record<string, string> = {}) {
   const values = new Map(Object.entries(entries));
@@ -58,5 +65,42 @@ describe('participant color storage', () => {
     setStoredColor('#4ade80', 'participant-4');
 
     expect(storage.getItem('syncode_user_color:participant-4')).toBe('#4ade80');
+  });
+});
+
+describe('last room invite storage', () => {
+  it('stores and restores a valid room invite', () => {
+    const storage = createStorage();
+    vi.stubGlobal('localStorage', storage);
+    const invite = { roomId: 'room_42', accessKey: 'A'.repeat(43) };
+
+    storeRoomInvite(invite.roomId, invite.accessKey);
+
+    expect(getStoredRoomInvite()).toEqual(invite);
+  });
+
+  it('clears only the matching room invite', () => {
+    const storage = createStorage();
+    vi.stubGlobal('localStorage', storage);
+    storeRoomInvite('room_42', 'A'.repeat(43));
+
+    clearStoredRoomInvite('another-room');
+    expect(getStoredRoomInvite()?.roomId).toBe('room_42');
+
+    clearStoredRoomInvite('room_42');
+    expect(getStoredRoomInvite()).toBeNull();
+  });
+
+  it('ignores malformed stored invites', () => {
+    const storage = createStorage({
+      syncode_last_room_invite: JSON.stringify({
+        roomId: 'room_42',
+        accessKey: 'invalid',
+      }),
+    });
+    vi.stubGlobal('localStorage', storage);
+
+    expect(getStoredRoomInvite()).toBeNull();
+    expect(storage.getItem('syncode_last_room_invite')).toBeNull();
   });
 });

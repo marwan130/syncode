@@ -1,15 +1,71 @@
 import { v4 as uuidv4 } from 'uuid';
+import { isValidRoomAccessKey } from './roomInvites';
 
 const STORAGE_KEYS = {
   DISPLAY_NAME: 'syncode_display_name',
   USER_COLOR: 'syncode_user_color',
+  LAST_ROOM_INVITE: 'syncode_last_room_invite',
 } as const;
+
+export interface StoredRoomInvite {
+  roomId: string;
+  accessKey: string;
+}
 
 const participantKey = (roomId: string) => `syncode_participant_id:${roomId}`;
 const joinRequestKey = (roomId: string) => `syncode_join_request_id:${roomId}`;
 const joinRejectedKey = (roomId: string) => `syncode_join_rejected:${roomId}`;
 const roomCreatorTokenKey = (roomId: string) =>
   `syncode_room_creator_token:${roomId}`;
+
+export function getStoredRoomInvite(): StoredRoomInvite | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.LAST_ROOM_INVITE);
+    if (!raw) return null;
+    const invite: unknown = JSON.parse(raw);
+    if (
+      !invite ||
+      typeof invite !== 'object' ||
+      !('roomId' in invite) ||
+      typeof invite.roomId !== 'string' ||
+      !/^[a-zA-Z0-9_-]{1,128}$/.test(invite.roomId) ||
+      !('accessKey' in invite) ||
+      typeof invite.accessKey !== 'string' ||
+      !isValidRoomAccessKey(invite.accessKey)
+    ) {
+      localStorage.removeItem(STORAGE_KEYS.LAST_ROOM_INVITE);
+      return null;
+    }
+    return { roomId: invite.roomId, accessKey: invite.accessKey };
+  } catch {
+    return null;
+  }
+}
+
+export function storeRoomInvite(roomId: string, accessKey: string): void {
+  if (
+    !/^[a-zA-Z0-9_-]{1,128}$/.test(roomId) ||
+    !isValidRoomAccessKey(accessKey)
+  )
+    return;
+  try {
+    localStorage.setItem(
+      STORAGE_KEYS.LAST_ROOM_INVITE,
+      JSON.stringify({ roomId, accessKey })
+    );
+  } catch {
+    return;
+  }
+}
+
+export function clearStoredRoomInvite(roomId: string): void {
+  try {
+    if (getStoredRoomInvite()?.roomId === roomId)
+      localStorage.removeItem(STORAGE_KEYS.LAST_ROOM_INVITE);
+  } catch {
+    return;
+  }
+}
 
 export function getStoredRoomCreatorToken(roomId: string): string | null {
   try {

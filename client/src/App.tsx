@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Routes,
   Route,
@@ -16,7 +16,7 @@ import { GithubAuthProvider } from './github/GithubAuthProvider';
 import { AppFeedbackProvider } from './components/shared/AppFeedback';
 import { AppActivityProvider } from './components/shared/AppActivity';
 import { isValidRoomAccessKey } from './utils/roomInvites';
-import { storeRoomProfile } from './utils/userStorage';
+import { storeRoomInvite, storeRoomProfile } from './utils/userStorage';
 import { createRoomSession } from './utils/roomCreation';
 import { SyncodeLogo } from './components/shared/SyncodeLogo';
 import { PrivacyPolicyPage } from './components/shared/PrivacyPolicyPage';
@@ -114,8 +114,13 @@ function RoomRoute() {
   const navigate = useNavigate();
   const accessKey =
     new URLSearchParams(location.hash.slice(1)).get('key') ?? '';
+  const validInvite = Boolean(roomId && isValidRoomAccessKey(accessKey));
 
-  if (!isValidRoomAccessKey(accessKey)) {
+  useEffect(() => {
+    if (validInvite && roomId) storeRoomInvite(roomId, accessKey);
+  }, [accessKey, roomId, validInvite]);
+
+  if (!validInvite) {
     return (
       <main className="home-page">
         <h1 className="home-title">
