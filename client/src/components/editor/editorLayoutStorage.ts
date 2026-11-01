@@ -100,7 +100,6 @@ export function getEntryPath(entry: RoomEntry, entries: RoomEntry[]): string {
   return path.join('/');
 }
 
-export function getEditorModelPath(roomId: string, filePath: string): string {
-  const path = filePath.split('/').map(encodeURIComponent).join('/');
-  return `syncode://${encodeURIComponent(roomId)}/${path}`;
+export function getEditorModelPath(roomId: string, fileId: string): string {
+  return `syncode://${encodeURIComponent(roomId)}/files/${encodeURIComponent(fileId)}`;
 }

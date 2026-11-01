@@ -8,9 +8,13 @@ const entries: RoomEntry[] = [
   { id: 'file', name: 'main.ts', parentId: 'src', isFolder: false },
 ];
 
-function marker(path: string, severity: number): monaco.editor.IMarker {
+function marker(
+  path: string,
+  severity: number,
+  scheme = 'file'
+): monaco.editor.IMarker {
   return {
-    resource: { path, toString: () => `file://${path}` },
+    resource: { path, scheme, toString: () => `${scheme}://${path}` },
     severity,
     startLineNumber: 3,
     startColumn: 2,
@@ -33,6 +37,18 @@ describe('file diagnostics', () => {
     expect(result.problems.map((problem) => problem.severity)).toEqual([
       'warning',
       'error',
+    ]);
+  });
+
+  it('maps stable Monaco model URIs to files after a rename', () => {
+    const result = computeFileDiagnostics(
+      [marker('/files/file', 8, 'syncode')],
+      entries
+    );
+
+    expect(result.byFile.file).toBe('error');
+    expect(result.problems).toMatchObject([
+      { fileId: 'file', path: 'src/main.ts', severity: 'error' },
     ]);
   });
 

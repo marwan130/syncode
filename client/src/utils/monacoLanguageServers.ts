@@ -1,11 +1,15 @@
 import type { Monaco } from '@monaco-editor/react';
 import type * as monaco from 'monaco-editor';
+import 'vscode-jsonrpc/browser';
 import { createWebSocketConnection, listen } from 'vscode-ws-jsonrpc';
 type MessageConnection = ReturnType<typeof createWebSocketConnection>;
 import type { LanguageMode } from '../components/editor/languageModes';
 import type { SignalRCrdtProvider } from '../providers/SignalRCrdtProvider';
 import { getAutocompleteEnabled } from './autocompletePreference';
-import { getEntryPath } from '../components/editor/editorLayoutStorage';
+import {
+  getEditorModelPath,
+  getEntryPath,
+} from '../components/editor/editorLayoutStorage';
 import { languageForFileName } from '../components/editor/languageModes';
 
 interface LspRange {
@@ -52,6 +56,7 @@ interface ManagedDocument {
   uri: string;
   content: string;
   version: number;
+  diagnostics?: LspDiagnostic[];
   models: Map<string, { model: monaco.editor.ITextModel; references: number }>;
 }
 
@@ -75,7 +80,12 @@ export async function connectModelToLanguageServer(
   fileId: string,
   filePath: string
 ): Promise<() => void> {
-  if (language === 'javascript' || language === 'typescript') return () => {};
+  if (
+    language === 'javascript' ||
+    language === 'typescript' ||
+    language === 'css'
+  )
+    return () => {};
   configureLanguageServerProviders(monacoApi);
   const clients =
     clientsByProvider.get(provider) ??
@@ -162,6 +172,7 @@ class RoomLanguageServerClient {
     if (modelReference) modelReference.references++;
     else document.models.set(modelId, { model, references: 1 });
     bindingsByModel.set(modelId, { client: this, document });
+    if (document.diagnostics) this.applyDiagnostics(document, model);
     this.activeModels++;
     return document;
   }
@@ -241,7 +252,7 @@ class RoomLanguageServerClient {
     connection.onNotification(
       'textDocument/publishDiagnostics',
       (params: { uri: string; diagnostics: LspDiagnostic[] }) => {
-        const document = this.documents.get(params.uri);
+        const document = this.findDocument(params.uri);
         if (document) this.publishDiagnostics(document, params.diagnostics);
       }
     );
@@ -302,6 +313,16 @@ class RoomLanguageServerClient {
     document: ManagedDocument,
     diagnostics: LspDiagnostic[]
   ): void {
+    document.diagnostics = diagnostics;
+    for (const { model } of document.models.values())
+      this.applyDiagnostics(document, model);
+  }
+
+  private applyDiagnostics(
+    document: ManagedDocument,
+    model: monaco.editor.ITextModel
+  ): void {
+    const diagnostics = document.diagnostics ?? [];
     const markers: monaco.editor.IMarkerData[] = diagnostics.map(
       (diagnostic) => ({
         severity:
@@ -321,8 +342,7 @@ class RoomLanguageServerClient {
         endColumn: diagnostic.range.end.character + 1,
       })
     );
-    for (const { model } of document.models.values())
-      this.monacoApi.editor.setModelMarkers(model, 'syncode-lsp', markers);
+    this.monacoApi.editor.setModelMarkers(model, 'syncode-lsp', markers);
   }
 
   private clearDiagnostics(model: monaco.editor.ITextModel): void {
@@ -335,6 +355,15 @@ class RoomLanguageServerClient {
     content: string
   ): ManagedDocument {
     return { fileId, uri, content, version: 1, models: new Map() };
+  }
+
+  private findDocument(uri: string): ManagedDocument | undefined {
+    const directMatch = this.documents.get(uri);
+    if (directMatch) return directMatch;
+    const path = workspacePath(uri);
+    return [...this.documents.values()].find(
+      (document) => workspacePath(document.uri) === path
+    );
   }
 
   private syncWorkspace(): void {
@@ -364,8 +393,7 @@ class RoomLanguageServerClient {
     const uri = toWorkspaceUri(filePath);
     const content = this.provider.getFileContent(fileId);
     const document = this.documents.get(uri);
-    if (!document)
-      return this.openWorkspaceDocument(fileId, uri, filePath, content);
+    if (!document) return this.openWorkspaceDocument(fileId, uri, content);
     this.updateWorkspaceDocument(document, fileId, uri, content);
   }
 
@@ -378,15 +406,14 @@ class RoomLanguageServerClient {
   private openWorkspaceDocument(
     fileId: string,
     uri: string,
-    filePath: string,
     content: string
   ): void {
     const document = this.createDocument(fileId, uri, content);
-    const model = this.monacoApi.editor
-      .getModels()
-      .find((item: monaco.editor.ITextModel) =>
-        item.uri.path.endsWith(`/${filePath}`)
-      );
+    const model = this.monacoApi.editor.getModel(
+      this.monacoApi.Uri.parse(
+        getEditorModelPath(this.provider.getRoomId(), fileId)
+      )
+    );
     if (model)
       document.models.set(model.uri.toString(), { model, references: 0 });
     this.documents.set(uri, document);
@@ -449,7 +476,6 @@ function configureLanguageServerProviders(monacoApi: Monaco): void {
 
   for (const language of [
     'html',
-    'css',
     'python',
     'csharp',
     'c',
@@ -678,4 +704,12 @@ function toMonacoDocumentSymbol(
 function toWorkspaceUri(filePath: string): string {
   const path = filePath.split('/').map(encodeURIComponent).join('/');
   return `file:///workspace/${path}`;
+}
+
+function workspacePath(uri: string): string {
+  try {
+    return decodeURIComponent(new URL(uri).pathname).replace(/\\/g, '/');
+  } catch {
+    return uri;
+  }
 }

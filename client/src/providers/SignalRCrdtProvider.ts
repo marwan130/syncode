@@ -798,7 +798,10 @@ export class SignalRCrdtProvider {
       'StartLanguageServer',
       language
     );
-    const socketUrl = new URL('/api/language-servers', this.serverUrl);
+    const socketUrl = new URL(
+      '/api/language-servers',
+      this.serverUrl || window.location.origin
+    );
     socketUrl.protocol = socketUrl.protocol === 'https:' ? 'wss:' : 'ws:';
     socketUrl.searchParams.set('ticket', session.ticket);
     return socketUrl.toString();

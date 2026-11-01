@@ -39,7 +39,7 @@ public sealed class LanguageServerSessions : IHostedService, IAsyncDisposable
         _logger = logger;
         _runtime = runtime;
         _docker = configuration["ExecutionService:DockerCli"] ?? "docker";
-        var maximumSessions = configuration.GetValue("ExecutionService:MaxLanguageServerSessions", 8);
+        var maximumSessions = configuration.GetValue("ExecutionService:MaxLanguageServerSessions", 16);
         if (maximumSessions is < 1 or > 256)
             throw new InvalidOperationException("ExecutionService:MaxLanguageServerSessions must be between 1 and 256.");
         _slots = new SemaphoreSlim(maximumSessions, maximumSessions);
@@ -71,6 +71,10 @@ public sealed class LanguageServerSessions : IHostedService, IAsyncDisposable
         try
         {
             await MaterializeWorkspaceAsync(workspace, entries, cancellationToken);
+            if (server.Image == "syncode-runner-node")
+            {
+                Directory.CreateDirectory(Path.Combine(workspace, "node_modules"));
+            }
             process = StartContainer(containerName, server, workspace, _dependencies.GetRoomPath(roomId));
             var session = new Session(id, containerName, workspace, process, DateTimeOffset.UtcNow);
             if (!_sessions.TryAdd(id, session)) throw new InvalidOperationException("Could not create language server session.");
@@ -181,9 +185,10 @@ public sealed class LanguageServerSessions : IHostedService, IAsyncDisposable
             "--env", "NODE_PATH=/deps/npm-global/lib/node_modules", "--env", "PYTHONPATH=/deps/python",
             "--mount", Mount(workspace, "/workspace", readOnly: true),
             "--mount", Mount(dependencies, "/deps", readOnly: true),
-            "--mount", Mount(Path.Combine(dependencies, "npm-project", "node_modules"), "/workspace/node_modules", readOnly: true),
-            "--workdir", "/workspace", "--entrypoint", server.Command[0], server.Image,
         };
+        if (server.Image == "syncode-runner-node")
+            args.AddRange(["--mount", Mount(Path.Combine(dependencies, "npm-project", "node_modules"), "/workspace/node_modules", readOnly: true)]);
+        args.AddRange(["--workdir", "/workspace", "--entrypoint", server.Command[0], server.Image]);
         args.AddRange(server.Command.Skip(1));
         return args;
     }
@@ -241,7 +246,6 @@ public sealed class LanguageServerSessions : IHostedService, IAsyncDisposable
             if (!result.EndOfMessage) continue;
 
             var body = message.ToArray();
-            using (JsonDocument.Parse(body)) { }
             var header = Encoding.ASCII.GetBytes($"Content-Length: {body.Length}\r\n\r\n");
             await input.WriteAsync(header, cancellationToken);
             await input.WriteAsync(body, cancellationToken);
@@ -253,14 +257,14 @@ public sealed class LanguageServerSessions : IHostedService, IAsyncDisposable
     private static async Task CopyProcessToWebSocketAsync(Stream output, WebSocket socket, CancellationToken cancellationToken)
     {
         var buffered = new BufferedStream(output, 16 * 1024);
+        var nextByte = new byte[1];
         while (!cancellationToken.IsCancellationRequested)
         {
             var header = new StringBuilder();
             while (true)
             {
-                var value = buffered.ReadByte();
-                if (value < 0) return;
-                header.Append((char)value);
+                if (await buffered.ReadAsync(nextByte.AsMemory(), cancellationToken) == 0) return;
+                header.Append((char)nextByte[0]);
                 if (header.Length > 1024) throw new InvalidDataException("Invalid language server frame.");
                 if (header.ToString().EndsWith("\r\n\r\n", StringComparison.Ordinal)) break;
             }

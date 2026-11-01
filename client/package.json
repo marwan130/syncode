@@ -26,6 +26,7 @@
     "react-icons": "^5.7.0",
     "react-router-dom": "^7.18.4",
     "uuid": "^14.0.2",
+    "vscode-jsonrpc": "9.0.3",
     "vscode-ws-jsonrpc": "4.0.3"
   },
   "devDependencies": {

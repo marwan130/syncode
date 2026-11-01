@@ -99,9 +99,12 @@ describe('getEntryPath', () => {
     expect(getEntryPath(orphan, entries)).toBe('file.ts');
   });
 
-  it('uses a separate Monaco model path for each room', () => {
-    expect(getEditorModelPath('room-a', 'src/App.tsx')).not.toBe(
-      getEditorModelPath('room-b', 'src/App.tsx')
+  it('keys Monaco model paths by room and stable file ID', () => {
+    expect(getEditorModelPath('room-a', 'file-a')).not.toBe(
+      getEditorModelPath('room-b', 'file-a')
+    );
+    expect(getEditorModelPath('room-a', 'file-a')).not.toBe(
+      getEditorModelPath('room-a', 'file-b')
     );
   });
 });

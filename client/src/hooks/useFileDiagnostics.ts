@@ -35,7 +35,11 @@ export function computeFileDiagnostics(
     const path = getEntryPath(entry, entries);
     const normalizedPath = normalizePath(path);
     for (const marker of allMarkers) {
-      if (!markerMatchesPath(marker, normalizedPath)) continue;
+      if (
+        !markerMatchesEntry(marker, entry.id) &&
+        !markerMatchesPath(marker, normalizedPath)
+      )
+        continue;
       const severity = getDiagnosticSeverity(marker.severity);
       if (!severity) continue;
       problems.push({
@@ -51,6 +55,20 @@ export function computeFileDiagnostics(
   }
 
   return { byFile: result, problems };
+}
+
+function markerMatchesEntry(
+  marker: monaco.editor.IMarker,
+  fileId: string
+): boolean {
+  if (marker.resource.scheme !== 'syncode') return false;
+  const match = marker.resource.path.match(/^\/files\/([^/]+)$/);
+  if (!match) return false;
+  try {
+    return decodeURIComponent(match[1]) === fileId;
+  } catch {
+    return false;
+  }
 }
 
 function normalizePath(path: string): string {

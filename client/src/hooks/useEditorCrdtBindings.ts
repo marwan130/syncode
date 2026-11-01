@@ -44,14 +44,13 @@ function createMissingEditorModels(
   for (const fileId of openFileIds) {
     const entry = entriesById.get(fileId);
     if (!entry || entry.isFolder) continue;
-    const filePath = getEntryPath(entry, entries);
     const uri = monacoApi.Uri.parse(
-      getEditorModelPath(provider.getRoomId(), filePath)
+      getEditorModelPath(provider.getRoomId(), fileId)
     );
     if (monacoApi.editor.getModel(uri)) continue;
     monacoApi.editor.createModel(
       provider.getFileContent(fileId),
-      languageForFileName(filePath),
+      languageForFileName(getEntryPath(entry, entries)),
       uri
     );
   }

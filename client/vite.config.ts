@@ -64,7 +64,10 @@ export default defineConfig({
         ...roomServerProxy(),
         ws: true,
       },
-      '/api': roomServerProxy(),
+      '/api': {
+        ...roomServerProxy(),
+        ws: true,
+      },
     },
   },
   test: {

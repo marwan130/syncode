@@ -90,7 +90,12 @@ export function EditorCodePane({
         if (disposed) close();
         else release = close;
       })
-      .catch(() => {});
+      .catch((error: unknown) => {
+        console.error(
+          `Language server failed for ${language} (${filePath}).`,
+          error
+        );
+      });
 
     return () => {
       disposed = true;
@@ -107,7 +112,7 @@ export function EditorCodePane({
       <Editor
         height="100%"
         language={language}
-        path={getEditorModelPath(modelRoomId, filePath)}
+        path={getEditorModelPath(modelRoomId, fileId)}
         defaultValue=""
         theme="syncode-current-theme"
         beforeMount={configureMonacoEditor}

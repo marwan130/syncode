@@ -36,7 +36,10 @@ internal static class ExecutionEndpoints
             if (context.Request.ContentLength > 64 * 1024 * 1024)
                 return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
             try { return Results.Ok(await sessions.CreateAsync(roomId, language, request.Entries, cancellationToken)); }
-            catch (LanguageServerCapacityException) { return Results.StatusCode(StatusCodes.Status429TooManyRequests); }
+            catch (LanguageServerCapacityException exception)
+            {
+                return Results.Problem(exception.Message, statusCode: StatusCodes.Status429TooManyRequests);
+            }
             catch (ArgumentException exception) { return Results.BadRequest(new { error = exception.Message }); }
             catch (Exception exception) when (exception is IOException or InvalidOperationException or System.ComponentModel.Win32Exception)
             {

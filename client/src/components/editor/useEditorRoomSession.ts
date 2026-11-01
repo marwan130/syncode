@@ -4,6 +4,7 @@ import { useCrdtSync } from '../../hooks/useCrdtSync';
 import { useEditorRoomIdentity } from '../../hooks/useEditorRoomIdentity';
 import { useGithubAuth } from '../../github/useGithubAuth';
 import {
+  clearStoredRoomInvite,
   createSiteId,
   getOrCreateJoinRequestId,
   getStoredRoomCreatorToken,
@@ -39,10 +40,12 @@ export function useEditorRoomSession(
       // Cancel the pending join request and create a fresh room for ourselves
       await provider.cancelJoinRequest();
       renewJoinRequestId(roomId);
+      clearStoredRoomInvite(roomId);
       navigate('/', { replace: true });
       return;
     }
     await provider.leaveRoom();
+    clearStoredRoomInvite(roomId);
     navigate('/', { replace: true });
   };
 
@@ -51,11 +54,15 @@ export function useEditorRoomSession(
   }, [account?.avatarUrl, connection.providerRef]);
 
   useEffect(() => {
-    if (connection.wasKicked) navigate('/', { replace: true });
-  }, [connection.wasKicked, navigate]);
+    if (connection.wasKicked) {
+      clearStoredRoomInvite(roomId);
+      navigate('/', { replace: true });
+    }
+  }, [connection.wasKicked, navigate, roomId]);
 
   useEffect(() => {
     if (connection.status !== 'join-rejected') return;
+    clearStoredRoomInvite(roomId);
     renewJoinRequestId(roomId);
     navigate(getReturnRoomInvite(location.state)?.path ?? '/', {
       replace: true,
