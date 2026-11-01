@@ -1,0 +1,22 @@
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+WORKDIR /source
+
+COPY server/Application/Syncode.Server.Application.csproj server/Application/
+COPY server/Syncode.Server.csproj server/
+RUN dotnet restore server/Syncode.Server.csproj
+
+COPY server/ server/
+RUN dotnet publish server/Syncode.Server.csproj \
+    --configuration Release \
+    --no-restore \
+    --output /app/publish \
+    /p:UseAppHost=false
+
+FROM mcr.microsoft.com/dotnet/aspnet:10.0
+WORKDIR /app
+COPY --from=build /app/publish .
+ENV ASPNETCORE_URLS=http://0.0.0.0:5111 \
+    ASPNETCORE_FORWARDEDHEADERS_ENABLED=true
+USER $APP_UID
+EXPOSE 5111
+ENTRYPOINT ["dotnet", "Syncode.Server.dll"]

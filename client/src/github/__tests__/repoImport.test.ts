@@ -8,10 +8,12 @@ import type { GithubRepositoryImportResponse } from '../githubTypes';
 
 describe('parseGithubRepositoryInput', () => {
   it('accepts repository and branch URLs from github.com', () => {
-    expect(parseGithubRepositoryInput('https://github.com/owner/repo')).toEqual({
-      owner: 'owner',
-      name: 'repo',
-    });
+    expect(parseGithubRepositoryInput('https://github.com/owner/repo')).toEqual(
+      {
+        owner: 'owner',
+        name: 'repo',
+      }
+    );
     expect(
       parseGithubRepositoryInput('https://github.com/owner/repo/tree/main/src')
     ).toEqual({ owner: 'owner', name: 'repo', branch: 'main/src' });
@@ -58,18 +60,42 @@ describe('reviewGithubRepository', () => {
       expect.objectContaining({
         credentials: 'include',
         redirect: 'error',
-        body: JSON.stringify({ roomId: 'room', accessKey: 'access', ...repository }),
+        body: JSON.stringify({
+          roomId: 'room',
+          accessKey: 'access',
+          ...repository,
+        }),
       })
     );
   });
 
   it.each([
-    ['scope_required', 400, 'Authorize access to this repository, then try again.'],
-    ['rate_limited', 429, 'GitHub is limiting repository requests. Try again later.'],
-    ['repository_unavailable', 404, 'The repository could not be found or accessed.'],
+    [
+      'scope_required',
+      400,
+      'Authorize access to this repository, then try again.',
+    ],
+    [
+      'rate_limited',
+      429,
+      'GitHub is limiting repository requests. Try again later.',
+    ],
+    [
+      'repository_unavailable',
+      404,
+      'The repository could not be found or accessed.',
+    ],
     ['import_too_large', 413, 'This repository is too large to import.'],
-    ['unauthorized', 401, 'Your GitHub session expired. Sign in again and retry.'],
-    ['reauthorize', 401, 'Your GitHub session expired. Sign in again and retry.'],
+    [
+      'unauthorized',
+      401,
+      'Your GitHub session expired. Sign in again and retry.',
+    ],
+    [
+      'reauthorize',
+      401,
+      'Your GitHub session expired. Sign in again and retry.',
+    ],
     ['unknown', 403, 'Authorize access to this repository, then try again.'],
     ['unknown', 500, 'Could not read this GitHub repository.'],
   ])('maps safe error %s', async (error, status, message) => {
@@ -84,11 +110,14 @@ describe('reviewGithubRepository', () => {
   });
 
   it('uses a generic error when an error response is not JSON', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      ok: false,
-      status: 500,
-      json: () => Promise.reject(new Error('private response details')),
-    }));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 500,
+        json: () => Promise.reject(new Error('private response details')),
+      })
+    );
 
     await expect(
       reviewGithubRepository(repository, 'room', 'access', 'grant')
@@ -119,7 +148,9 @@ describe('baselineForSelectedFiles', () => {
       fileBlobShas: { 'index.js': 'blob', 'src/app.ts': 'other' },
     };
 
-    expect(baselineForSelectedFiles(baseline, [{ path: 'src/app.ts' }])).toEqual({
+    expect(
+      baselineForSelectedFiles(baseline, [{ path: 'src/app.ts' }])
+    ).toEqual({
       ...baseline,
       fileBlobShas: { 'src/app.ts': 'other' },
     });

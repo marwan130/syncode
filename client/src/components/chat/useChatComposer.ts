@@ -78,9 +78,12 @@ async function deliverChatMessage(
   try {
     await onSendMessage(content);
     state.setDraft('');
-    if (state.textareaRef.current) state.textareaRef.current.style.height = '36px';
+    if (state.textareaRef.current)
+      state.textareaRef.current.style.height = '36px';
   } catch {
-    state.setSendError('Message could not be sent. Wait a moment and try again.');
+    state.setSendError(
+      'Message could not be sent. Wait a moment and try again.'
+    );
   } finally {
     state.sendingRef.current = false;
     state.setIsSending(false);

@@ -34,3 +34,11 @@ export interface GithubPushResponse {
   compareUrl: string;
   commitSha: string;
 }
+
+export interface GithubRepositoryCreateRequest {
+  roomId: string;
+  accessKey: string;
+  name: string;
+  message: string;
+  isPrivate: boolean;
+}

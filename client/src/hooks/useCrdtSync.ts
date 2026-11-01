@@ -3,6 +3,7 @@ import type { RefObject } from 'react';
 import { SignalRCrdtProvider } from '../providers/SignalRCrdtProvider';
 import type { ConnectionStatus } from '../providers/SignalRCrdtProvider';
 import { userFacingError } from '../utils/userFacingError';
+import { useAppActivity } from '../components/shared/useAppActivity';
 
 export interface UseCrdtSyncProps {
   siteId: string;
@@ -34,6 +35,7 @@ export function useCrdtSync({
   creatorToken,
   enabled = true,
 }: UseCrdtSyncProps): UseCrdtSyncReturn {
+  const { beginActivity, runActivity } = useAppActivity();
   const [status, setStatus] = useState<ConnectionStatus>('disconnected');
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [wasKicked, setWasKicked] = useState(false);
@@ -54,13 +56,23 @@ export function useCrdtSync({
       serverUrl,
       profileRef.current.displayName,
       profileRef.current.color,
-      creatorToken
+      creatorToken,
+      undefined
     );
     providerRef.current = p;
 
     const unsubStatus = p.onStatusChange((s) => {
       setStatus(s);
       if (s === 'connected') setConnectionError(null);
+    });
+    let stopSnapshotActivity: (() => void) | null = null;
+    const unsubSnapshotSave = p.onSnapshotSaveChange((isSaving) => {
+      if (isSaving && !stopSnapshotActivity)
+        stopSnapshotActivity = beginActivity('Saving changes…');
+      else if (!isSaving && stopSnapshotActivity) {
+        stopSnapshotActivity();
+        stopSnapshotActivity = null;
+      }
     });
     const unsubKicked = p.onRoomKicked(() => setWasKicked(true));
 
@@ -69,7 +81,7 @@ export function useCrdtSync({
     let cancelled = false;
     queueMicrotask(() => {
       if (cancelled) return;
-      p.connect().catch((err) => {
+      runActivity('Connecting to room…', () => p.connect()).catch((err) => {
         if (!cancelled) {
           setConnectionError(
             userFacingError(
@@ -84,6 +96,8 @@ export function useCrdtSync({
     return () => {
       cancelled = true;
       unsubStatus();
+      unsubSnapshotSave();
+      stopSnapshotActivity?.();
       unsubKicked();
       p.disconnect().catch(() => {});
       providerRef.current = null;
@@ -96,6 +110,8 @@ export function useCrdtSync({
     displayName,
     creatorToken,
     enabled,
+    beginActivity,
+    runActivity,
   ]);
 
   useEffect(() => {

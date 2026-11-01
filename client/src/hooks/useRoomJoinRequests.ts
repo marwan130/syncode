@@ -8,7 +8,8 @@ import type {
 
 export function useRoomJoinRequests(
   providerRef: RefObject<SignalRCrdtProvider | null>,
-  status: ConnectionStatus
+  status: ConnectionStatus,
+  isAdmin: boolean
 ) {
   const [requests, setRequests] = useState<RoomJoinRequest[]>([]);
 
@@ -19,14 +20,22 @@ export function useRoomJoinRequests(
       return;
     }
 
-    return provider.onRoomJoinRequestsChanged(setRequests);
-  }, [providerRef, status]);
+    const unsubscribe = provider.onRoomJoinRequestsChanged(setRequests);
+    if (status === 'connected' && isAdmin)
+      provider
+        .getRoomJoinRequests()
+        .then(setRequests)
+        .catch(() => {});
+    return unsubscribe;
+  }, [providerRef, status, isAdmin]);
 
   return {
     requests,
     approve: (requestId: string) =>
-      providerRef.current?.approveRoomJoinRequest(requestId) ?? Promise.resolve(),
+      providerRef.current?.approveRoomJoinRequest(requestId) ??
+      Promise.resolve(),
     reject: (requestId: string) =>
-      providerRef.current?.rejectRoomJoinRequest(requestId) ?? Promise.resolve(),
+      providerRef.current?.rejectRoomJoinRequest(requestId) ??
+      Promise.resolve(),
   };
 }

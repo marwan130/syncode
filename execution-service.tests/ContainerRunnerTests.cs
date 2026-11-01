@@ -103,6 +103,7 @@ public sealed class ContainerRunnerTests
         Assert.Contains("syncode-runner-node", runArgs);
         Assert.Contains("RUNNER_RUNTIME=typescript", runArgs);
         Assert.Contains(runArgs, arg => arg.EndsWith(",target=/workspace/main.ts,readonly", StringComparison.Ordinal));
+        Assert.Contains(runArgs, arg => arg.EndsWith(",target=/workspace/node_modules,readonly", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -123,6 +124,7 @@ public sealed class ContainerRunnerTests
         Assert.Equal("128", runArgs[processLimitIndex + 1]);
         Assert.Contains(runArgs, arg => arg.StartsWith("/runner:rw,exec,nosuid,nodev,size=128m", StringComparison.Ordinal));
         Assert.Contains("fsize=134217728:134217728", runArgs);
+        Assert.DoesNotContain(runArgs, arg => arg.EndsWith(",target=/workspace/node_modules,readonly", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -219,6 +221,182 @@ public sealed class ContainerRunnerTests
         Assert.Contains("--runtime=runsc", Assert.Single(docker.StreamingArguments));
     }
 
+    [Fact]
+    public async Task RunAsync_MountsCargoTomlProjectAsWorkspaceDirectory()
+    {
+        var docker = new FakeDockerCli();
+        var runner = CreateRunner(docker);
+        var job = CreateJob(language: ExecutionLanguage.Rust) with
+        {
+            Source = "fn main() { println!(\"built with cargo\"); }",
+            SourcePath = "src/main.rs",
+            ProjectFiles =
+            [
+                new ExecutionProjectFile("Cargo.toml", "[package]\nname = \"testproject\"\nversion = \"0.1.0\"\nedition = \"2024\"\n"),
+                new ExecutionProjectFile("src/main.rs", "fn main() { println!(\"built with cargo\"); }")
+            ]
+        };
+
+        await runner.RunAsync(job, _ => ValueTask.CompletedTask);
+
+        var args = Assert.Single(docker.StreamingArguments);
+        Assert.Contains("SYNCODE_SOURCE_PATH=src/main.rs", args);
+        Assert.Contains("syncode-runner-rust", args);
+        Assert.Contains(args, arg => arg.StartsWith("type=bind,source=", StringComparison.Ordinal) &&
+            arg.Contains(",target=/workspace,readonly", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task RunAsync_MountsCsprojProjectAsWorkspaceDirectory()
+    {
+        var docker = new FakeDockerCli();
+        var runner = CreateRunner(docker);
+        var job = CreateJob(language: ExecutionLanguage.CSharp) with
+        {
+            Source = "Console.WriteLine(\"built with dotnet\");",
+            SourcePath = "Program.cs",
+            ProjectFiles =
+            [
+                new ExecutionProjectFile("MyApp.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    <OutputType>Exe</OutputType>\n    <TargetFramework>net10.0</TargetFramework>\n  </PropertyGroup>\n</Project>\n"),
+                new ExecutionProjectFile("Program.cs", "Console.WriteLine(\"built with dotnet\");")
+            ]
+        };
+
+        await runner.RunAsync(job, _ => ValueTask.CompletedTask);
+
+        var args = Assert.Single(docker.StreamingArguments);
+        Assert.Contains("SYNCODE_SOURCE_PATH=Program.cs", args);
+        Assert.Contains("syncode-runner-dotnet", args);
+        Assert.Contains(args, arg => arg.StartsWith("type=bind,source=", StringComparison.Ordinal) &&
+            arg.Contains(",target=/workspace,readonly", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task RunAsync_MountsCMakeProjectAsWorkspaceDirectory()
+    {
+        var docker = new FakeDockerCli();
+        var runner = CreateRunner(docker);
+        var job = CreateJob(language: ExecutionLanguage.C) with
+        {
+            Source = "#include <stdio.h>\nint main(void) { puts(\"built with cmake\"); return 0; }",
+            SourcePath = "main.c",
+            ProjectFiles =
+            [
+                new ExecutionProjectFile("CMakeLists.txt", "cmake_minimum_required(VERSION 3.20)\nproject(test C)\nadd_executable(test main.c)\n"),
+                new ExecutionProjectFile("main.c", "#include <stdio.h>\nint main(void) { puts(\"built with cmake\"); return 0; }")
+            ]
+        };
+
+        await runner.RunAsync(job, _ => ValueTask.CompletedTask);
+
+        var args = Assert.Single(docker.StreamingArguments);
+        Assert.Contains("SYNCODE_SOURCE_PATH=main.c", args);
+        Assert.Contains("syncode-runner-c", args);
+    }
+
+    [Fact]
+    public async Task RunAsync_MountsMavenProjectAsWorkspaceDirectory()
+    {
+        var docker = new FakeDockerCli();
+        var runner = CreateRunner(docker);
+        var job = CreateJob(language: ExecutionLanguage.Java) with
+        {
+            Source = "public class Main { public static void main(String[] args) { System.out.println(\"built with maven\"); } }",
+            SourcePath = "src/main/java/Main.java",
+            ProjectFiles =
+            [
+                new ExecutionProjectFile("pom.xml", "<project><modelVersion>4.0.0</modelVersion><groupId>test</groupId><artifactId>test</artifactId><version>1.0</version></project>"),
+                new ExecutionProjectFile("src/main/java/Main.java", "public class Main { public static void main(String[] args) { System.out.println(\"built with maven\"); } }")
+            ]
+        };
+
+        await runner.RunAsync(job, _ => ValueTask.CompletedTask);
+
+        var args = Assert.Single(docker.StreamingArguments);
+        Assert.Contains("SYNCODE_SOURCE_PATH=src/main/java/Main.java", args);
+        Assert.Contains("syncode-runner-java", args);
+    }
+
+    [DockerIntegrationFact]
+    [Trait("Category", "DockerIntegration")]
+    public async Task RunAsync_RustProjectWithCargoToml_BuildsAndRuns()
+    {
+        var containerRuntime = Environment.GetEnvironmentVariable("SYNCODE_CONTAINER_RUNTIME") ?? "runc";
+        var runner = new ContainerRunner(
+            new DockerCli(), new ActiveContainerRegistry(), NullLogger<ContainerRunner>.Instance,
+            containerRuntime: containerRuntime);
+        var job = CreateJob(language: ExecutionLanguage.Rust) with
+        {
+            Source = "fn main() { println!(\"cargo-project-ready\"); }",
+            SourcePath = "src/main.rs",
+            ProjectFiles =
+            [
+                new ExecutionProjectFile("Cargo.toml", "[package]\nname = \"testproject\"\nversion = \"0.1.0\"\nedition = \"2024\"\n"),
+                new ExecutionProjectFile("src/main.rs", "fn main() { println!(\"cargo-project-ready\"); }")
+            ]
+        };
+
+        var output = await RunAndCaptureAsync(runner, job);
+
+        Assert.True(output.Result.ExitCode == 0,
+            $"Rust Cargo project returned {output.Result.ExitCode}: {output.Text}");
+        Assert.Contains("cargo-project-ready", output.Text);
+    }
+
+    [DockerIntegrationFact]
+    [Trait("Category", "DockerIntegration")]
+    public async Task RunAsync_CSharpProjectWithCsproj_BuildsAndRuns()
+    {
+        var containerRuntime = Environment.GetEnvironmentVariable("SYNCODE_CONTAINER_RUNTIME") ?? "runc";
+        var runner = new ContainerRunner(
+            new DockerCli(), new ActiveContainerRegistry(), NullLogger<ContainerRunner>.Instance,
+            containerRuntime: containerRuntime);
+        var job = CreateJob(language: ExecutionLanguage.CSharp) with
+        {
+            Source = "Console.WriteLine(\"csproj-project-ready\");",
+            SourcePath = "Program.cs",
+            ProjectFiles =
+            [
+                new ExecutionProjectFile("TestApp.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\">\n  <PropertyGroup>\n    <OutputType>Exe</OutputType>\n    <TargetFramework>net10.0</TargetFramework>\n    <ImplicitUsings>enable</ImplicitUsings>\n    <NuGetAudit>false</NuGetAudit>\n  </PropertyGroup>\n</Project>\n"),
+                new ExecutionProjectFile("Program.cs", "Console.WriteLine(\"csproj-project-ready\");")
+            ]
+        };
+
+        var output = await RunAndCaptureAsync(runner, job);
+
+        Assert.True(output.Result.ExitCode == 0,
+            $"C# project returned {output.Result.ExitCode}: {output.Text}");
+        Assert.Contains("csproj-project-ready", output.Text);
+    }
+
+    [DockerIntegrationFact]
+    [Trait("Category", "DockerIntegration")]
+    public async Task RunAsync_CProjectWithCMakeLists_BuildsAndRuns()
+    {
+        var containerRuntime = Environment.GetEnvironmentVariable("SYNCODE_CONTAINER_RUNTIME") ?? "runc";
+        var runner = new ContainerRunner(
+            new DockerCli(), new ActiveContainerRegistry(), NullLogger<ContainerRunner>.Instance,
+            containerRuntime: containerRuntime);
+        var cmakelists = "cmake_minimum_required(VERSION 3.20)\nproject(test_c C)\nadd_executable(test_c main.c)\n";
+        var source = "#include <stdio.h>\nint main(void) { puts(\"cmake-project-ready\"); return 0; }";
+        var job = CreateJob(language: ExecutionLanguage.C) with
+        {
+            Source = source,
+            SourcePath = "main.c",
+            ProjectFiles =
+            [
+                new ExecutionProjectFile("CMakeLists.txt", cmakelists),
+                new ExecutionProjectFile("main.c", source)
+            ]
+        };
+
+        var output = await RunAndCaptureAsync(runner, job);
+
+        Assert.True(output.Result.ExitCode == 0,
+            $"C CMake project returned {output.Result.ExitCode}: {output.Text}");
+        Assert.Contains("cmake-project-ready", output.Text);
+    }
+
     private static ContainerRunner CreateRunner(FakeDockerCli docker, ResourceLimits? limits = null) =>
         new(docker, new ActiveContainerRegistry(), NullLogger<ContainerRunner>.Instance, limits);
 
@@ -234,6 +412,19 @@ public sealed class ContainerRunnerTests
     {
         var output = new System.Text.StringBuilder();
         var result = await runner.RunAsync(CreateJob(source, language), chunk =>
+        {
+            output.Append(chunk.Text);
+            return ValueTask.CompletedTask;
+        });
+        return (result, output.ToString());
+    }
+
+    private static async Task<(ExecutionResult Result, string Text)> RunAndCaptureAsync(
+        ContainerRunner runner,
+        ExecutionJob job)
+    {
+        var output = new System.Text.StringBuilder();
+        var result = await runner.RunAsync(job, chunk =>
         {
             output.Append(chunk.Text);
             return ValueTask.CompletedTask;

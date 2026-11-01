@@ -1,4 +1,3 @@
-import type { ReactNode } from 'react';
 import type { RoomEntry } from '../../providers/SignalRCrdtProvider';
 import { ExplorerActionButton } from './ExplorerActionButton';
 import type { ExplorerNodeSharedProps } from './fileExplorerTypes';
@@ -8,8 +7,9 @@ export interface FileExplorerRootActionsProps {
   entries: RoomEntry[];
   canImportFolder: boolean;
   onImportFolder?: () => void;
+  onOpenGithub?: () => void;
   onSaveProject?: () => void;
-  githubAction?: ReactNode;
+  onRefresh?: () => void;
 }
 
 export function FileExplorerRootActions({
@@ -17,29 +17,48 @@ export function FileExplorerRootActions({
   entries,
   canImportFolder,
   onImportFolder,
+  onOpenGithub,
   onSaveProject,
-  githubAction,
+  onRefresh,
 }: FileExplorerRootActionsProps) {
   return (
     <div className="file-explorer-actions is-visible">
       <ExplorerActionButton
         kind="new-file"
-        label="New file"
+        label="New File..."
         disabled={!tree.canEdit}
         onClick={() => tree.onStartCreate(null, false)}
       />
       <ExplorerActionButton
         kind="new-folder"
-        label="New folder"
+        label="New Folder..."
         disabled={!tree.canEdit}
         onClick={() => tree.onStartCreate(null, true)}
       />
+      {onRefresh && (
+        <ExplorerActionButton
+          kind="refresh"
+          label="Refresh Explorer"
+          onClick={onRefresh}
+        />
+      )}
       <FileExplorerImportAction
         tree={tree}
         canImportFolder={canImportFolder}
         onImportFolder={onImportFolder}
       />
-      {githubAction}
+      {onOpenGithub && (
+        <ExplorerActionButton
+          kind="github-repository"
+          label={
+            canImportFolder
+              ? 'Open GitHub Repository...'
+              : 'Only room admins can open a GitHub repository'
+          }
+          disabled={!canImportFolder}
+          onClick={onOpenGithub}
+        />
+      )}
       <FileExplorerSaveAction entries={entries} onSaveProject={onSaveProject} />
     </div>
   );
@@ -56,11 +75,11 @@ function FileExplorerImportAction({
   if (!onImportFolder) return null;
   return (
     <ExplorerActionButton
-      kind="import-folder"
+      kind="open-folder"
       label={
         canImportFolder
-          ? 'Import folder'
-          : 'Only room admins can import a folder'
+          ? 'Open Folder...'
+          : 'Only room admins can open a folder'
       }
       disabled={!tree.canEdit || !canImportFolder}
       onClick={onImportFolder}

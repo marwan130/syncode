@@ -24,6 +24,7 @@ export const FileExplorerTreeItem: FC<FileExplorerTreeItemProps> = ({
     expandedFolders,
     diagnosticsByEntry,
     gitStatusByEntry,
+    fileProblemCounts,
     editing,
     editError,
     renderNameInput,
@@ -107,6 +108,7 @@ export const FileExplorerTreeItem: FC<FileExplorerTreeItemProps> = ({
             diagnostic={diagnostic}
             diagnosticHint={diagnosticHint}
             gitStatus={gitStatusByEntry.get(entry.id)}
+            problemCount={fileProblemCounts?.[entry.id]}
             onToggleFolder={onToggleFolder}
             onSelect={onSelect}
             onOpenContextMenu={(x, y) => {
@@ -131,9 +133,7 @@ export const FileExplorerTreeItem: FC<FileExplorerTreeItemProps> = ({
           onOpen={() =>
             entry.isFolder ? onToggleFolder(entry.id) : onSelect(entry.id)
           }
-          onCreate={(isFolder) =>
-            onStartCreate(entry.id, isFolder)
-          }
+          onCreate={(isFolder) => onStartCreate(entry.id, isFolder)}
           onRename={() => onStartRename(entry)}
           onDelete={() => onDelete(entry)}
           onDismiss={() => setContextMenu(null)}

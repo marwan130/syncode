@@ -21,7 +21,15 @@ public sealed record GithubOAuthSession(
 
 public sealed class GithubOAuthException : Exception
 {
-    public GithubOAuthException(string message, bool unauthorized = false)
+    public GithubOAuthException() : base() { }
+
+    public GithubOAuthException(string message)
+        : this(message, false) { }
+
+    public GithubOAuthException(string message, Exception innerException)
+        : base(message, innerException) { }
+
+    public GithubOAuthException(string message, bool unauthorized)
         : base(message) => Unauthorized = unauthorized;
 
     public bool Unauthorized { get; }

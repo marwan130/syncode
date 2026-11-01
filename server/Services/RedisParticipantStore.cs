@@ -1,10 +1,10 @@
 using System.Text.Json;
-using server.Models;
+using server.Application.Rooms;
 using StackExchange.Redis;
 
 namespace server.Services;
 
-public sealed class RedisParticipantStore
+public sealed class RedisParticipantStore : IRoomParticipantStore
 {
     private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
     private readonly IDatabase _db;
@@ -17,12 +17,16 @@ public sealed class RedisParticipantStore
         int maxParticipants,
         int maxActiveRooms,
         int maxConnections,
-        bool isRoomCreator)
+        bool isRoomCreator,
+        bool isReturningMember,
+        bool returningMemberIsAdmin,
+        bool returningMemberIsLocked,
+        bool hasReturningAdmin)
     {
         return (int)await _db.ScriptEvaluateAsync(
             RedisParticipantScripts.AdmitParticipantScript,
-            [RedisRoomKeys.Participants(roomId), RedisRoomKeys.Meta(roomId), RedisRoomKeys.ActiveRooms, RedisRoomKeys.InstanceConnections(instanceId), RedisRoomKeys.ConnectionRoom(participant.ConnectionId)],
-            [participant.ConnectionId, JsonSerializer.Serialize(participant), instanceId, maxParticipants, roomId, maxActiveRooms, maxConnections, isRoomCreator ? "1" : "0"]);
+            [RedisRoomKeys.Participants(roomId), RedisRoomKeys.Meta(roomId), RedisRoomKeys.ActiveRooms, RedisRoomKeys.InstanceConnections(instanceId), RedisRoomKeys.ConnectionRoom(participant.ConnectionId), RedisRoomKeys.PreviousApprovedParticipants(roomId)],
+            [participant.ConnectionId, JsonSerializer.Serialize(participant), instanceId, maxParticipants, roomId, maxActiveRooms, maxConnections, isRoomCreator ? "1" : "0", isReturningMember ? "1" : "0", returningMemberIsAdmin ? "1" : "0", returningMemberIsLocked ? "1" : "0", hasReturningAdmin ? "1" : "0"]);
     }
 
     public async Task<bool> TryRegisterConnectionAsync(string connectionId, string instanceId, int maxConnections) =>
@@ -43,7 +47,7 @@ public sealed class RedisParticipantStore
             [RedisRoomKeys.Participants(roomId), RedisRoomKeys.ActiveRooms, RedisRoomKeys.ConnectionRoom(connectionId), RedisRoomKeys.InstanceConnections(instanceId)],
             [connectionId, roomId]);
 
-    public async Task<(int Status, Participant? Participant)> ToggleParticipantLockedAsync(
+    public async Task<ParticipantActionResult> ToggleParticipantLockedAsync(
         string roomId,
         string actorConnectionId,
         string targetConnectionId)
@@ -53,24 +57,30 @@ public sealed class RedisParticipantStore
             [RedisRoomKeys.Participants(roomId)],
             [actorConnectionId, targetConnectionId]);
         var value = (string?)result;
-        if (int.TryParse(value, out var status)) return (status, null);
+        if (int.TryParse(value, out var status)) return new ParticipantActionResult(status, null);
         var participant = JsonSerializer.Deserialize<Participant>(value!, JsonOptions);
-        return participant is null ? (0, null) : (1, participant);
+        return new ParticipantActionResult(participant is null ? 0 : 1, participant);
     }
 
-    public async Task<(int Status, Participant? Participant)> KickParticipantAsync(
+    public async Task<ParticipantActionResult> KickParticipantAsync(
         string roomId,
         string actorConnectionId,
         string targetConnectionId)
     {
         var result = await _db.ScriptEvaluateAsync(
             RedisParticipantScripts.KickParticipantScript,
-            [RedisRoomKeys.Participants(roomId), RedisRoomKeys.ActiveRooms, RedisRoomKeys.ConnectionRoom(targetConnectionId)],
+            [
+                RedisRoomKeys.Participants(roomId),
+                RedisRoomKeys.ActiveRooms,
+                RedisRoomKeys.ConnectionRoom(targetConnectionId),
+                RedisRoomKeys.PreviousApprovedParticipants(roomId),
+                RedisRoomKeys.PendingJoinRequests(roomId)
+            ],
             [actorConnectionId, targetConnectionId, roomId]);
         var value = (string?)result;
-        if (int.TryParse(value, out var status)) return (status, null);
+        if (int.TryParse(value, out var status)) return new ParticipantActionResult(status, null);
         var participant = JsonSerializer.Deserialize<Participant>(value!, JsonOptions);
-        return participant is null ? (0, null) : (1, participant);
+        return new ParticipantActionResult(participant is null ? 0 : 1, participant);
     }
 
     public async Task<Participant?> UpdateParticipantColorAsync(
@@ -103,7 +113,7 @@ public sealed class RedisParticipantStore
             : JsonSerializer.Deserialize<Participant>(value, JsonOptions);
     }
 
-    public async Task<(int Status, Participant? Participant)> SetParticipantAdminAsync(
+    public async Task<ParticipantActionResult> SetParticipantAdminAsync(
         string roomId,
         string actorConnectionId,
         string targetConnectionId,
@@ -111,16 +121,27 @@ public sealed class RedisParticipantStore
     {
         var result = await _db.ScriptEvaluateAsync(
             RedisParticipantScripts.SetParticipantAdminScript,
-            [RedisRoomKeys.Participants(roomId)],
+            [RedisRoomKeys.Participants(roomId), RedisRoomKeys.PreviousApprovedParticipants(roomId)],
             [actorConnectionId, targetConnectionId, isAdmin ? "1" : "0"]);
         var value = (string?)result;
-        if (int.TryParse(value, out var status)) return (status, null);
+        if (int.TryParse(value, out var status)) return new ParticipantActionResult(status, null);
         var participant = JsonSerializer.Deserialize<Participant>(value!, JsonOptions);
-        return participant is null ? (0, null) : (1, participant);
+        return new ParticipantActionResult(participant is null ? 0 : 1, participant);
     }
 
     public async Task<bool> IsParticipantAsync(string roomId, string connectionId) =>
         await _db.HashExistsAsync(RedisRoomKeys.Participants(roomId), connectionId);
+
+    public async Task<Participant?> PromoteToAdminAsync(string roomId, string connectionId)
+    {
+        var result = await _db.ScriptEvaluateAsync(
+            RedisParticipantScripts.PromoteParticipantScript,
+            [RedisRoomKeys.Participants(roomId), RedisRoomKeys.PreviousApprovedParticipants(roomId)],
+            [connectionId]);
+        return result.IsNull
+            ? null
+            : JsonSerializer.Deserialize<Participant>((string)result!, JsonOptions);
+    }
 
     public async Task<IReadOnlyList<Participant>> GetParticipantsAsync(string roomId)
     {

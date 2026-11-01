@@ -15,19 +15,22 @@ public sealed class ContainerRunner
     private readonly ResourceLimits _limits;
     private readonly ILogger<ContainerRunner> _logger;
     private readonly string _containerRuntime;
+    private readonly RoomDependencyStore _dependencies;
 
     public ContainerRunner(
         IDockerCli docker,
         ActiveContainerRegistry activeContainers,
         ILogger<ContainerRunner> logger,
         ResourceLimits? limits = null,
-        string containerRuntime = "runc")
+        string containerRuntime = "runc",
+        RoomDependencyStore? dependencies = null)
     {
         _docker = docker;
         _activeContainers = activeContainers;
         _logger = logger;
         _limits = limits ?? ResourceLimits.Default;
         _containerRuntime = containerRuntime;
+        _dependencies = dependencies ?? new RoomDependencyStore(new ConfigurationBuilder().Build());
     }
 
     public async Task<ExecutionResult> RunAsync(
@@ -106,7 +109,8 @@ public sealed class ContainerRunner
             using var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeout.Token);
 
             var arguments = BuildRunArguments(containerName, image, runnerRuntime, memoryBytes, sourcePath, sourceName,
-                processLimit, maxFileBytes, job.ProjectFiles is { Count: > 0 }, job.SourcePath, sourceDirectory);
+                processLimit, maxFileBytes, job.ProjectFiles is { Count: > 0 }, job.SourcePath, sourceDirectory,
+                _dependencies.GetRoomPath(job.RoomId));
             int exitCode;
             try
             {
@@ -165,7 +169,8 @@ public sealed class ContainerRunner
         long maxFileBytes,
         bool mountProjectDirectory,
         string projectSourcePath,
-        string sourceDirectory)
+        string sourceDirectory,
+        string dependencyDirectory)
     {
         var arguments = new List<string>
         {
@@ -189,19 +194,33 @@ public sealed class ContainerRunner
         "--user", $"{RunnerUserId}:{RunnerUserId}",
         "--env", $"RUNNER_RUNTIME={runnerRuntime}",
         "--env", $"SYNCODE_SOURCE_PATH={projectSourcePath}",
+        "--env", "HOME=/tmp", "--env", "DOTNET_CLI_HOME=/tmp/dotnet", "--env", "DOTNET_PROCESSOR_COUNT=1",
+        "--env", "XDG_CACHE_HOME=/deps/cache",
+        "--env", "NPM_CONFIG_CACHE=/deps/npm-cache", "--env", "NPM_CONFIG_PREFIX=/deps/npm-global",
+        "--env", "YARN_CACHE_FOLDER=/deps/yarn-cache",
+        "--env", "NODE_PATH=/deps/npm-global/lib/node_modules",
+        "--env", "PIP_CACHE_DIR=/deps/pip-cache", "--env", "PIP_TARGET=/deps/python",
+        "--env", "PYTHONPATH=/deps/python", "--env", "NUGET_PACKAGES=/deps/nuget",
+        "--env", "CARGO_HOME=/deps/cargo-home", "--env", "RUSTUP_HOME=/usr/local/rustup",
+        "--env", "GRADLE_USER_HOME=/deps/gradle", "--env", "MAVEN_OPTS=-Dmaven.repo.local=/deps/maven",
+        "--env", "CONAN_HOME=/deps/conan",
         "--mount", BuildMountSpecification(mountProjectDirectory ? sourceDirectory : sourcePath,
             mountProjectDirectory ? "/workspace" : $"/workspace/{sourceName}"),
+        "--mount", BuildMountSpecification(dependencyDirectory, "/deps"),
         image
         };
+        if (image == "syncode-runner-node")
+            arguments.InsertRange(arguments.Count - 1,
+            ["--mount", BuildMountSpecification(Path.Combine(dependencyDirectory, "npm-project", "node_modules"), "/workspace/node_modules")]);
         return arguments;
     }
 
-    private static string BuildMountSpecification(string sourcePath, string target)
+    private static string BuildMountSpecification(string sourcePath, string target, bool readOnly = true)
     {
         var sourceField = $"source={sourcePath}";
         if (sourcePath.Contains(','))
             sourceField = $"\"{sourceField}\"";
-        return $"type=bind,{sourceField},target={target},readonly";
+        return $"type=bind,{sourceField},target={target}{(readOnly ? ",readonly" : string.Empty)}";
     }
 
     private static string ValidateProjectPath(string path)

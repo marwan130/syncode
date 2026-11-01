@@ -1,10 +1,10 @@
 using System.Text.Json;
-using server.Models;
+using server.Application.Rooms;
 using StackExchange.Redis;
 
 namespace server.Services;
 
-public sealed class RedisRoomChatStore(IConnectionMultiplexer redis)
+public sealed class RedisRoomChatStore(IConnectionMultiplexer redis) : IRoomChatStore, IRoomChatHistoryReader
 {
     private const int HistoryLimit = 100;
     private const string AppendMessageScript = """

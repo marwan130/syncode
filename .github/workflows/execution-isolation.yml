@@ -57,6 +57,56 @@ jobs:
           docker info --format '{{json .Runtimes}}'
       - name: Build supported runner images
         run: bash infra/build-runner-images.sh
+      - name: Verify registry-only package egress under gVisor
+        shell: bash
+        run: |
+          set -euo pipefail
+          egress_network=syncode-package-egress
+          session_network=syncode-package-egress-check
+          proxy=syncode-package-proxy
+          cleanup() {
+            docker network disconnect --force "$session_network" "$proxy" >/dev/null 2>&1 || true
+            docker network rm "$session_network" >/dev/null 2>&1 || true
+            docker rm --force "$proxy" >/dev/null 2>&1 || true
+            docker network rm "$egress_network" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          docker network create --driver bridge --label syncode.package-egress=true "$egress_network"
+          docker run --detach --name "$proxy" --pull=never --runtime=runsc \
+            --label syncode.package-egress=true --network "$egress_network" \
+            --memory=128m --memory-swap=128m --cpus=0.25 --pids-limit=32 \
+            --read-only --tmpfs /tmp:rw,noexec,nosuid,nodev,size=8m,uid=10001,gid=10001 \
+            --cap-drop=ALL --cap-add=NET_BIND_SERVICE --security-opt=no-new-privileges \
+            --user=10001:10001 syncode-package-proxy
+          for attempt in $(seq 1 30); do
+            health="$(docker inspect --format '{{.State.Health.Status}}' "$proxy")"
+            if [[ "$health" == healthy ]]; then break; fi
+            if [[ "$attempt" == 30 ]]; then exit 1; fi
+            sleep 1
+          done
+          docker network create --driver bridge --internal \
+            --opt com.docker.network.bridge.gateway_mode_ipv4=isolated \
+            --opt com.docker.network.bridge.gateway_mode_ipv6=isolated \
+            --label syncode.package-session=true "$session_network"
+          docker network connect "$session_network" "$proxy"
+          proxy_ip="$(docker inspect --format "{{(index .NetworkSettings.Networks \"$session_network\").IPAddress}}" "$proxy")"
+          docker run --rm --pull=never --runtime=runsc --network "$session_network" --dns "$proxy_ip" \
+            --memory=256m --memory-swap=256m --cpus=0.5 --pids-limit=32 \
+            --ulimit nofile=256:256 --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,nodev,size=16m,uid=10001,gid=10001 \
+            --cap-drop=ALL --security-opt=no-new-privileges --user=10001:10001 \
+            --env HTTP_PROXY="http://$proxy_ip:3128" \
+            --env HTTPS_PROXY="http://$proxy_ip:3128" \
+            --env NPM_CONFIG_CACHE=/tmp/npm-cache \
+            --env PIP_CACHE_DIR=/tmp/pip-cache \
+            --entrypoint /bin/sh syncode-runner-bash -ec '
+              curl --fail --silent --show-error https://registry.npmjs.org/-/ping >/dev/null
+              npm install --ignore-scripts --prefix /tmp/npm-check --no-audit --no-fund is-number@7.0.0
+              pip install --no-deps --target /tmp/pip-check six==1.16.0
+              if curl --max-time 5 --fail --silent --show-error https://example.com/ >/dev/null; then exit 1; fi
+              if curl --max-time 5 --proxy "$HTTP_PROXY" --fail --silent --show-error http://172.17.0.1:2375/ >/dev/null; then exit 1; fi
+              if curl --max-time 5 --noproxy "*" --fail --silent --show-error https://registry.npmjs.org/ >/dev/null; then exit 1; fi
+            '
       - name: Validate isolated C# SDK startup
         run: |
           workspace="$(mktemp -d)"

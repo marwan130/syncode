@@ -1,44 +1,28 @@
-import { useCallback } from 'react';
+import { useCallback, useRef } from 'react';
 import type { ExecutionLanguage } from '../providers/SignalRCrdtProvider';
 import type * as monaco from 'monaco-editor';
 
 export interface UseEditorRunActionOptions {
   canRunCode: boolean;
-  isRunning: boolean;
   executionLanguage: ExecutionLanguage | null;
   editor: monaco.editor.IStandaloneCodeEditor | null;
   activeFilePath: string;
-  runCode: (
-    language: ExecutionLanguage,
-    sourcePath: string
-  ) => Promise<void>;
-  revealTerminalPanel: () => void;
-  setStartBashOnTerminalOpen: (start: boolean) => void;
+  runCode: (language: ExecutionLanguage, sourcePath: string) => void;
 }
 
 export function useEditorRunAction({
   canRunCode,
-  isRunning,
   executionLanguage,
   editor,
   activeFilePath,
   runCode,
-  revealTerminalPanel,
-  setStartBashOnTerminalOpen,
 }: UseEditorRunActionOptions) {
+  const lastRunAt = useRef(0);
   return useCallback(() => {
-    if (!canRunCode || isRunning || !executionLanguage || !editor) return;
-    setStartBashOnTerminalOpen(false);
-    revealTerminalPanel();
-    void runCode(executionLanguage, activeFilePath);
-  }, [
-    activeFilePath,
-    canRunCode,
-    editor,
-    executionLanguage,
-    isRunning,
-    revealTerminalPanel,
-    runCode,
-    setStartBashOnTerminalOpen,
-  ]);
+    if (!canRunCode || !executionLanguage || !editor) return;
+    const now = Date.now();
+    if (now - lastRunAt.current < 1000) return;
+    lastRunAt.current = now;
+    runCode(executionLanguage, activeFilePath);
+  }, [activeFilePath, canRunCode, editor, executionLanguage, runCode]);
 }

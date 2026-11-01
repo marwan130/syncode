@@ -6,7 +6,7 @@ import {
   storeExplorerWidth,
 } from './editorLayoutStorage';
 
-interface SidebarPanelProps {
+export interface SidebarPanelProps {
   isOpen: boolean;
   width: number;
   onWidthChange: (width: number) => void;

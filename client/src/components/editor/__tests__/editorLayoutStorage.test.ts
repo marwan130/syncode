@@ -6,6 +6,7 @@ import {
   DEFAULT_TERMINAL_HEIGHT,
   MIN_PREVIEW_WIDTH,
   getEntryPath,
+  getEditorModelPath,
   getStoredExplorerWidth,
   getStoredPreviewWidth,
   getStoredTerminalHeight,
@@ -96,5 +97,14 @@ describe('getEntryPath', () => {
       isFolder: false,
     } as RoomEntry;
     expect(getEntryPath(orphan, entries)).toBe('file.ts');
+  });
+
+  it('keys Monaco model paths by room and stable file ID', () => {
+    expect(getEditorModelPath('room-a', 'file-a')).not.toBe(
+      getEditorModelPath('room-b', 'file-a')
+    );
+    expect(getEditorModelPath('room-a', 'file-a')).not.toBe(
+      getEditorModelPath('room-a', 'file-b')
+    );
   });
 });

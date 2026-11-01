@@ -9,7 +9,9 @@ export interface ParsedGithubRepository {
   branch?: string;
 }
 
-export function parseGithubRepositoryInput(value: string): ParsedGithubRepository {
+export function parseGithubRepositoryInput(
+  value: string
+): ParsedGithubRepository {
   const trimmed = value.trim();
   let parts: string[];
   if (trimmed.includes('://')) {
@@ -39,9 +41,12 @@ export function parseGithubRepositoryInput(value: string): ParsedGithubRepositor
     branch = parts.slice(3).join('/');
   }
 
-  if (!/^[A-Za-z0-9-]{1,39}$/.test(owner) ||
-      !/^[A-Za-z0-9._-]{1,100}$/.test(name) ||
-      name === '.' || name === '..') {
+  if (
+    !/^[A-Za-z0-9-]{1,39}$/.test(owner) ||
+    !/^[A-Za-z0-9._-]{1,100}$/.test(name) ||
+    name === '.' ||
+    name === '..'
+  ) {
     throw new Error('The GitHub repository address is invalid.');
   }
   return { owner, name, ...(branch ? { branch } : {}) };
@@ -79,20 +84,24 @@ export function baselineForSelectedFiles(
   return {
     ...baseline,
     fileBlobShas: Object.fromEntries(
-      Object.entries(baseline.fileBlobShas).filter(([path]) => selected.has(path))
+      Object.entries(baseline.fileBlobShas).filter(([path]) =>
+        selected.has(path)
+      )
     ),
     ...(baseline.fileLineEndings && {
       fileLineEndings: Object.fromEntries(
-        Object.entries(baseline.fileLineEndings).filter(([path]) => selected.has(path))
+        Object.entries(baseline.fileLineEndings).filter(([path]) =>
+          selected.has(path)
+        )
       ),
     }),
   };
 }
 
 async function getRepositoryError(response: Response): Promise<string> {
-  const result = (await response.json().catch(() => null)) as
-    | { error?: string }
-    | null;
+  const result = (await response.json().catch(() => null)) as {
+    error?: string;
+  } | null;
   switch (result?.error) {
     case 'scope_required':
       return 'Authorize access to this repository, then try again.';
@@ -112,14 +121,16 @@ async function getRepositoryError(response: Response): Promise<string> {
   }
 }
 
-function isRepositoryImport(value: unknown): value is GithubRepositoryImportResponse {
+function isRepositoryImport(
+  value: unknown
+): value is GithubRepositoryImportResponse {
   if (!value || typeof value !== 'object') return false;
   const result = value as Partial<GithubRepositoryImportResponse>;
   return Boolean(
     result.baseline &&
-      Array.isArray(result.files) &&
-      Array.isArray(result.skipped) &&
-      result.baseline.fileBlobShas &&
-      Object.keys(result.baseline.fileBlobShas).length === result.files.length
+    Array.isArray(result.files) &&
+    Array.isArray(result.skipped) &&
+    result.baseline.fileBlobShas &&
+    Object.keys(result.baseline.fileBlobShas).length === result.files.length
   );
 }

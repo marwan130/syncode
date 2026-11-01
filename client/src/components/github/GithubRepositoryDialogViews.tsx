@@ -5,12 +5,15 @@ import type {
   GithubRepositoryImportResponse,
 } from '../../github/githubTypes';
 import { ScrollbarPanel } from '../shared/ScrollbarPanel';
+import { projectFileListViewportHeight } from '../project/projectFileListLayout';
 
 export interface RepositoryChangesViewProps {
   baseline: GithubRepositoryBaseline;
   changes: GithubChangeStatus[];
   commitMessage: string;
   onCommitMessageChange: (message: string) => void;
+  branchName: string;
+  onBranchNameChange: (branchName: string) => void;
   branchUrl: string;
   compareUrl: string;
 }
@@ -20,6 +23,8 @@ export function RepositoryChangesView({
   changes,
   commitMessage,
   onCommitMessageChange,
+  branchName,
+  onBranchNameChange,
   branchUrl,
   compareUrl,
 }: RepositoryChangesViewProps) {
@@ -29,8 +34,8 @@ export function RepositoryChangesView({
         {baseline.owner}/{baseline.name} · {baseline.branch}
       </p>
       <p className="project-import-warning">
-        Changes are shared with everyone in this room. Only your GitHub
-        session is used when you push.
+        Changes are shared with everyone in this room. Only your GitHub session
+        is used when you push.
       </p>
       <ScrollbarPanel
         className="project-import-list github-changes-list"
@@ -53,15 +58,32 @@ export function RepositoryChangesView({
       </ScrollbarPanel>
       {changes.length > 0 && (
         <>
-          <label className="github-commit-label" htmlFor="github-commit-message">
-            Commit message
+          <label className="github-commit-label" htmlFor="github-branch-name">
+            Branch name
           </label>
           <input
+            id="github-branch-name"
+            className="github-commit-input"
+            value={branchName}
+            maxLength={255}
+            placeholder="Leave blank to generate one"
+            onChange={(event) => onBranchNameChange(event.currentTarget.value)}
+          />
+          <label
+            className="github-commit-label"
+            htmlFor="github-commit-message"
+          >
+            Commit message
+          </label>
+          <textarea
             id="github-commit-message"
             className="github-commit-input"
+            rows={3}
             value={commitMessage}
             maxLength={200}
-            onChange={(event) => onCommitMessageChange(event.currentTarget.value)}
+            onChange={(event) =>
+              onCommitMessageChange(event.currentTarget.value)
+            }
           />
           <p className="github-push-target">
             Push to a new branch based on {baseline.branch}.
@@ -70,7 +92,9 @@ export function RepositoryChangesView({
       )}
       {branchUrl && (
         <p className="github-push-links">
-          <a href={branchUrl} target="_blank" rel="noreferrer">View branch</a>
+          <a href={branchUrl} target="_blank" rel="noreferrer">
+            View branch
+          </a>
           {' · '}
           <a href={compareUrl} target="_blank" rel="noreferrer">
             Open pull request
@@ -83,12 +107,17 @@ export function RepositoryChangesView({
 
 export interface RepositoryImportViewState {
   repositoryInput: string;
+  error: string;
+  notice: string;
   isBusy: boolean;
+  isImporting: boolean;
   canImport: boolean;
   preview: GithubRepositoryImportResponse | null;
   selectedPaths: Set<string>;
   selectedCount: number;
   selectedBytes: number;
+  importedCount: number;
+  importedPaths: Set<string>;
   canAuthorizePrivate: boolean;
 }
 
@@ -104,20 +133,22 @@ export interface RepositoryImportViewProps {
   actions: RepositoryImportViewActions;
 }
 
-export function RepositoryImportView({ state, actions }: RepositoryImportViewProps) {
+export function RepositoryImportView({
+  state,
+  actions,
+}: RepositoryImportViewProps) {
   return (
     <>
       <RepositoryReviewForm state={state} actions={actions} />
-      {!state.canImport && (
-        <p className="project-import-error">
-          Only room admins can import a repository.
-        </p>
-      )}
       {state.preview && (
         <RepositoryImportPreview state={state} actions={actions} />
       )}
       {state.canAuthorizePrivate && (
-        <button className="project-action-button" type="button" onClick={actions.onAuthorizePrivate}>
+        <button
+          className="project-action-button"
+          type="button"
+          onClick={actions.onAuthorizePrivate}
+        >
           Authorize private repository access
         </button>
       )}
@@ -125,10 +156,14 @@ export function RepositoryImportView({ state, actions }: RepositoryImportViewPro
   );
 }
 
-function RepositoryReviewForm({
-  state,
-  actions,
-}: RepositoryImportViewProps) {
+function RepositoryReviewForm({ state, actions }: RepositoryImportViewProps) {
+  const error =
+    state.error ||
+    (!state.canImport ? 'Only room admins can import a repository.' : '');
+  const warning = state.preview
+    ? 'The current room project will be replaced. Everyone in this room will see the imported files. Review the included and skipped paths.'
+    : '';
+  const message = error || [warning, state.notice].filter(Boolean).join(' ');
   return (
     <>
       <label className="github-commit-label" htmlFor="github-repository-url">
@@ -143,7 +178,9 @@ function RepositoryReviewForm({
           onChange={(event) =>
             actions.onRepositoryInputChange(event.currentTarget.value)
           }
-          onKeyDown={(event) => handleRepositoryInputKeyDown(event, actions.onReview)}
+          onKeyDown={(event) =>
+            handleRepositoryInputKeyDown(event, actions.onReview)
+          }
           disabled={state.isBusy || !state.canImport}
         />
         <button
@@ -152,9 +189,17 @@ function RepositoryReviewForm({
           onClick={actions.onReview}
           disabled={isRepositoryReviewDisabled(state)}
         >
-          {getRepositoryReviewLabel(state.isBusy)}
+          {getRepositoryReviewLabel(state.isBusy && !state.isImporting)}
         </button>
       </div>
+      {message ? (
+        <span
+          className={`github-repository-inline-message${error ? ' is-error' : ''}`}
+          role={error ? 'alert' : 'status'}
+        >
+          {message}
+        </span>
+      ) : null}
     </>
   );
 }
@@ -167,7 +212,12 @@ function handleRepositoryInputKeyDown(
 }
 
 function isRepositoryReviewDisabled(state: RepositoryImportViewState): boolean {
-  return state.isBusy || !state.canImport || !state.repositoryInput.trim();
+  return (
+    state.isBusy ||
+    Boolean(state.preview) ||
+    !state.canImport ||
+    !state.repositoryInput.trim()
+  );
 }
 
 function getRepositoryReviewLabel(isBusy: boolean): string {
@@ -182,20 +232,17 @@ function RepositoryImportPreview({
   if (!preview) return null;
   return (
     <>
-      <p className="project-import-warning">
-        Everyone in this room will see imported files, and the room server
-        relays them. Review the included and skipped paths.
-      </p>
       <p className="github-repository-summary">
         {preview.baseline.owner}/{preview.baseline.name} ·{' '}
-        {preview.baseline.branch} · {state.selectedCount} selected ·{' '}
-        {(state.selectedBytes / 1024).toFixed(1)} KB of 1 MB · 64 KB max per file ·{' '}
-        {preview.skipped.length}{' '}
-        skipped
+        {preview.baseline.branch} ·{' '}
+        {state.isBusy && state.importedCount > 0
+          ? `Importing ${state.importedCount} of ${state.selectedCount}`
+          : `${state.selectedCount} selected · ${(state.selectedBytes / 1024).toFixed(1)} KB of 1 MB · 64 KB max per file · ${preview.skipped.length} skipped`}
       </p>
       <RepositoryImportFileList
         preview={preview}
         selectedPaths={state.selectedPaths}
+        importedPaths={state.importedPaths}
         onSelectedPathsChange={actions.onSelectedPathsChange}
         isBusy={state.isBusy}
       />
@@ -206,6 +253,7 @@ function RepositoryImportPreview({
 interface RepositoryImportFileListProps {
   preview: GithubRepositoryImportResponse;
   selectedPaths: Set<string>;
+  importedPaths: Set<string>;
   onSelectedPathsChange: Dispatch<SetStateAction<Set<string>>>;
   isBusy: boolean;
 }
@@ -213,15 +261,26 @@ interface RepositoryImportFileListProps {
 function RepositoryImportFileList({
   preview,
   selectedPaths,
+  importedPaths,
   onSelectedPathsChange,
   isBusy,
 }: RepositoryImportFileListProps) {
+  const remainingFiles = preview.files.filter(
+    (file) => !importedPaths.has(file.path)
+  );
   return (
     <ScrollbarPanel
       className="project-import-list"
+      style={{
+        height: projectFileListViewportHeight(
+          remainingFiles.length + preview.skipped.length
+        ),
+        maxHeight: '42vh',
+        flex: '0 1 auto',
+      }}
       aria-label="Repository files to import"
     >
-      {preview.files.map((file) => (
+      {remainingFiles.map((file) => (
         <label className="project-import-row" key={file.path}>
           <input
             type="checkbox"

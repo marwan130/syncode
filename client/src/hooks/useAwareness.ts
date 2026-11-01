@@ -29,6 +29,29 @@ function toAwarenessState(
   };
 }
 
+export function deduplicateParticipants(
+  participants: ParticipantInfo[],
+  localConnectionId: string | null,
+  localMemberId?: string | null
+): ParticipantInfo[] {
+  const localParticipant = participants.find(
+    (participant) => participant.connectionId === localConnectionId
+  );
+  const knownLocalMemberId = localMemberId ?? localParticipant?.memberId;
+  const memberIds = new Set(knownLocalMemberId ? [knownLocalMemberId] : []);
+  return participants.filter((participant) => {
+    if (
+      !participant.connectionId ||
+      participant.connectionId === localConnectionId
+    )
+      return false;
+    if (participant.memberId && memberIds.has(participant.memberId))
+      return false;
+    if (participant.memberId) memberIds.add(participant.memberId);
+    return true;
+  });
+}
+
 export function useAwareness({
   providerRef,
   status,
@@ -43,6 +66,7 @@ export function useAwareness({
   const [localParticipant, setLocalParticipant] =
     useState<AwarenessState | null>(null);
   const throttleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const localMemberIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     const provider = providerRef.current;
@@ -70,12 +94,15 @@ export function useAwareness({
       const current = list.find(
         (participant) => participant.connectionId === provider.connectionId
       );
+      if (current?.memberId) localMemberIdRef.current = current.memberId;
       setLocalParticipant(current ? toAwarenessState(current) : null);
       setPeers((previous) => {
         const next = new Map<string, AwarenessState>();
-        for (const p of list) {
-          if (!p.connectionId || p.connectionId === provider.connectionId)
-            continue;
+        for (const p of deduplicateParticipants(
+          list,
+          provider.connectionId,
+          localMemberIdRef.current
+        )) {
           next.set(
             p.connectionId,
             toAwarenessState(p, previous.get(p.connectionId)?.cursor ?? null)

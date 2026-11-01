@@ -42,7 +42,9 @@ describe('preview document assembly', () => {
     expect(html).toContain('Content-Security-Policy');
     expect(html).toContain('<style>body { color: red; }</style>');
     expect(html).toContain('<script>window.previewLoaded = true;</script>');
-    expect(html).toContain('<script src="https://example.com/app.js"></script>');
+    expect(html).toContain(
+      '<script src="https://example.com/app.js"></script>'
+    );
     expect(html).toContain('tabId=2');
   });
 

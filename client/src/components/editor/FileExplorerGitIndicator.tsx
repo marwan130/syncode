@@ -1,8 +1,7 @@
-import { Icon } from '@iconify/react';
 import type { FileExplorerGitStatus } from './fileExplorerUtils';
 
 const CHANGE_LABELS = {
-  added: 'A',
+  added: 'U',
   modified: 'M',
   deleted: 'D',
   mixed: '*',
@@ -10,32 +9,29 @@ const CHANGE_LABELS = {
 
 export function FileExplorerGitIndicator({
   status,
-  aggregate = false,
+  isFolder = false,
+  hasProblem = false,
 }: {
   status?: FileExplorerGitStatus;
-  aggregate?: boolean;
+  isFolder?: boolean;
+  hasProblem?: boolean;
 }) {
   if (!status) return null;
-  const label = aggregate && status.changeCount > 1
-    ? String(status.changeCount)
-    : CHANGE_LABELS[status.kind];
+  const label = CHANGE_LABELS[status.kind];
   const changeKind = status.kind === 'mixed' ? 'mixed' : status.kind;
-  const description = `${status.changeCount} ${changeKind} ${status.changeCount === 1 ? 'change' : 'changes'}, ${status.stagedCount} staged`;
+  const description = `${changeKind} ${isFolder ? 'folder' : 'file'}${status.changeCount === 1 ? '' : 's'}`;
 
   return (
     <span
-      className={`file-explorer-git-indicator is-${status.kind}`}
+      className={`file-explorer-git-indicator is-${status.kind}${hasProblem ? ' has-problem' : ''}`}
       role="img"
-      title={description}
-      aria-label={description}
+      title={`${description}${hasProblem ? ', contains problems' : ''}`}
+      aria-label={`${description}${hasProblem ? ', contains problems' : ''}`}
     >
-      <span aria-hidden="true">{label}</span>
-      {status.stagedCount > 0 && (
-        <Icon
-          className="file-explorer-git-staged"
-          icon="codicon:check"
-          aria-hidden="true"
-        />
+      {isFolder ? (
+        <span className="file-explorer-git-dot" aria-hidden="true" />
+      ) : (
+        <span aria-hidden="true">{label}</span>
       )}
     </span>
   );

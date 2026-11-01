@@ -1,9 +1,9 @@
 import { Icon } from '@iconify/react';
+import { SHORTCUT_DEFINITIONS } from './shortcutDefinitions';
 
-export type ActivityView =
-  'explorer' | 'search' | 'source-control' | 'run';
+export type ActivityView = 'explorer' | 'search' | 'source-control' | 'run';
 
-interface ActivityBarProps {
+export interface ActivityBarProps {
   activeView: ActivityView | null;
   onSelect: (view: ActivityView) => void;
   isChatOpen: boolean;
@@ -59,18 +59,12 @@ export function ActivityBar({
 }
 
 function activityShortcut(id: ActivityView): string {
-  switch (id) {
-    case 'explorer':
-      return 'Control+Alt+E';
-    case 'search':
-      return 'Control+Alt+F';
-    case 'source-control':
-      return 'Control+Alt+G';
-    case 'run':
-      return 'Control+Alt+D';
-  }
+  const definition = SHORTCUT_DEFINITIONS.find((item) => item.id === id);
+  return definition?.keys.join('+').replace('Ctrl', 'Control') ?? '';
 }
 
 function activityShortcutLabel(id: ActivityView): string {
-  return activityShortcut(id).replace('Control', 'Ctrl');
+  return (
+    SHORTCUT_DEFINITIONS.find((item) => item.id === id)?.keys.join('+') ?? ''
+  );
 }

@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using Microsoft.AspNetCore.Mvc;
+using server.Application.Github;
 using server.Models;
 using server.Services;
 
@@ -12,6 +13,7 @@ public sealed partial class GithubAuthController(
     GithubOAuthService oauth,
     IConfiguration configuration,
     IWebHostEnvironment environment,
+    IGithubAuthRateLimiter rateLimiter,
     ILogger<GithubAuthController> logger) : ControllerBase
 {
     private const string SessionCookieName = "syncode_github_session";
@@ -23,7 +25,9 @@ public sealed partial class GithubAuthController(
         [FromBody] GithubOAuthExchangeRequest? request,
         CancellationToken cancellationToken)
     {
-        if (!GithubRequestSecurity.HasTrustedOrigin(Request, configuration, environment)) return Forbid();
+        if (!GithubRequestSecurity.HasTrustedOrigin(Request, configuration, environment))
+            return StatusCode(StatusCodes.Status403Forbidden);
+        if (!await AllowRequestAsync("exchange")) return RateLimited();
         if (request is null ||
             string.IsNullOrWhiteSpace(request.Code) || request.Code.Length > 512 ||
             string.IsNullOrWhiteSpace(request.CodeVerifier) ||
@@ -46,7 +50,9 @@ public sealed partial class GithubAuthController(
     [HttpPost("session/refresh")]
     public async Task<IActionResult> GetSession(CancellationToken cancellationToken)
     {
-        if (!GithubRequestSecurity.HasTrustedOrigin(Request, configuration, environment)) return Forbid();
+        if (!GithubRequestSecurity.HasTrustedOrigin(Request, configuration, environment))
+            return StatusCode(StatusCodes.Status403Forbidden);
+        if (!await AllowRequestAsync("refresh")) return RateLimited();
         if (!Request.Cookies.TryGetValue(SessionCookieName, out var sessionId))
             return Unauthorized(new { error = "unauthorized" });
         try
@@ -65,7 +71,9 @@ public sealed partial class GithubAuthController(
     [HttpDelete("session")]
     public async Task<IActionResult> DeleteSession(CancellationToken cancellationToken)
     {
-        if (!GithubRequestSecurity.HasTrustedOrigin(Request, configuration, environment)) return Forbid();
+        if (!GithubRequestSecurity.HasTrustedOrigin(Request, configuration, environment))
+            return StatusCode(StatusCodes.Status403Forbidden);
+        if (!await AllowRequestAsync("logout")) return RateLimited();
         var revoked = true;
         if (Request.Cookies.TryGetValue(SessionCookieName, out var sessionId))
         {
@@ -105,6 +113,16 @@ public sealed partial class GithubAuthController(
             error = exception.Unauthorized ? "reauthorize" : "oauth_failed"
         });
     }
+
+    private async Task<bool> AllowRequestAsync(string action)
+    {
+        var address = HttpContext.Connection.RemoteIpAddress?.ToString();
+        return !string.IsNullOrWhiteSpace(address) &&
+            await rateLimiter.TryConsumeAsync(address, $"{action}:{Guid.NewGuid():N}");
+    }
+
+    private IActionResult RateLimited() =>
+        StatusCode(StatusCodes.Status429TooManyRequests, new { error = "rate_limited" });
 
     private void SetSessionCookie(GithubOAuthSession session)
     {

@@ -9,7 +9,7 @@ import { createPortal } from 'react-dom';
 import type { RoomEntry } from '../../providers/SignalRCrdtProvider';
 import { useOutsidePointerDismiss } from '../../hooks/useOutsidePointerDismiss';
 
-interface FileExplorerContextMenuProps {
+export interface FileExplorerContextMenuProps {
   entry: RoomEntry;
   x: number;
   y: number;
@@ -79,10 +79,14 @@ export function FileExplorerContextMenu({
             '[role="menuitem"]:not(:disabled)'
           ) ?? []
         );
-        const index = items.indexOf(document.activeElement as HTMLButtonElement);
+        const index = items.indexOf(
+          document.activeElement as HTMLButtonElement
+        );
         const direction = event.key === 'ArrowDown' ? 1 : -1;
         const currentIndex = index < 0 ? (direction > 0 ? -1 : 0) : index;
-        items[(currentIndex + direction + items.length) % items.length]?.focus();
+        items[
+          (currentIndex + direction + items.length) % items.length
+        ]?.focus();
       }}
     >
       {entry.isFolder ? (
@@ -129,10 +133,10 @@ interface MenuItemProps {
   onClick: () => void;
 }
 
-const MenuItem = forwardRef<
-  HTMLButtonElement,
-  MenuItemProps
->(function MenuItem({ label, disabled, onClick }, ref) {
+const MenuItem = forwardRef<HTMLButtonElement, MenuItemProps>(function MenuItem(
+  { label, disabled, onClick },
+  ref
+) {
   return (
     <button
       ref={ref}

@@ -51,13 +51,11 @@ export async function listPendingProjectTreeOperations(
       resolve(
         records
           .map(({ operation }) => operation)
-          .sort(
-            (left, right) => {
-              if (left.opId.siteId !== right.opId.siteId)
-                return left.opId.siteId < right.opId.siteId ? -1 : 1;
-              return left.opId.counter - right.opId.counter;
-            }
-          )
+          .sort((left, right) => {
+            if (left.opId.siteId !== right.opId.siteId)
+              return left.opId.siteId < right.opId.siteId ? -1 : 1;
+            return left.opId.counter - right.opId.counter;
+          })
       );
     };
     request.onerror = () => reject(request.error);
@@ -95,6 +93,28 @@ export async function removePendingProjectTreeOperation(
       .delete(`${roomId}:${operationKey(operation)}`);
     request.onsuccess = () => resolve();
     request.onerror = () => reject(request.error);
+  });
+}
+
+export async function clearPendingProjectTreeOperations(
+  roomId: string
+): Promise<void> {
+  const database = await openDatabase();
+  await new Promise<void>((resolve, reject) => {
+    const transaction = database.transaction(storeName, 'readwrite');
+    const store = transaction.objectStore(storeName);
+    const request = store
+      .index('roomId')
+      .openKeyCursor(IDBKeyRange.only(roomId));
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (!cursor) return;
+      store.delete(cursor.primaryKey);
+      cursor.continue();
+    };
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+    transaction.onabort = () => reject(transaction.error);
   });
 }
 

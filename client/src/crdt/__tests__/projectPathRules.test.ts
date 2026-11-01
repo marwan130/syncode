@@ -27,16 +27,20 @@ describe('project path rules', () => {
       { id: 'file', name: 'main.ts', parentId: 'folder', isFolder: false },
     ];
     expect(getProjectEntryPath(entries[1], entries)).toBe('src/main.ts');
-    expect(getProjectEntryPath(
-      { id: 'cycle-a', name: 'a', parentId: 'cycle-b', isFolder: true },
-      [
+    expect(
+      getProjectEntryPath(
         { id: 'cycle-a', name: 'a', parentId: 'cycle-b', isFolder: true },
-        { id: 'cycle-b', name: 'b', parentId: 'cycle-a', isFolder: true },
-      ]
-    )).toBeNull();
-    expect(getProjectEntryPath(
-      { id: 'orphan', name: 'main.ts', parentId: 'missing', isFolder: false },
-      []
-    )).toBeNull();
+        [
+          { id: 'cycle-a', name: 'a', parentId: 'cycle-b', isFolder: true },
+          { id: 'cycle-b', name: 'b', parentId: 'cycle-a', isFolder: true },
+        ]
+      )
+    ).toBeNull();
+    expect(
+      getProjectEntryPath(
+        { id: 'orphan', name: 'main.ts', parentId: 'missing', isFolder: false },
+        []
+      )
+    ).toBeNull();
   });
 });

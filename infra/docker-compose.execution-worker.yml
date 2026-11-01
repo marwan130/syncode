@@ -1,0 +1,38 @@
+name: syncode-execution-worker
+
+services:
+  execution-service:
+    build:
+      context: ..
+      dockerfile: execution-service/Dockerfile
+    user: "10001:10001"
+    group_add:
+      - "${DOCKER_GID:?Set DOCKER_GID to the worker Docker socket group ID}"
+    network_mode: host
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,uid=10001,gid=10001
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ExecutionService__Enabled: "true"
+      ExecutionService__ContainerRuntime: runsc
+      ExecutionService__PackageEgress__Enabled: ${PACKAGE_EGRESS_ENABLED:-false}
+      ExecutionService__ApiKey: ${SYNCODE_EXECUTION_API_KEY:?Set SYNCODE_EXECUTION_API_KEY in the worker environment file}
+      ExecutionService__Urls: http://${EXECUTION_BIND_IP:?Set EXECUTION_BIND_IP to the worker WireGuard address}:5112
+      Redis: ${SYNCODE_REDIS_PRIVATE_ENDPOINT:?Set SYNCODE_REDIS_PRIVATE_ENDPOINT to the app Redis WireGuard address},password=${SYNCODE_REDIS_PASSWORD:?Set SYNCODE_REDIS_PASSWORD to the shared Redis password}
+      DOCKER_HOST: unix:///var/run/docker.sock
+      TMPDIR: ${EXECUTION_SOURCE_PATH:?Set EXECUTION_SOURCE_PATH in the worker environment file}
+      TMP: ${EXECUTION_SOURCE_PATH:?Set EXECUTION_SOURCE_PATH in the worker environment file}
+      TEMP: ${EXECUTION_SOURCE_PATH:?Set EXECUTION_SOURCE_PATH in the worker environment file}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - type: bind
+        source: ${EXECUTION_SOURCE_PATH:?Set EXECUTION_SOURCE_PATH in the worker environment file}
+        target: ${EXECUTION_SOURCE_PATH:?Set EXECUTION_SOURCE_PATH in the worker environment file}
+        bind:
+          create_host_path: false
+    restart: unless-stopped

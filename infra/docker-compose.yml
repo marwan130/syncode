@@ -1,123 +1,78 @@
-name: syncode-execution
+name: syncode
 
 services:
   redis:
     image: redis:7.4-alpine
-    command: ["redis-server", "--appendonly", "yes"]
+    command: ["sh", "-c", "exec redis-server --appendonly yes --requirepass \"$$SYNCODE_REDIS_PASSWORD\""]
+    environment:
+      SYNCODE_REDIS_PASSWORD: ${SYNCODE_REDIS_PASSWORD:?Set SYNCODE_REDIS_PASSWORD to a random secret}
     volumes:
       - redis-data:/data
     ports:
-      - "127.0.0.1:${REDIS_PORT:-6380}:6379"
+      - "${SYNCODE_REDIS_BIND_IP:?Set SYNCODE_REDIS_BIND_IP to the app host WireGuard address}:6379:6379"
     networks:
       - service-network
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning -a \"$$SYNCODE_REDIS_PASSWORD\" ping"]
       interval: 5s
       timeout: 3s
       retries: 10
       start_period: 5s
     restart: unless-stopped
 
-  docker:
-    image: docker:27.5.1-dind
-    privileged: true
-    hostname: docker
-    environment:
-      DOCKER_TLS_CERTDIR: /certs
-      DOCKER_TLS_SAN: DNS:docker
-    dns:
-      - 8.8.8.8
-      - 1.1.1.1
-    command: ["--dns=8.8.8.8", "--dns=1.1.1.1"]
-    volumes:
-      - docker-data:/var/lib/docker
-      - docker-client-certs:/certs/client
-      - execution-source:/execution-source
-    networks:
-      - docker-control
-      - docker-egress
-    healthcheck:
-      test: ["CMD", "docker", "info"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
-      start_period: 10s
-    restart: unless-stopped
-
-  runner-images:
-    image: docker:27.5.1-cli
-    environment:
-      DOCKER_HOST: tcp://docker:2376
-      DOCKER_TLS_VERIFY: "1"
-      DOCKER_CERT_PATH: /certs/client
-      DOCKER_BUILDKIT: "0"
-    volumes:
-      - ..:/workspace:ro
-      - docker-client-certs:/certs/client:ro
-    entrypoint: ["sh", "/workspace/infra/build-runner-images.sh"]
-    depends_on:
-      docker:
-        condition: service_healthy
-    networks:
-      - docker-control
-    restart: "no"
-
-  execution-service:
+  room-server:
     build:
       context: ..
-      dockerfile: execution-service/Dockerfile
-    user: "10001:10001"
-    read_only: true
-    tmpfs:
-      - /tmp:rw,noexec,nosuid,nodev,size=16m,uid=10001,gid=10001
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
+      dockerfile: infra/Dockerfile.server
     environment:
-      ASPNETCORE_ENVIRONMENT: Development
-      ExecutionService__Enabled: "true"
-      ExecutionService__ContainerRuntime: ${EXECUTION_CONTAINER_RUNTIME:-runc}
-      ExecutionService__ApiKey: ${SYNCODE_EXECUTION_API_KEY:?Set SYNCODE_EXECUTION_API_KEY in infra/.env}
-      ExecutionService__Urls: http://0.0.0.0:5112
-      ExecutionService__WorkerCount: ${EXECUTION_WORKER_COUNT:-3}
-      Redis: redis:6379
-      DOCKER_HOST: tcp://docker:2376
-      DOCKER_TLS_VERIFY: "1"
-      DOCKER_CERT_PATH: /certs/client
-      TMPDIR: /execution-source
-      TMP: /execution-source
-      TEMP: /execution-source
-    ports:
-      - "127.0.0.1:5112:5112"
-    volumes:
-      - execution-source:/execution-source
-      - docker-client-certs:/certs/client:ro
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://0.0.0.0:5111
+      ASPNETCORE_FORWARDEDHEADERS_ENABLED: "true"
+      ReverseProxy__KnownProxies__0: ${SYNCODE_FRONTEND_PROXY_IP:-172.30.10.3}
+      Redis: redis:6379,password=${SYNCODE_REDIS_PASSWORD:?Set SYNCODE_REDIS_PASSWORD to the Redis password}
+      ExecutionService__BaseUrl: ${SYNCODE_EXECUTION_SERVICE_URL:?Set SYNCODE_EXECUTION_SERVICE_URL to the worker WireGuard URL}
+      ExecutionService__ApiKey: ${SYNCODE_EXECUTION_API_KEY:?Set SYNCODE_EXECUTION_API_KEY in the app environment file}
+      Github__ClientId: ${GITHUB_CLIENT_ID:?Set GITHUB_CLIENT_ID in the app environment file}
+      Github__ClientSecret: ${GITHUB_CLIENT_SECRET:?Set GITHUB_CLIENT_SECRET in the app environment file}
+      Github__RedirectUri: ${GITHUB_REDIRECT_URI:?Set GITHUB_REDIRECT_URI in the app environment file}
+      Github__TokenEncryptionKey: ${GITHUB_TOKEN_ENCRYPTION_KEY:?Set GITHUB_TOKEN_ENCRYPTION_KEY in the app environment file}
+      AllowedHosts: ${SYNCODE_ALLOWED_HOSTS:?Set SYNCODE_ALLOWED_HOSTS to the public hostname}
+      AllowedOrigins__0: ${SYNCODE_ALLOWED_ORIGIN:?Set SYNCODE_ALLOWED_ORIGIN to the public HTTPS origin}
     depends_on:
       redis:
         condition: service_healthy
-      docker:
-        condition: service_healthy
-      runner-images:
-        condition: service_completed_successfully
     networks:
-      - service-network
-      - docker-control
+      frontend-network:
+        ipv4_address: ${SYNCODE_ROOM_SERVER_IP:-172.30.10.2}
+      service-network:
+      github-egress:
+    restart: unless-stopped
+
+  client:
+    build:
+      context: ..
+      dockerfile: infra/Dockerfile.client
+      args:
+        VITE_BACKEND_URL: ${VITE_BACKEND_URL:-}
+        VITE_GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:?Set GITHUB_CLIENT_ID in the app environment file}
+    ports:
+      - "127.0.0.1:${CLIENT_PORT:-8080}:8080"
+    depends_on:
+      - room-server
+    networks:
+      frontend-network:
+        ipv4_address: ${SYNCODE_FRONTEND_PROXY_IP:-172.30.10.3}
     restart: unless-stopped
 
 networks:
-  service-network:
-  docker-control:
+  frontend-network:
     internal: true
-  docker-egress:
+    ipam:
+      config:
+        - subnet: ${SYNCODE_FRONTEND_SUBNET:-172.30.10.0/24}
+  service-network:
+    internal: true
+  github-egress:
 
 volumes:
   redis-data:
-  docker-data:
-  docker-client-certs:
-  execution-source:
-    driver: local
-    driver_opts:
-      type: tmpfs
-      device: tmpfs
-      o: size=1g,uid=10001,gid=10001,mode=0750

@@ -1,14 +1,9 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import type { RefObject } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useOutsidePointerDismiss } from '../../hooks/useOutsidePointerDismiss';
 import { validateRoomInvite } from '../../utils/roomInvites';
-import {
-  getOrCreateParticipantId,
-  getStoredDisplayName,
-  setStoredColor,
-  setStoredDisplayName,
-} from '../../utils/userStorage';
+import { storeRoomProfile } from '../../utils/userStorage';
 
 export interface JoinRoomModalProps {
   isOpen: boolean;
@@ -28,9 +23,11 @@ export function JoinRoomModal({
   containerRef,
 }: JoinRoomModalProps) {
   const [inviteLink, setInviteLink] = useState('');
+  const [displayName, setDisplayName] = useState(currentName);
   const [error, setError] = useState('');
   const submittedRef = useRef(false);
   const navigate = useNavigate();
+  const location = useLocation();
 
   useOutsidePointerDismiss(
     isOpen,
@@ -49,8 +46,8 @@ export function JoinRoomModal({
   const handleJoin = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (submittedRef.current) return;
-    if (!currentName) {
-      setError('Choose a name from your avatar menu first.');
+    if (!currentName && !displayName.trim()) {
+      setError('Enter a display name to continue.');
       return;
     }
 
@@ -66,13 +63,19 @@ export function JoinRoomModal({
     const { invite } = validation;
 
     submittedRef.current = true;
-    setStoredDisplayName(
+    storeRoomProfile(
       invite.roomId,
-      getStoredDisplayName(invite.roomId) ?? currentName
+      currentName || displayName.trim(),
+      currentColor
     );
-    setStoredColor(currentColor, getOrCreateParticipantId(invite.roomId));
     onClose();
-    navigate(`/room/${invite.roomId}#key=${invite.accessKey}`);
+    navigate(`/room/${invite.roomId}#key=${invite.accessKey}`, {
+      state: {
+        returnTo: currentRoomId
+          ? `${location.pathname}${location.search}${location.hash}`
+          : null,
+      },
+    });
   };
 
   return (
@@ -90,8 +93,26 @@ export function JoinRoomModal({
             setError('');
           }}
         />
+        {!currentName && (
+          <input
+            className="profile-name-input join-room-name-input"
+            type="text"
+            maxLength={24}
+            autoComplete="nickname"
+            placeholder="Enter a display name"
+            aria-label="Display name"
+            value={displayName}
+            onChange={(event) => {
+              setDisplayName(event.target.value);
+              setError('');
+            }}
+          />
+        )}
         {error && <span className="profile-error">{error}</span>}
-        <button className="profile-join-button" type="submit">
+        <button
+          className="room-leave-button profile-leave-button join-room-submit-button"
+          type="submit"
+        >
           Join
         </button>
       </form>

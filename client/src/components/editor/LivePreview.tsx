@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef } from 'react';
 import type { CSSProperties, MutableRefObject } from 'react';
 import type { Monaco } from '@monaco-editor/react';
 import type { editor as MonacoEditor } from 'monaco-editor';
@@ -21,15 +21,10 @@ export interface LivePreviewProps {
 }
 
 function sendPreviewDocument(
-  frame: HTMLIFrameElement,
-  tabId: number,
+  port: MessagePort | undefined,
   document: string
 ): void {
-  // Sandboxed preview frames have opaque origins and are checked by their window reference.
-  frame.contentWindow?.postMessage(
-    { type: 'syncode-preview-document', tabId, document },
-    '*'
-  );
+  port?.postMessage({ type: 'syncode-preview-document', document });
 }
 
 interface PreviewTabStripProps {
@@ -145,6 +140,10 @@ interface PreviewFramesProps {
   language: PreviewLanguage;
   previewSource: string;
   frameRefs: MutableRefObject<Map<number, HTMLIFrameElement>>;
+  previewPorts: MutableRefObject<Map<number, MessagePort>>;
+  initializedFrames: MutableRefObject<WeakSet<HTMLIFrameElement>>;
+  readyTabs: MutableRefObject<Set<number>>;
+  latestDocuments: MutableRefObject<Map<number, string>>;
 }
 
 function PreviewFrames({
@@ -154,6 +153,10 @@ function PreviewFrames({
   language,
   previewSource,
   frameRefs,
+  previewPorts,
+  initializedFrames,
+  readyTabs,
+  latestDocuments,
 }: PreviewFramesProps) {
   return (
     <div className="preview-tab-content">
@@ -169,13 +172,37 @@ function PreviewFrames({
           sandbox="allow-scripts"
           referrerPolicy="no-referrer"
           src="/preview.html"
-          onLoad={(event) =>
-            sendPreviewDocument(
-              event.currentTarget,
-              tab.id,
-              createPreviewDocument(project, language, previewSource, tab.id)
-            )
-          }
+          onLoad={(event) => {
+            const frame = event.currentTarget;
+            if (initializedFrames.current.has(frame)) return;
+            initializedFrames.current.add(frame);
+
+            const channel = new MessageChannel();
+            const port = channel.port1;
+            previewPorts.current.get(tab.id)?.close();
+            previewPorts.current.set(tab.id, port);
+            readyTabs.current.delete(tab.id);
+            port.onmessage = (message: MessageEvent<{ type?: string }>) => {
+              if (message.data?.type !== 'syncode-preview-ready') return;
+              readyTabs.current.add(tab.id);
+              sendPreviewDocument(
+                port,
+                latestDocuments.current.get(tab.id) ??
+                  createPreviewDocument(
+                    project,
+                    language,
+                    previewSource,
+                    tab.id
+                  )
+              );
+            };
+            port.start();
+            frame.contentWindow?.postMessage(
+              { type: 'syncode-preview-connect', tabId: tab.id },
+              '*',
+              [channel.port2]
+            );
+          }}
           hidden={activeTabId !== tab.id}
         />
       ))}
@@ -191,6 +218,10 @@ export function LivePreview({
   style,
 }: LivePreviewProps) {
   const frameRefs = useRef(new Map<number, HTMLIFrameElement>());
+  const previewPorts = useRef(new Map<number, MessagePort>());
+  const initializedFrames = useRef(new WeakSet<HTMLIFrameElement>());
+  const readyTabs = useRef(new Set<number>());
+  const latestDocuments = useRef(new Map<number, string>());
   const preview = usePreviewTabs();
   const { source } = project;
   const previewSource = useTypeScriptPreview(language, editor, monaco, source);
@@ -198,14 +229,38 @@ export function LivePreview({
   usePreviewHistory(frameRefs, preview.setTabs);
 
   useEffect(() => {
-    frameRefs.current.forEach((frame, tabId) => {
-      sendPreviewDocument(
-        frame,
-        tabId,
-        createPreviewDocument(project, language, previewSource, tabId)
-      );
+    const activeTabIds = new Set(preview.tabs.map((tab) => tab.id));
+    previewPorts.current.forEach((port, tabId) => {
+      if (activeTabIds.has(tabId)) return;
+      port.close();
+      previewPorts.current.delete(tabId);
+      readyTabs.current.delete(tabId);
     });
-  }, [language, previewSource, project]);
+  }, [preview.tabs]);
+
+  useEffect(
+    () => () => {
+      previewPorts.current.forEach((port) => port.close());
+      previewPorts.current.clear();
+      readyTabs.current.clear();
+    },
+    []
+  );
+
+  useLayoutEffect(() => {
+    const documents = new Map(
+      preview.tabs.map((tab) => [
+        tab.id,
+        createPreviewDocument(project, language, previewSource, tab.id),
+      ])
+    );
+    latestDocuments.current = documents;
+    previewPorts.current.forEach((port, tabId) => {
+      if (!readyTabs.current.has(tabId)) return;
+      const document = documents.get(tabId);
+      if (document) sendPreviewDocument(port, document);
+    });
+  }, [language, previewSource, preview.tabs, project]);
 
   return (
     <section className="live-preview" style={style} aria-label="Live preview">
@@ -219,7 +274,7 @@ export function LivePreview({
       <PreviewToolbar
         activeTab={preview.activeTab}
         onMoveHistory={(direction) =>
-          preview.moveHistory(frameRefs, direction)
+          preview.moveHistory(previewPorts, direction)
         }
         onReload={preview.reloadTab}
       />
@@ -230,6 +285,10 @@ export function LivePreview({
         language={language}
         previewSource={previewSource}
         frameRefs={frameRefs}
+        previewPorts={previewPorts}
+        initializedFrames={initializedFrames}
+        readyTabs={readyTabs}
+        latestDocuments={latestDocuments}
       />
     </section>
   );

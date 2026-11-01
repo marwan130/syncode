@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import type { FC } from 'react';
+import { ScrollbarPanel } from '../shared/ScrollbarPanel';
 
 export interface ShortcutGuideDialogProps {
   isOpen: boolean;
@@ -32,13 +33,13 @@ const SHORTCUTS: Array<{ label: string; keys: string[] }> = [
   { label: 'Indent / outdent line', keys: ['Tab', '/', 'Shift', '+', 'Tab'] },
   {
     label: 'Navigate file explorer items',
-    keys: ['Home', 'End'],
+    keys: ['↑', '/', '↓', 'Home', 'End'],
   },
   { label: 'Expand / collapse folders', keys: ['→', '/', '←'] },
   { label: 'Switch terminal tabs', keys: ['←', '/', '→'] },
   {
     label: 'Edit Bash command or history',
-    keys: ['←', '→', 'Home', 'End', 'Backspace', 'Delete'],
+    keys: ['←', '→', '↑', '↓', 'Home', 'End', 'Backspace', 'Delete'],
   },
   { label: 'Run Bash command', keys: ['Enter'] },
   { label: 'Close this guide', keys: ['Esc'] },
@@ -57,7 +58,7 @@ export const ShortcutGuideDialog: FC<ShortcutGuideDialogProps> = ({
         ? document.activeElement
         : null;
     const dialog = dialogRef.current;
-    dialog?.querySelector<HTMLElement>('button')?.focus();
+    dialog?.focus();
 
     const trapFocus = (event: KeyboardEvent) =>
       handleShortcutDialogKeyDown(event, dialog, onClose);
@@ -91,22 +92,24 @@ export const ShortcutGuideDialog: FC<ShortcutGuideDialogProps> = ({
             Keyboard shortcuts
           </h2>
         </header>
-        <dl>
-          {SHORTCUTS.map((item) => (
-            <div className="shortcut-dialog-row" key={item.label}>
-              <dt>{item.label}</dt>
-              <dd>
-                {item.keys.map((key, index) =>
-                  key === '+' || key === '/' ? (
-                    ` ${key} `
-                  ) : (
-                    <kbd key={index}>{key}</kbd>
-                  )
-                )}
-              </dd>
-            </div>
-          ))}
-        </dl>
+        <ScrollbarPanel className="shortcut-dialog-scroll-area">
+          <dl>
+            {SHORTCUTS.map((item) => (
+              <div className="shortcut-dialog-row" key={item.label}>
+                <dt>{item.label}</dt>
+                <dd>
+                  {item.keys.map((key, index) =>
+                    key === '+' || key === '/' ? (
+                      ` ${key} `
+                    ) : (
+                      <kbd key={index}>{key}</kbd>
+                    )
+                  )}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </ScrollbarPanel>
         <footer className="shortcut-dialog-footer">
           <span>
             Use <kbd>Tab</kbd> and <kbd>Shift</kbd> + <kbd>Tab</kbd> to move

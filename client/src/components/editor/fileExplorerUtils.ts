@@ -44,7 +44,22 @@ export type FileDiagnostics = Record<string, FileDiagnostic>;
 export interface FileExplorerGitStatus {
   kind: GithubChangeStatus['kind'] | 'mixed';
   changeCount: number;
-  stagedCount: number;
+}
+
+export type FileStatusTone = 'added' | 'warning' | 'error';
+
+export function getFileStatusTone(
+  diagnostic: FileDiagnostic | undefined,
+  changeKind: FileExplorerGitStatus['kind'] | undefined
+): FileStatusTone | undefined {
+  if (diagnostic === 'error' || changeKind === 'deleted') return 'error';
+  if (
+    diagnostic === 'warning' ||
+    changeKind === 'modified' ||
+    changeKind === 'mixed'
+  )
+    return 'warning';
+  return changeKind === 'added' ? 'added' : undefined;
 }
 
 export function getFileExplorerIndent(depth: number): number {
@@ -53,8 +68,7 @@ export function getFileExplorerIndent(depth: number): number {
 
 export function resolveFileExplorerGitStatus(
   entries: RoomEntry[],
-  changes: GithubChangeStatus[],
-  stagedPaths: ReadonlySet<string>
+  changes: GithubChangeStatus[]
 ): Map<string, FileExplorerGitStatus> {
   const entriesByPath = new Map(
     entries.map((entry) => [getEntryPath(entry, entries), entry])
@@ -77,7 +91,7 @@ export function resolveFileExplorerGitStatus(
   return new Map(
     [...changesByEntry].map(([entryId, entryChanges]) => [
       entryId,
-      summarizeChanges(entryChanges, stagedPaths),
+      summarizeChanges(entryChanges),
     ])
   );
 }
@@ -93,18 +107,12 @@ function addChange(
 }
 
 function summarizeChanges(
-  changes: GithubChangeStatus[],
-  stagedPaths: ReadonlySet<string>
+  changes: GithubChangeStatus[]
 ): FileExplorerGitStatus {
   const kinds = new Set(changes.map((change) => change.kind));
   return {
     kind: kinds.size === 1 ? changes[0].kind : 'mixed',
     changeCount: new Set(changes.map((change) => change.path)).size,
-    stagedCount: new Set(
-      changes
-        .filter((change) => stagedPaths.has(change.path))
-        .map((change) => change.path)
-    ).size,
   };
 }
 

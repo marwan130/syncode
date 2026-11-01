@@ -26,3 +26,5 @@ NDependOut/
 .codex/
 graphify-out/
 skills-lock.json
+
+.fake

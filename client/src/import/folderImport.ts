@@ -38,20 +38,15 @@ export interface FolderFileSource {
   file: File;
 }
 
-interface DirectoryEntryHandle {
-  kind: 'directory' | 'file';
-  entries?: () => AsyncIterable<[string, DirectoryEntryHandle]>;
-  getFile?: () => Promise<File>;
-}
-
 interface WritableFileHandle {
   createWritable: () => Promise<{
     write: (content: string) => Promise<void>;
     close: () => Promise<void>;
+    abort?: () => Promise<void>;
   }>;
 }
 
-interface WritableDirectoryHandle extends DirectoryEntryHandle {
+interface WritableDirectoryHandle {
   getDirectoryHandle?: (
     name: string,
     options?: { create?: boolean }
@@ -67,62 +62,130 @@ interface WritableDirectoryHandle extends DirectoryEntryHandle {
 
 interface DirectoryPickerWindow extends Window {
   showDirectoryPicker?: (options?: {
-    mode?: 'read' | 'readwrite';
-  }) => Promise<DirectoryEntryHandle>;
+    mode?: 'readwrite';
+  }) => Promise<WritableDirectoryHandle>;
 }
 
 const MAX_SCANNED_ENTRIES = 5000;
 
-export function supportsDirectoryPicker(): boolean {
+interface OpenFilePickerWindow extends Window {
+  showOpenFilePicker?: (options?: {
+    multiple?: boolean;
+  }) => Promise<Array<{ getFile: () => Promise<File>; name: string }>>;
+}
+
+function supportsOpenFilePicker(): boolean {
   return (
-    typeof (window as DirectoryPickerWindow).showDirectoryPicker === 'function'
+    typeof (window as OpenFilePickerWindow).showOpenFilePicker === 'function'
   );
 }
 
-export async function pickFolderFiles(): Promise<{
-  files: FolderFileSource[];
-  skipped: FolderInspection['skipped'];
-}> {
-  const picker = (window as DirectoryPickerWindow).showDirectoryPicker;
-  if (!picker)
-    throw new Error('Folder selection is not available in this browser.');
-
-  const root = await picker.call(window, { mode: 'read' });
-  const files: FolderFileSource[] = [];
-  const skipped: FolderInspection['skipped'] = [];
-  let scannedEntries = 0;
-  let truncated = false;
-  const visit = async (directory: DirectoryEntryHandle, prefix: string) => {
-    if (!directory.entries) return;
-    for await (const [name, child] of directory.entries()) {
-      if (scannedEntries >= MAX_SCANNED_ENTRIES) {
-        truncated = true;
-        break;
+export async function pickAndImportLocalFile(
+  onImport: (files: ImportedFileContent[]) => Promise<void>
+): Promise<void> {
+  let file: File | undefined;
+  if (supportsOpenFilePicker()) {
+    try {
+      const picker = (window as OpenFilePickerWindow).showOpenFilePicker;
+      if (picker) {
+        const handles = await picker.call(window, { multiple: false });
+        if (handles[0]) {
+          file = await handles[0].getFile();
+        }
       }
-      scannedEntries++;
-      const path = prefix ? `${prefix}/${name}` : name;
-      const ignored = getImportIgnoreReason(path, child.kind === 'directory');
-      if (ignored) {
-        skipped.push({ path, reason: ignored });
-        continue;
-      }
-      if (child.kind === 'directory') {
-        await visit(child, path);
-      } else if (child.getFile) {
-        const file = await child.getFile();
-        files.push({ path, file });
-      }
+    } catch (reason) {
+      if (reason instanceof DOMException && reason.name === 'AbortError')
+        return;
+      throw reason;
     }
-  };
-
-  await visit(root, '');
-  if (truncated) {
-    skipped.push({
-      path: 'Additional folder contents',
-      reason: 'Preview limited to 5000 entries',
+  }
+  if (!file) {
+    file = await new Promise<File | undefined>((resolve) => {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.style.display = 'none';
+      input.onchange = () => {
+        resolve(input.files?.[0]);
+        input.remove();
+      };
+      input.oncancel = () => {
+        resolve(undefined);
+        input.remove();
+      };
+      document.body.appendChild(input);
+      input.click();
     });
   }
-  return { files, skipped };
+  if (!file) return;
+
+  const inspection = await inspectFolderFiles([{ path: file.name, file }]);
+  const candidates = inspection.candidates.filter((c) => c.selected);
+  if (!candidates.length) {
+    const skipReason =
+      inspection.skipped[0]?.reason ?? 'This file cannot be imported.';
+    throw new Error(skipReason);
+  }
+  const files = await readSelectedImportFiles(candidates);
+  await onImport(files);
+}
+
+async function pickFolderFiles(): Promise<{
+  files: FolderFileSource[];
+  skipped: FolderInspection['skipped'];
+  folderName?: string;
+}> {
+  return pickFolderFilesFromInput();
+}
+
+export interface LocalFolderImportPreview extends FolderInspection {
+  folderName?: string;
+}
+
+export async function pickLocalFolderForImport(): Promise<LocalFolderImportPreview | null> {
+  const { files, skipped, folderName } = await pickFolderFiles();
+  if (!folderName && files.length === 0 && skipped.length === 0) return null;
+
+  const inspection = await inspectFolderFiles(files, skipped);
+  return { ...inspection, folderName };
+}
+
+function pickFolderFilesFromInput(): Promise<{
+  files: FolderFileSource[];
+  skipped: FolderInspection['skipped'];
+  folderName?: string;
+}> {
+  return new Promise((resolve, reject) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.multiple = true;
+    input.setAttribute('webkitdirectory', '');
+    input.style.display = 'none';
+    input.onchange = () => {
+      const files = Array.from(input.files ?? []);
+      const firstRelativePath = files[0]?.webkitRelativePath ?? '';
+      const folderName = firstRelativePath.split('/')[0] || undefined;
+      resolve({
+        files: files.map((file) => ({
+          path: file.webkitRelativePath.split('/').slice(1).join('/'),
+          file,
+        })),
+        skipped: [],
+        folderName,
+      });
+      input.remove();
+    };
+    input.oncancel = () => {
+      resolve({ files: [], skipped: [] });
+      input.remove();
+    };
+    document.body.appendChild(input);
+    try {
+      input.click();
+    } catch (error) {
+      input.remove();
+      reject(error);
+    }
+  });
 }
 
 export async function inspectFolderFiles(
@@ -304,7 +367,9 @@ async function createImportSnapshot(
   const compressed = await compressCrdtSnapshot(snapshot);
   const { snapshotBytes, compressedBytes } = compressed;
   if (compressedBytes > MAX_IMPORT_FILE_COMPRESSED_BYTES)
-    throw new Error('A compressed file snapshot exceeds the 1 MB per-file limit.');
+    throw new Error(
+      'A compressed file snapshot exceeds the 1 MB per-file limit.'
+    );
   return {
     path,
     contentBytes,
@@ -338,13 +403,16 @@ function validateProjectImportTotals(totals: {
 }
 
 export async function saveProjectFilesToFolder(
-  files: ImportedFileContent[]
+  files: ImportedFileContent[],
+  onProgress?: (completedFiles: number) => void,
+  signal?: AbortSignal
 ): Promise<boolean> {
+  throwIfSaveAborted(signal);
   const picker = (window as DirectoryPickerWindow).showDirectoryPicker;
   if (!picker) return false;
 
   const root = await picker.call(window, { mode: 'readwrite' });
-  const writableRoot = root as WritableDirectoryHandle;
+  const writableRoot = root;
 
   if (
     writableRoot.requestPermission &&
@@ -353,7 +421,8 @@ export async function saveProjectFilesToFolder(
     throw new Error('Write access to the selected folder was not granted.');
   }
 
-  for (const file of files) {
+  for (const [index, file] of files.entries()) {
+    throwIfSaveAborted(signal);
     const path = normalizeImportPath(file.path);
     const segments = path.split('/');
     let directory = writableRoot;
@@ -368,21 +437,30 @@ export async function saveProjectFilesToFolder(
       create: true,
     });
     const writable = await handle.createWritable();
-    await writable.write(file.content);
-    await writable.close();
+    try {
+      await writable.write(file.content);
+      if (signal?.aborted) {
+        await writable.abort?.();
+        throw new DOMException('Saving was cancelled.', 'AbortError');
+      }
+      await writable.close();
+    } catch (reason) {
+      if (signal?.aborted) {
+        try {
+          await writable.abort?.();
+        } catch {
+          // Ignore abort cleanup failures
+        }
+        throw new DOMException('Saving was cancelled.', 'AbortError');
+      }
+      throw reason;
+    }
+    onProgress?.(index + 1);
   }
   return true;
 }
 
-export function downloadProjectFiles(files: ImportedFileContent[]): void {
-  files.forEach((file, index) => {
-    const blob = new Blob([file.content], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    const flattenedPath = file.path.replaceAll('/', '__');
-    link.href = url;
-    link.download = `${String(index + 1).padStart(3, '0')}_${flattenedPath}`;
-    link.click();
-    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-  });
+function throwIfSaveAborted(signal?: AbortSignal): void {
+  if (signal?.aborted)
+    throw new DOMException('Saving was cancelled.', 'AbortError');
 }

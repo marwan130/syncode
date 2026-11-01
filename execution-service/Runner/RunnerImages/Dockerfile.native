@@ -1,4 +1,4 @@
-FROM alpine:3.22
+FROM alpine:3.24.3
 
 ARG RUNNER_RUNTIME
 ENV RUNNER_RUNTIME=${RUNNER_RUNTIME} \
@@ -7,7 +7,7 @@ ENV RUNNER_RUNTIME=${RUNNER_RUNTIME} \
     TEMP=/runner/tmp
 
 RUN test "$RUNNER_RUNTIME" = c -o "$RUNNER_RUNTIME" = cpp \
-    && apk add --no-cache build-base \
+    && apk add --no-cache build-base cmake clang-extra-tools \
     && addgroup -S -g 10001 runner \
     && adduser -S -D -H -u 10001 -G runner runner \
     && mkdir -p /workspace \

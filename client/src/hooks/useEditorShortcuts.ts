@@ -4,6 +4,8 @@ import type { ExecutionLanguage } from '../providers/SignalRCrdtProvider';
 import type { LanguageMode } from '../components/editor/languageModes';
 import { isPreviewLanguage } from '../components/editor/languageModes';
 import type { ActivityView } from '../components/editor/ActivityBar';
+import { SHORTCUT_DEFINITIONS } from '../components/editor/shortcutDefinitions';
+import type { BottomPanelView } from '../components/editor/terminalTypes';
 
 export interface EditorShortcutOptions {
   isShortcutGuideOpen: boolean;
@@ -17,7 +19,7 @@ export interface EditorShortcutOptions {
   setActiveSidebarView: Dispatch<SetStateAction<ActivityView | null>>;
   setChatOpen: Dispatch<SetStateAction<boolean>>;
   setNewTerminalRequest: Dispatch<SetStateAction<number>>;
-  setStartBashOnTerminalOpen: Dispatch<SetStateAction<boolean>>;
+  setBottomPanelView: Dispatch<SetStateAction<BottomPanelView>>;
   revealTerminalPanel: () => void;
   language: LanguageMode;
   canRunCode: boolean;
@@ -38,7 +40,7 @@ export function useEditorShortcuts({
   setActiveSidebarView,
   setChatOpen,
   setNewTerminalRequest,
-  setStartBashOnTerminalOpen,
+  setBottomPanelView,
   revealTerminalPanel,
   language,
   canRunCode,
@@ -73,7 +75,7 @@ export function useEditorShortcuts({
         setActiveSidebarView,
         setChatOpen,
         setNewTerminalRequest,
-        setStartBashOnTerminalOpen,
+        setBottomPanelView,
         revealTerminalPanel,
         handleRunCode,
       });
@@ -96,7 +98,7 @@ export function useEditorShortcuts({
     setNewTerminalRequest,
     setPreviewOpen,
     setShortcutGuideOpen,
-    setStartBashOnTerminalOpen,
+    setBottomPanelView,
     setTerminalOpen,
     onSplitWorkspace,
   ]);
@@ -157,7 +159,7 @@ function handleCommandShortcut(
     | 'setActiveSidebarView'
     | 'setChatOpen'
     | 'setNewTerminalRequest'
-    | 'setStartBashOnTerminalOpen'
+    | 'setBottomPanelView'
     | 'revealTerminalPanel'
     | 'handleRunCode'
   >
@@ -165,73 +167,93 @@ function handleCommandShortcut(
   if (!(event.ctrlKey || event.metaKey) || !event.altKey || event.repeat)
     return;
 
+  const key = event.key.toLowerCase();
+  const shortcut = SHORTCUT_DEFINITIONS.find(
+    ({ keys }) =>
+      keys.length === 3 &&
+      keys[0] === 'Ctrl' &&
+      keys[1] === 'Alt' &&
+      keys[2].toLowerCase() === key
+  );
+  if (!shortcut) return;
   const actions: Record<string, () => void> = {
-    s: () => {
+    split: () => {
       if (!options.canSplitWorkspace) return;
       event.preventDefault();
       options.onSplitWorkspace();
     },
-    k: () => {
+    shortcuts: () => {
       event.preventDefault();
       options.setShortcutGuideOpen((open) => !open);
     },
-    t: () => {
+    'terminal-toggle': () => {
       event.preventDefault();
       if (options.isTerminalOpen) options.setTerminalOpen(false);
       else {
-        options.setStartBashOnTerminalOpen(true);
+        options.setBottomPanelView('terminal');
         options.revealTerminalPanel();
       }
     },
-    n: () => {
+    'terminal-new': () => {
       event.preventDefault();
+      options.setBottomPanelView('terminal');
       if (options.isTerminalOpen)
         options.setNewTerminalRequest((value) => value + 1);
       else {
-        options.setStartBashOnTerminalOpen(true);
         options.revealTerminalPanel();
       }
     },
-    q: () => {
+    'terminal-close-tab': () => {
       const target = event.target as HTMLElement | null;
       if (options.isTerminalOpen && target?.closest('.execution-terminal')) {
         event.preventDefault();
         window.dispatchEvent(new Event('syncode:terminal-close-active'));
       }
     },
-    e: () => {
+    explorer: () => {
       event.preventDefault();
       options.setExplorerOpen((open) => !open);
     },
-    f: () => {
+    search: () => {
       event.preventDefault();
       options.setActiveSidebarView((view) =>
         view === 'search' ? null : 'search'
       );
+      if (options.monacoEditor) {
+        options.monacoEditor.focus();
+        options.monacoEditor
+          .getAction('editor.action.startFindReplaceAction')
+          ?.run();
+      }
     },
-    g: () => {
+    find: () => {
+      if (options.monacoEditor) {
+        event.preventDefault();
+        options.monacoEditor.focus();
+        options.monacoEditor.getAction('actions.find')?.run();
+      }
+    },
+    'source-control': () => {
       event.preventDefault();
       options.setActiveSidebarView((view) =>
         view === 'source-control' ? null : 'source-control'
       );
     },
-    d: () => {
+    run: () => {
       event.preventDefault();
-      options.setActiveSidebarView((view) =>
-        view === 'run' ? null : 'run'
-      );
+      options.setActiveSidebarView((view) => (view === 'run' ? null : 'run'));
     },
-    c: () => {
+    chat: () => {
       event.preventDefault();
       options.setChatOpen((open) => !open);
     },
-    p: () => {
+    preview: () => {
       if (isPreviewLanguage(options.language)) {
         event.preventDefault();
         options.setPreviewOpen((open) => !open);
       }
     },
-    r: () => {
+    'run-active': () => {
       if (
         options.canRunCode &&
         options.executionLanguage &&
@@ -241,13 +263,17 @@ function handleCommandShortcut(
         options.handleRunCode();
       }
     },
-    w: () => {
+    'terminal-panel-close': () => {
       if (options.isTerminalOpen) {
         event.preventDefault();
-        options.setStartBashOnTerminalOpen(false);
         options.setTerminalOpen(false);
       }
     },
+    problems: () => {
+      event.preventDefault();
+      options.setBottomPanelView('problems');
+      options.revealTerminalPanel();
+    },
   };
-  actions[event.key.toLowerCase()]?.();
+  actions[shortcut.id]?.();
 }

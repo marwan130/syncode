@@ -1,0 +1,20 @@
+FROM ubuntu/squid:6.6-24.04_edge@sha256:8a3baed477e2c282ab8aa5edad442f69873246964f225c5c2ae8364b6610963c
+
+USER root
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends -y dnsmasq dnsutils \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --system --gid 10001 syncode-proxy \
+    && useradd --system --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin syncode-proxy \
+    && mkdir -p /tmp \
+    && chown 10001:10001 /tmp
+
+COPY squid.conf /etc/squid/squid.conf
+COPY dnsmasq.conf /etc/dnsmasq.conf
+COPY package-proxy-entrypoint.sh /usr/local/bin/package-proxy-entrypoint
+RUN chmod 0555 /usr/local/bin/package-proxy-entrypoint
+
+USER 10001:10001
+EXPOSE 53/udp 53/tcp 3128
+HEALTHCHECK --interval=5s --timeout=2s --retries=12 CMD /bin/bash -c 'squidclient -h 127.0.0.1 -p 3128 mgr:info >/dev/null 2>&1 && nslookup registry.npmjs.org 127.0.0.1 >/dev/null 2>&1'
+ENTRYPOINT ["/usr/local/bin/package-proxy-entrypoint"]

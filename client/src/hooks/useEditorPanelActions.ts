@@ -1,5 +1,6 @@
 import { useCallback } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
+import type { BottomPanelView } from '../components/editor/terminalTypes';
 
 export interface UseEditorPanelActionsOptions {
   isTerminalOpen: boolean;
@@ -8,10 +9,7 @@ export interface UseEditorPanelActionsOptions {
   setPreviewOpen: Dispatch<SetStateAction<boolean>>;
   setTerminalOpen: Dispatch<SetStateAction<boolean>>;
   setNewTerminalRequest: Dispatch<SetStateAction<number>>;
-  setStartBashOnTerminalOpen: Dispatch<SetStateAction<boolean>>;
-  setSplitWorkspaceOpen: Dispatch<SetStateAction<boolean>>;
-  setSplitFileId: (fileId: string | null) => void;
-  setActiveEditorGroup: (group: 'primary' | 'secondary') => void;
+  setBottomPanelView: Dispatch<SetStateAction<BottomPanelView>>;
   revealTerminalPanel: () => void;
 }
 
@@ -22,10 +20,7 @@ export function useEditorPanelActions({
   setPreviewOpen,
   setTerminalOpen,
   setNewTerminalRequest,
-  setStartBashOnTerminalOpen,
-  setSplitWorkspaceOpen,
-  setSplitFileId,
-  setActiveEditorGroup,
+  setBottomPanelView,
   revealTerminalPanel,
 }: UseEditorPanelActionsOptions) {
   const toggleExplorer = useCallback(
@@ -40,28 +35,21 @@ export function useEditorPanelActions({
     () => setPreviewOpen((open) => !open),
     [setPreviewOpen]
   );
-  const closeSplitGroup = useCallback(() => {
-    setSplitWorkspaceOpen(false);
-    setSplitFileId(null);
-    setActiveEditorGroup('primary');
-  }, [setActiveEditorGroup, setSplitFileId, setSplitWorkspaceOpen]);
   const openTerminal = useCallback(() => {
+    setBottomPanelView('terminal');
     if (isTerminalOpen) setNewTerminalRequest((value) => value + 1);
-    else setStartBashOnTerminalOpen(true);
     revealTerminalPanel();
   }, [
     isTerminalOpen,
     revealTerminalPanel,
     setNewTerminalRequest,
-    setStartBashOnTerminalOpen,
+    setBottomPanelView,
   ]);
   const closeTerminal = useCallback(() => {
-    setStartBashOnTerminalOpen(false);
     setTerminalOpen(false);
-  }, [setStartBashOnTerminalOpen, setTerminalOpen]);
+  }, [setTerminalOpen]);
 
   return {
-    closeSplitGroup,
     closeTerminal,
     openTerminal,
     toggleChat,

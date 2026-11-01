@@ -19,7 +19,9 @@ describe('folder import safety', () => {
       source('SRC/ÉCLAIR.TS', 'duplicate'),
     ]);
 
-    expect(result.candidates.map(({ path }) => path)).toEqual(['src/éclair.ts']);
+    expect(result.candidates.map(({ path }) => path)).toEqual([
+      'src/éclair.ts',
+    ]);
     expect(result.skipped.map(({ reason }) => reason)).toEqual([
       'Unsafe file path',
       'Unsafe file path',

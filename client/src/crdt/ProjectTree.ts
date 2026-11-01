@@ -185,6 +185,14 @@ function cloneOperation(operation: ProjectTreeOperation): ProjectTreeOperation {
   }
 }
 
+export function parseProjectTreeOperation(json: string): ProjectTreeOperation {
+  const operation: unknown = JSON.parse(json);
+  if (!operation || typeof operation !== 'object' || Array.isArray(operation)) {
+    throw new Error('Invalid project tree operation.');
+  }
+  return cloneOperation(operation as ProjectTreeOperation);
+}
+
 function operationValue(operation: ProjectTreeOperation): string {
   switch (operation.type) {
     case 'create':
@@ -515,6 +523,15 @@ export class ProjectTree {
   }
 
   public createEntry(entry: RoomEntry): CreateProjectEntryOp {
+    if (
+      this.getEntries().some(
+        (current) =>
+          current.parentId === entry.parentId &&
+          current.name.toLowerCase() === entry.name.toLowerCase()
+      )
+    ) {
+      throw new Error('A file or folder with that name already exists here.');
+    }
     const operation = this.makeOperation({ type: 'create', entry });
     this.applyOperation(operation);
     return operation;

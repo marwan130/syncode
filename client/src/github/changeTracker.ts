@@ -2,6 +2,12 @@ import type { RoomEntry } from '../providers/SignalRCrdtProvider';
 import { getEntryPath } from '../components/editor/editorLayoutStorage';
 import type { GithubFileChange, GithubRepositoryBaseline } from './githubTypes';
 
+export interface GithubChangeReviewTab {
+  id: string;
+  change: GithubChangeStatus;
+  baseline: GithubRepositoryBaseline;
+}
+
 export interface GithubChangeStatus extends GithubFileChange {
   kind: 'added' | 'modified' | 'deleted';
 }
@@ -48,7 +54,8 @@ function preserveLineEndings(
   content: string,
   lineEnding: 'lf' | 'crlf' | 'cr'
 ): string {
-  const newline = lineEnding === 'crlf' ? '\r\n' : lineEnding === 'cr' ? '\r' : '\n';
+  const newline =
+    lineEnding === 'crlf' ? '\r\n' : lineEnding === 'cr' ? '\r' : '\n';
   return content.replace(/\r\n|\r|\n/g, newline);
 }
 

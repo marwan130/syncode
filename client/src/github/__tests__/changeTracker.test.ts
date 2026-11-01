@@ -25,7 +25,12 @@ describe('getGithubChanges', () => {
 
     const changes = await getGithubChanges(baseline, entries, () => 'changed');
     expect(changes).toEqual([
-      { path: 'src/file.ts', content: 'changed', deleted: false, kind: 'modified' },
+      {
+        path: 'src/file.ts',
+        content: 'changed',
+        deleted: false,
+        kind: 'modified',
+      },
     ]);
   });
 

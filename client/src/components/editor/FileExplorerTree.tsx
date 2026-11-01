@@ -16,6 +16,7 @@ export const FileExplorerTree: FC<FileExplorerTreeNodeProps> = (props) => {
     expandedFolders: props.expandedFolders,
     diagnosticsByEntry: props.diagnosticsByEntry,
     gitStatusByEntry: props.gitStatusByEntry,
+    fileProblemCounts: props.fileProblemCounts,
     editing,
     draftName,
     editError,

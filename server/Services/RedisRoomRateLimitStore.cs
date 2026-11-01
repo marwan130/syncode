@@ -1,8 +1,18 @@
 using StackExchange.Redis;
+using System.Security.Cryptography;
+using System.Text;
+using server.Application.Github;
+using server.Application.Projects;
+using server.Application.Rooms;
 
 namespace server.Services;
 
-public sealed class RedisRoomRateLimitStore(IConnectionMultiplexer redis)
+public sealed class RedisRoomRateLimitStore(IConnectionMultiplexer redis) :
+    IProjectTreeRateLimiter,
+    IProjectImportRateLimiter,
+    IRoomRateLimiter,
+    IRoomCreationRateLimiter,
+    IGithubAuthRateLimiter
 {
     private const string ConsumeRateLimitScript = """
         local now = tonumber(ARGV[1])
@@ -22,6 +32,23 @@ public sealed class RedisRoomRateLimitStore(IConnectionMultiplexer redis)
         """;
 
     private readonly IDatabase _db = redis.GetDatabase();
+
+    public Task<bool> TryConsumeAsync(string clientAddress, string operationId)
+    {
+        var addressHash = HashAddress(clientAddress);
+        var key = $"syncode:github-auth:rate:{addressHash}";
+        return TryConsumeAsync([key, key], operationId, 5, 20, 5, 20);
+    }
+
+    Task<bool> IRoomCreationRateLimiter.TryConsumeAsync(
+        string clientAddress,
+        string operationId)
+    {
+        var addressHash = HashAddress(clientAddress);
+        return TryConsumeAsync(
+            [$"syncode:room-create:rate:{addressHash}:10s", $"syncode:room-create:rate:{addressHash}:1m"],
+            operationId, 5, 30, 5, 30);
+    }
 
     public Task<bool> TryConsumeProjectImportAsync(string roomId, string connectionId, string importId) =>
         TryConsumeAsync(
@@ -67,4 +94,7 @@ public sealed class RedisRoomRateLimitStore(IConnectionMultiplexer redis)
         $"room:{{{roomId}}}:files:create:rate:connection:{connectionId}:{window}";
     private static string FileRoomKey(string roomId, string window) =>
         $"room:{{{roomId}}}:files:create:rate:{window}";
+
+    private static string HashAddress(string clientAddress) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(clientAddress)));
 }

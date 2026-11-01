@@ -12,3 +12,4 @@ docker build -t syncode-runner-cpp --build-arg RUNNER_RUNTIME=cpp -f "$images_di
 docker build -t syncode-runner-rust -f "$images_dir/Dockerfile.rust" "$images_dir"
 docker build -t syncode-runner-java -f "$images_dir/Dockerfile.java" "$images_dir"
 docker build -t syncode-runner-bash -f "$images_dir/Dockerfile.bash" "$images_dir"
+docker build -t syncode-package-proxy -f "$images_dir/Dockerfile.package-proxy" "$images_dir"

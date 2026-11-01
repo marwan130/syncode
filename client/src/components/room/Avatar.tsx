@@ -26,7 +26,7 @@ export function Avatar({
 
   return (
     <div
-      title={title ?? name}
+      title={title}
       style={{
         width: 26,
         height: 26,

@@ -1,18 +1,55 @@
 # Syncode
 
-Syncode is a browser-based real-time collaborative code editor.
+Syncode is a browser IDE where people edit and run the same project together in a room. The browser connects to a .NET room server. Redis holds room state, and the execution service runs terminals and language tools in Docker containers.
 
-## System Architecture
+## What it includes
 
-![Syncode System Architecture](docs/syncode_architecture.drawio.png)
+- Collaborative text editing and a shared file tree with offline edit recovery
+- Participant presence, room roles, join approval, and admin controls
+- Monaco editing, language-server diagnostics, a shared Bash terminal, and browser preview
+- GitHub import and push, branch management, commit history, and file diffs
+- Local folder import and project export
 
-## Scaling deployment
+## Run locally with Docker Compose
 
-The client is a static Vite build and can be served from a CDN. Multiple room-server instances can share the same Redis deployment. Redis stores room state, capacity and rate-limit data, while the SignalR Redis backplane distributes hub broadcasts. Keep the Redis connection, room-capacity settings, allowed origins, execution-service URL, API key, and execution queue prefix consistent across instances.
+Install Docker Desktop and switch it to Linux containers. Make sure `infra/.env` exists and contains your local settings. 
 
-The load balancer must support WebSockets and preserve SignalR session affinity while clients negotiate and connect. The client uses SignalR negotiation, so a Redis backplane alone does not replace affinity. Configure load-balancer health probes against a health/readiness endpoint provided by the deployment. The room server does not currently expose a dedicated health endpoint.
+From the repository root, start the stack.
 
-Execution output is published through Redis Pub/Sub. Room-server instances elect one output relay at a time using a short Redis lease, then send each event through the SignalR backplane. This avoids every server broadcasting the same event. Execution workers can share the same Redis queue and scale independently.
+```powershell
+docker compose --env-file infra/.env -f infra/docker-compose.local.yml up --build -d
+```
 
-Interactive terminal sessions are currently owned by the room-server connection that created them. They work across a multi-instance deployment when SignalR affinity holds, but an instance restart or connection replacement does not restore an open shell. Room documents and room membership are Redis-backed and can be reloaded after reconnect.
+The first start builds the app and execution service, then builds the language runner images inside the nested Docker service. Later starts reuse those images.
 
+Open [http://localhost:8081](http://localhost:8081). The local stack uses the `CLIENT_PORT` value from `infra/.env`, which is `8081`. The room server health endpoint is available at `http://localhost:8081/health`, and the execution service health endpoint is at `http://localhost:5112/health`.
+
+Check the running services with this command.
+
+```powershell
+docker compose --env-file infra/.env -f infra/docker-compose.local.yml ps
+```
+
+Stop the stack when you are done.
+
+```powershell
+docker compose --env-file infra/.env -f infra/docker-compose.local.yml down
+```
+
+This keeps the Redis data and built runner images for your next run. The app, Redis, and execution API bind to loopback. The local stack uses a privileged nested Docker service to run code containers, so keep it on your development machine.
+
+GitHub sign-in uses the OAuth values in `infra/.env`. The callback URL should match the local client address, for example `http://localhost:8081/github/callback`.
+
+## Project layout
+
+- `client` contains the React and Monaco browser app
+- `server` contains the room API, SignalR hubs, and room coordination
+- `server/Application` contains application contracts and workflows
+- `execution-service` runs terminals, language servers, and code in Docker containers
+- `infra/docker-compose.local.yml` starts the local development stack
+
+For runner limits, supported languages, and isolation details, see [the execution service README](execution-service/README.md).
+
+## License
+
+Syncode is available under the MIT License. See [LICENSE](LICENSE) and [third-party notices](client/THIRD-PARTY-NOTICES.md) for included assets and dependency licenses.

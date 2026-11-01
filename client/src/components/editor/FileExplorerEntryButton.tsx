@@ -1,10 +1,15 @@
 import type { FC, KeyboardEvent } from 'react';
 import { Icon } from '@iconify/react';
 import type { RoomEntry } from '../../providers/SignalRCrdtProvider';
-import { getFileExplorerIndent, getFileIcon } from './fileExplorerUtils';
+import {
+  getFileExplorerIndent,
+  getFileIcon,
+  getFileStatusTone,
+} from './fileExplorerUtils';
 import { getExplorerNavigationAction } from './fileExplorerKeyboard';
 import type { FileExplorerGitStatus } from './fileExplorerUtils';
 import { FileExplorerGitIndicator } from './FileExplorerGitIndicator';
+import { FileProblemCount } from './FileProblemCount';
 
 export interface FileExplorerEntryButtonProps {
   entry: RoomEntry;
@@ -13,6 +18,7 @@ export interface FileExplorerEntryButtonProps {
   diagnostic?: 'error' | 'warning';
   diagnosticHint?: string;
   gitStatus?: FileExplorerGitStatus;
+  problemCount?: number;
   onToggleFolder: (id: string) => void;
   onSelect: (id: string) => void;
   onOpenContextMenu: (x: number, y: number) => void;
@@ -45,10 +51,7 @@ function handleKeyDown(
   props: FileExplorerEntryButtonProps
 ) {
   const { entry, depth, isExpanded, onToggleFolder, onOpenContextMenu } = props;
-  if (
-    event.key === 'ContextMenu' ||
-    (event.key === 'F10' && event.shiftKey)
-  ) {
+  if (event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey)) {
     event.preventDefault();
     const bounds = event.currentTarget.getBoundingClientRect();
     onOpenContextMenu(bounds.left, bounds.bottom);
@@ -95,13 +98,18 @@ export const FileExplorerEntryButton: FC<FileExplorerEntryButtonProps> = (
     diagnostic,
     diagnosticHint,
     gitStatus,
+    problemCount,
     onToggleFolder,
     onSelect,
   } = props;
   const gitStatusHint = gitStatus
-    ? `${gitStatus.changeCount} ${gitStatus.kind} ${gitStatus.changeCount === 1 ? 'change' : 'changes'}, ${gitStatus.stagedCount} staged`
+    ? `${gitStatus.changeCount} ${gitStatus.kind} ${gitStatus.changeCount === 1 ? 'change' : 'changes'}`
     : undefined;
   const entryHints = [diagnosticHint, gitStatusHint].filter(Boolean).join('. ');
+  const statusTone = getFileStatusTone(
+    diagnostic,
+    entry.isFolder ? undefined : gitStatus?.kind
+  );
   return (
     <button
       className="file-explorer-select"
@@ -127,17 +135,22 @@ export const FileExplorerEntryButton: FC<FileExplorerEntryButtonProps> = (
         aria-hidden="true"
       />
       <span
-        className={`file-explorer-name${diagnostic ? ` has-${diagnostic}` : ''}`}
+        className={`file-explorer-name${statusTone ? ` has-${statusTone}` : ''}`}
       >
         {entry.name}
       </span>
+      <FileProblemCount count={problemCount} />
       {diagnostic && (
         <span
           className={`file-explorer-diagnostic is-${diagnostic}`}
           aria-hidden="true"
         />
       )}
-      <FileExplorerGitIndicator status={gitStatus} aggregate={entry.isFolder} />
+      <FileExplorerGitIndicator
+        status={gitStatus}
+        isFolder={entry.isFolder}
+        hasProblem={Boolean(diagnostic || problemCount)}
+      />
     </button>
   );
 };

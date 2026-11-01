@@ -36,7 +36,7 @@ export function useFileExplorerMove({
     if (entry) void moveEntry(entry, parentId);
   };
 
-  const onDragOver = (event: DragEvent<HTMLLIElement>) => {
+  const onDragOver = (event: DragEvent<HTMLElement>) => {
     if (canEdit) event.preventDefault();
   };
 
@@ -44,6 +44,6 @@ export function useFileExplorerMove({
     moveEntry,
     onDragOver,
     onDrop,
-    onRootDrop: (event: DragEvent<HTMLLIElement>) => onDrop(event, null),
+    onRootDrop: (event: DragEvent<HTMLElement>) => onDrop(event, null),
   };
 }

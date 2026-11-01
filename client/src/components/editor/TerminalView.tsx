@@ -3,11 +3,9 @@ import type { RefObject } from 'react';
 import { FitAddon } from '@xterm/addon-fit';
 import { Terminal as XTerm } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
-import type { TerminalOutputChunk } from '../../hooks/useExecutionStream';
 import type { SignalRCrdtProvider } from '../../providers/SignalRCrdtProvider';
 import { userFacingError } from '../../utils/userFacingError';
-import { consumeTerminalInput } from './terminalInput';
-import type { TerminalTab } from './terminalTypes';
+import type { TerminalRunRequest, TerminalTab } from './terminalTypes';
 
 type TerminalOutputResult = Awaited<
   ReturnType<SignalRCrdtProvider['readTerminalOutput']>
@@ -16,26 +14,23 @@ type TerminalOutputResult = Awaited<
 export interface TerminalViewProps {
   tab: TerminalTab;
   active: boolean;
-  jobId: string | null;
   providerRef: RefObject<SignalRCrdtProvider | null>;
-  chunks: TerminalOutputChunk[];
-  outputRevision: number;
+  runRequest?: TerminalRunRequest | null;
+  onRunRequestClaimed: (requestId: string) => void;
 }
 
 export function TerminalView({
   tab,
   active,
-  jobId,
   providerRef,
-  chunks,
-  outputRevision,
+  runRequest,
+  onRunRequestClaimed,
 }: TerminalViewProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<XTerm | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const offsetRef = useRef(0);
-  const chunkCount = useRef(0);
-  const revision = useRef(outputRevision);
+  const lastRunRequest = useRef<string | null>(null);
 
   useEffect(() => {
     if (!hostRef.current) return;
@@ -47,7 +42,7 @@ export function TerminalView({
       allowProposedApi: false,
       theme: readTerminalTheme(getComputedStyle(document.documentElement)),
       scrollback: 3000,
-      allowTransparency: false,
+      allowTransparency: true,
     });
     const fit = new FitAddon();
     terminal.loadAddon(fit);
@@ -87,6 +82,13 @@ export function TerminalView({
     });
     return () => cancelAnimationFrame(frame);
   }, [active]);
+
+  useEffect(() => {
+    const terminal = terminalRef.current;
+    if (!terminal || tab.kind !== 'bash' || tab.sessionId) return;
+    terminal.reset();
+    terminal.write('Starting isolated Bash…\r\n');
+  }, [tab.kind, tab.sessionId, tab.id]);
 
   useEffect(() => {
     const terminal = terminalRef.current;
@@ -136,43 +138,36 @@ export function TerminalView({
 
   useEffect(() => {
     const terminal = terminalRef.current;
-    if (!terminal || tab.kind !== 'output') return;
     if (
-      revision.current !== outputRevision ||
-      chunks.length < chunkCount.current
-    ) {
-      terminal.reset();
-      chunkCount.current = 0;
-      revision.current = outputRevision;
-    }
-    for (const chunk of chunks.slice(chunkCount.current)) {
-      terminal.write(
-        chunk.stream === 'stderr' ? `\x1b[31m${chunk.text}\x1b[0m` : chunk.text
-      );
-      chunkCount.current++;
-    }
-  }, [chunks, outputRevision, tab.kind]);
-
-  useEffect(() => {
-    const terminal = terminalRef.current;
-    if (!terminal || tab.kind !== 'output' || !jobId || !active) return;
-    let line = '';
-    const sendLine = (value: string) =>
-      void providerRef.current
-        ?.writeExecutionInput(jobId, `${value}\n`)
-        .catch((error: unknown) => {
-          terminal.write(
-            `\r\n${userFacingError(error, 'Input could not be sent.')}\r\n`
-          );
-        });
-    const inputSubscription = terminal.onData((data) => {
-      const update = consumeTerminalInput(data, line);
-      line = update.line;
-      if (update.echo) terminal.write(update.echo);
-      update.submittedLines.forEach(sendLine);
-    });
-    return () => inputSubscription.dispose();
-  }, [active, jobId, providerRef, tab.kind]);
+      !terminal ||
+      !active ||
+      tab.kind !== 'bash' ||
+      !tab.sessionId ||
+      !runRequest ||
+      lastRunRequest.current === runRequest.id
+    )
+      return;
+    lastRunRequest.current = runRequest.id;
+    onRunRequestClaimed(runRequest.id);
+    void providerRef.current
+      ?.runTerminalFile(
+        tab.sessionId,
+        runRequest.language,
+        runRequest.sourcePath
+      )
+      .catch((error: unknown) => {
+        terminal.write(
+          `\r\n${userFacingError(error, 'Could not run the active file.')}\r\n`
+        );
+      });
+  }, [
+    active,
+    onRunRequestClaimed,
+    providerRef,
+    runRequest,
+    tab.kind,
+    tab.sessionId,
+  ]);
 
   return (
     <div
@@ -182,7 +177,7 @@ export function TerminalView({
       className="execution-terminal-output"
       ref={hostRef}
       hidden={!active}
-      aria-label={tab.kind === 'bash' ? 'Bash terminal' : 'Program output'}
+      aria-label="Bash terminal"
     />
   );
 }
@@ -209,15 +204,28 @@ function writeBashOutput(terminal: XTerm, result: TerminalOutputResult) {
   return true;
 }
 
-function writeConflictNotice(terminal: XTerm, conflicts: number | undefined, reportedMessages: Set<string>) {
+function writeConflictNotice(
+  terminal: XTerm,
+  conflicts: number | undefined,
+  reportedMessages: Set<string>
+) {
   if (!conflicts || reportedMessages.has('conflict')) return;
-  terminal.write('\r\nSome terminal changes conflict with newer shared edits and were not applied.\r\n');
+  terminal.write(
+    '\r\nSome terminal changes conflict with newer shared edits and were not applied.\r\n'
+  );
   reportedMessages.add('conflict');
 }
 
-function writeUnsupportedNotice(terminal: XTerm, result: TerminalOutputResult, reportedMessages: Set<string>) {
-  if (!result.unsupportedPaths.length || reportedMessages.has('unsupported')) return;
-  terminal.write('\r\nSome generated, binary, oversized, or unsafe terminal files are not shared with the room.\r\n');
+function writeUnsupportedNotice(
+  terminal: XTerm,
+  result: TerminalOutputResult,
+  reportedMessages: Set<string>
+) {
+  if (!result.unsupportedPaths.length || reportedMessages.has('unsupported'))
+    return;
+  terminal.write(
+    '\r\nSome generated, binary, oversized, or unsafe terminal files are not shared with the room.\r\n'
+  );
   reportedMessages.add('unsupported');
 }
 

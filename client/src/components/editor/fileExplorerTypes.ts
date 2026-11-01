@@ -13,6 +13,7 @@ export interface ExplorerNodeSharedProps {
   expandedFolders: ReadonlySet<string>;
   diagnosticsByEntry: Record<string, 'error' | 'warning' | undefined>;
   gitStatusByEntry: Map<string, FileExplorerGitStatus>;
+  fileProblemCounts?: Record<string, number>;
   editing: FileExplorerEdit;
   draftName: string;
   editError: string;
@@ -49,13 +50,16 @@ export interface GithubRepositoryExplorerProps {
   roomId: string;
   accessKey: string;
   baseline: GithubRepositoryBaseline | null;
+  hasWorkspaceFiles: boolean;
   changes: GithubChangeStatus[];
   canImport: boolean;
   onRequestAdminGrant: () => Promise<string>;
   onImport: (
     files: ImportedFileContent[],
-    baseline: GithubRepositoryBaseline
+    baseline: GithubRepositoryBaseline,
+    onProgress?: (completedFiles: number) => void
   ) => Promise<void>;
+  onSelectBranch: (branch: string) => Promise<void>;
   onBaselineChange: (baseline: GithubRepositoryBaseline) => void;
 }
 
@@ -73,18 +77,22 @@ export interface FileExplorerTreeActions {
 
 export interface FileExplorerProjectActions {
   canImportFolder?: boolean;
-  onImportFolder?: (files: ImportedFileContent[]) => Promise<void>;
+  onImportFolder?: () => void | Promise<void>;
+  onOpenFile?: () => void | Promise<void>;
+  onOpenGithub?: () => void;
   onSaveProject?: () => Promise<void>;
   github?: GithubRepositoryExplorerProps;
 }
 
 export interface FileExplorerTreeProps {
   entries: RoomEntry[];
+  projectRootName?: string;
   activeFileId: string;
   canEdit: boolean;
   fileDiagnostics?: Record<string, 'error' | 'warning'>;
+  fileProblemCounts?: Record<string, number>;
   githubChanges?: GithubChangeStatus[];
-  stagedPaths?: ReadonlySet<string>;
+  createFileNonce?: number;
   actions: FileExplorerTreeActions;
   projectActions?: FileExplorerProjectActions;
 }

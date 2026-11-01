@@ -31,11 +31,6 @@ export function useEditorProjectState({
   const activeFile = fileState.entries.find(
     (entry) => entry.id === fileState.activeFileId && !entry.isFolder
   );
-  const splitFile = fileState.splitFileId
-    ? fileState.entries.find(
-        (entry) => entry.id === fileState.splitFileId && !entry.isFolder
-      )
-    : undefined;
 
   return {
     ...fileState,
@@ -44,8 +39,6 @@ export function useEditorProjectState({
       ? getEntryPath(activeFile, fileState.entries)
       : '',
     explorerActions,
-    splitFile,
-    splitFilePath: splitFile ? getEntryPath(splitFile, fileState.entries) : '',
     transfer,
   };
 }

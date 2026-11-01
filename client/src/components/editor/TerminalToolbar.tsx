@@ -1,92 +1,85 @@
 import type { KeyboardEvent } from 'react';
+import { Icon } from '@iconify/react';
+import { ScrollbarPanel } from '../shared/ScrollbarPanel';
 import type { TerminalTab } from './terminalTypes';
 
-export interface TerminalToolbarProps {
+export interface TerminalTabsVerticalProps {
   tabs: TerminalTab[];
   activeId: string;
   canStartBash: boolean;
-  statusMessage: string;
   onSelectTab: (tab: TerminalTab) => void;
   onCloseTab: (tab: TerminalTab) => void;
   onNewTab: () => void;
-  onClosePanel: () => void;
 }
 
-export function TerminalToolbar({
+export function TerminalTabsVertical({
   tabs,
   activeId,
   canStartBash,
-  statusMessage,
   onSelectTab,
   onCloseTab,
   onNewTab,
-  onClosePanel,
-}: TerminalToolbarProps) {
+}: TerminalTabsVerticalProps) {
   return (
-    <div className="execution-terminal-titlebar">
-      <strong>TERMINAL</strong>
+    <ScrollbarPanel
+      as="aside"
+      className="execution-terminal-sidebar"
+      aria-label="Terminal sessions"
+    >
       <div
-        className="execution-terminal-tabs"
+        className="execution-terminal-tabs-vertical"
         role="tablist"
         aria-label="Terminal tabs"
       >
-        {tabs.map((tab) => (
-          <div
-            className={`execution-terminal-tab${activeId === tab.id ? ' is-active' : ''}`}
-            key={tab.id}
-          >
-            <button
-              className="terminal-tab-select"
-              id={`terminal-tab-${tab.id}`}
-              role="tab"
-              aria-controls={`terminal-panel-${tab.id}`}
-              aria-selected={activeId === tab.id}
-              tabIndex={activeId === tab.id ? 0 : -1}
-              onClick={() => onSelectTab(tab)}
-              onKeyDown={focusAdjacentTerminalTab}
+        <div className="execution-terminal-tabs-list">
+          {tabs.map((tab) => (
+            <div
+              className={`execution-terminal-tab-vertical${activeId === tab.id ? ' is-active' : ''}`}
+              key={tab.id}
             >
-              {tab.label}
-            </button>
-            <button
-              className="terminal-tab-close"
-              aria-label={`Close ${tab.label}`}
-              onClick={() => onCloseTab(tab)}
-              title="Kill (Delete)"
-            >
-              <svg viewBox="0 0 16 16" aria-hidden="true">
-                <path
-                  d="M5.5 2h5l.6 1.5H14v1.4H2V3.5h2.9L5.5 2Zm-1.7 4h8.4l-.5 7.5H4.3L3.8 6Zm2 .9.3 5.7h1.2l-.2-5.7H5.8Zm3.2 0-.2 5.7H10l.3-5.7H9Z"
-                  fill="currentColor"
+              <button
+                className="terminal-tab-select"
+                id={`terminal-tab-${tab.id}`}
+                role="tab"
+                aria-controls={`terminal-panel-${tab.id}`}
+                aria-selected={activeId === tab.id}
+                tabIndex={activeId === tab.id ? 0 : -1}
+                onClick={() => onSelectTab(tab)}
+                onKeyDown={focusAdjacentTerminalTab}
+              >
+                <Icon
+                  icon="codicon:terminal"
+                  className="terminal-tab-icon"
+                  aria-hidden="true"
                 />
-              </svg>
-            </button>
-          </div>
-        ))}
+                <span className="terminal-tab-label">{tab.label}</span>
+              </button>
+              <button
+                className="terminal-tab-close"
+                aria-label={`Close ${tab.label}`}
+                onClick={() => onCloseTab(tab)}
+                title="Kill terminal"
+              >
+                <Icon icon="codicon:close" aria-hidden="true" />
+              </button>
+            </div>
+          ))}
+        </div>
         <button
-          className="terminal-new-tab"
+          className="terminal-new-tab-vertical"
           onClick={onNewTab}
           disabled={!canStartBash}
           title="New Bash terminal"
         >
-          +
+          <Icon icon="codicon:add" aria-hidden="true" />
+          <span>New Terminal</span>
         </button>
       </div>
-      <span className="execution-terminal-status" role="status">
-        {statusMessage}
-      </span>
-      <div className="execution-terminal-actions">
-        <button
-          className="terminal-panel-close"
-          type="button"
-          onClick={onClosePanel}
-          title="Close terminal panel"
-        >
-          Close
-        </button>
-      </div>
-    </div>
+    </ScrollbarPanel>
   );
 }
+
+// Backwards-compatible alias if referenced elsewhere
 
 function focusAdjacentTerminalTab(
   event: KeyboardEvent<HTMLButtonElement>
@@ -99,11 +92,20 @@ function focusAdjacentTerminalTab(
   next?.click();
 }
 
-function isArrowKey(key: string): key is 'ArrowLeft' | 'ArrowRight' {
-  return key === 'ArrowLeft' || key === 'ArrowRight';
+function isArrowKey(
+  key: string
+): key is 'ArrowUp' | 'ArrowDown' | 'ArrowLeft' | 'ArrowRight' {
+  return (
+    key === 'ArrowUp' ||
+    key === 'ArrowDown' ||
+    key === 'ArrowLeft' ||
+    key === 'ArrowRight'
+  );
 }
 
-function getTerminalTabButtons(current: HTMLButtonElement): HTMLButtonElement[] {
+function getTerminalTabButtons(
+  current: HTMLButtonElement
+): HTMLButtonElement[] {
   const tabList = current.closest('[role="tablist"]');
   return Array.from(
     tabList?.querySelectorAll<HTMLButtonElement>('[role="tab"]') ?? []
@@ -113,10 +115,10 @@ function getTerminalTabButtons(current: HTMLButtonElement): HTMLButtonElement[] 
 function getAdjacentTab(
   buttons: HTMLButtonElement[],
   current: HTMLButtonElement,
-  key: 'ArrowLeft' | 'ArrowRight'
+  key: 'ArrowUp' | 'ArrowDown' | 'ArrowLeft' | 'ArrowRight'
 ): HTMLButtonElement | undefined {
   if (buttons.length === 0) return undefined;
-  const direction = key === 'ArrowRight' ? 1 : -1;
+  const direction = key === 'ArrowDown' || key === 'ArrowRight' ? 1 : -1;
   const index = buttons.indexOf(current);
   return buttons[(index + direction + buttons.length) % buttons.length];
 }

@@ -1,6 +1,7 @@
 import type { Monaco } from '@monaco-editor/react';
 import type * as MonacoTypes from 'monaco-editor';
 import { getAutocompleteEnabled } from './autocompletePreference';
+import { isLanguageServerConnected } from './monacoLanguageServers';
 import type { LanguageMode } from '../components/editor/languageModes';
 
 interface CompletionSnippet {
@@ -416,6 +417,7 @@ export function configureMonacoCompletions(monaco: Monaco): void {
         position: MonacoTypes.Position
       ) {
         if (!getAutocompleteEnabled()) return { suggestions: [] };
+        if (isLanguageServerConnected(model)) return { suggestions: [] };
 
         const word = model.getWordUntilPosition(position);
         const range = new monaco.Range(

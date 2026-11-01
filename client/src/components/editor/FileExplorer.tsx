@@ -1,13 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { addCollection } from '@iconify/react';
-import { ImportFolderDialog } from '../project/ImportFolderDialog';
 import vscodeFileIcons from './vscodeFileIcons.json';
-import { createGithubRepositoryExplorerControls } from '../github/githubRepositoryExplorerControls';
 import { FileExplorerRoot } from './FileExplorerRoot';
 import type {
   FileExplorerProjectActions,
   ExplorerNodeSharedProps,
-  GithubRepositoryExplorerProps,
   FileExplorerTreeProps,
 } from './fileExplorerTypes';
 import { useFileExplorerEditing } from './useFileExplorerEditing';
@@ -19,35 +16,30 @@ import {
   resolveFileDiagnostics,
 } from './fileExplorerUtils';
 
-const NO_STAGED_PATHS: ReadonlySet<string> = new Set();
-
 addCollection(vscodeFileIcons);
 
 export function FileExplorer({
   entries,
+  projectRootName,
   activeFileId,
   canEdit,
   fileDiagnostics,
+  fileProblemCounts,
   githubChanges = [],
-  stagedPaths = NO_STAGED_PATHS,
+  createFileNonce = 0,
   actions,
   projectActions,
 }: FileExplorerTreeProps) {
-  const {
-    onSelect,
-    onCreateEntry,
-    onRename,
-    onDelete,
-    onMove,
-  } = actions;
+  const { onSelect, onCreateEntry, onRename, onDelete, onMove } = actions;
   const {
     canImportFolder,
     onImportFolder,
+    onOpenFile,
+    onOpenGithub,
     onSaveProject,
     github,
   } = resolveProjectActions(projectActions);
   const selection = useFileExplorerSelection(activeFileId, onSelect);
-  const [isImportDialogOpen, setImportDialogOpen] = useState(false);
   const moving = useFileExplorerMove({ entries, canEdit, onMove });
   const {
     draftName,
@@ -71,10 +63,9 @@ export function FileExplorer({
     [childrenByParent, entries, fileDiagnostics]
   );
   const gitStatusByEntry = useMemo(
-    () => resolveFileExplorerGitStatus(entries, githubChanges, stagedPaths),
-    [entries, githubChanges, stagedPaths]
+    () => resolveFileExplorerGitStatus(entries, githubChanges),
+    [entries, githubChanges]
   );
-  const githubControls = getGithubExplorerControls(github, canEdit);
 
   const treeProps: ExplorerNodeSharedProps = {
     entries,
@@ -84,6 +75,7 @@ export function FileExplorer({
     expandedFolders: selection.expandedFolders,
     diagnosticsByEntry,
     gitStatusByEntry,
+    fileProblemCounts,
     editing,
     draftName,
     editError,
@@ -96,54 +88,58 @@ export function FileExplorer({
     onSelect: selection.onSelect,
     onMove: moving.moveEntry,
   };
-  const openImportDialog = getOpenImportDialog(
-    onImportFolder,
-    setImportDialogOpen
-  );
   const saveProject = getSaveProjectAction(onSaveProject);
 
+  const lastCreateFileNonceRef = useRef(createFileNonce);
+
+  useEffect(() => {
+    if (createFileNonce > lastCreateFileNonceRef.current) {
+      lastCreateFileNonceRef.current = createFileNonce;
+      if (!selection.isRootExpanded) {
+        selection.onToggleRoot();
+      }
+      startCreate(null, false);
+    }
+  }, [createFileNonce, selection, startCreate]);
+
+  const workspaceName = useMemo(() => {
+    if (projectRootName) return projectRootName;
+    if (github?.baseline?.name) {
+      return github.baseline.name;
+    }
+    const topFolder = entries.find((e) => e.parentId === null && e.isFolder);
+    if (topFolder && entries.filter((e) => e.parentId === null).length === 1) {
+      return topFolder.name;
+    }
+    return undefined;
+  }, [entries, github, projectRootName]);
+
   return (
-    <>
-      <FileExplorerRoot
-        tree={treeProps}
-        entries={entries}
-        selectedEntryId={selection.selectedEntryId}
-        isRootExpanded={selection.isRootExpanded}
-        canImportFolder={canImportFolder}
-        onImportFolder={openImportDialog}
-        onSaveProject={saveProject}
-        githubAction={githubControls.action}
-        githubStatus={githubControls.status}
-        onToggleRoot={selection.onToggleRoot}
-        onDragOver={moving.onDragOver}
-        onDrop={moving.onRootDrop}
-      />
-      {renderImportDialog(onImportFolder, isImportDialogOpen, setImportDialogOpen)}
-    </>
+    <FileExplorerRoot
+      tree={treeProps}
+      entries={entries}
+      selectedEntryId={selection.selectedEntryId}
+      isRootExpanded={selection.isRootExpanded}
+      canImportFolder={canImportFolder}
+      onImportFolder={onImportFolder ? () => void onImportFolder() : undefined}
+      onOpenFile={onOpenFile ? () => void onOpenFile() : undefined}
+      onOpenGithub={onOpenGithub}
+      onSaveProject={saveProject}
+      workspaceName={workspaceName}
+      onToggleRoot={selection.onToggleRoot}
+      onDragOver={moving.onDragOver}
+      onDrop={moving.onRootDrop}
+    />
   );
 }
 
-function resolveProjectActions(projectActions: FileExplorerTreeProps['projectActions']) {
-  return { ...projectActions, canImportFolder: projectActions?.canImportFolder ?? false };
-}
-
-function getGithubExplorerControls(
-  github: GithubRepositoryExplorerProps | undefined,
-  canEdit: boolean
+function resolveProjectActions(
+  projectActions: FileExplorerTreeProps['projectActions']
 ) {
-  if (!github) return { action: null, status: null };
-  return createGithubRepositoryExplorerControls({
-    ...github,
-    canImport: github.canImport && canEdit,
-  });
-}
-
-function getOpenImportDialog(
-  onImportFolder: FileExplorerProjectActions['onImportFolder'],
-  setImportDialogOpen: (open: boolean) => void
-) {
-  if (!onImportFolder) return undefined;
-  return () => setImportDialogOpen(true);
+  return {
+    ...projectActions,
+    canImportFolder: projectActions?.canImportFolder ?? false,
+  };
 }
 
 function getSaveProjectAction(
@@ -151,19 +147,4 @@ function getSaveProjectAction(
 ) {
   if (!onSaveProject) return undefined;
   return () => void onSaveProject();
-}
-
-function renderImportDialog(
-  onImportFolder: FileExplorerProjectActions['onImportFolder'],
-  isImportDialogOpen: boolean,
-  setImportDialogOpen: (open: boolean) => void
-) {
-  if (!onImportFolder) return null;
-  return (
-    <ImportFolderDialog
-      isOpen={isImportDialogOpen}
-      onClose={() => setImportDialogOpen(false)}
-      onImport={onImportFolder}
-    />
-  );
 }

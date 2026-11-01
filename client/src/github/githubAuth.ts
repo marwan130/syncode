@@ -24,7 +24,8 @@ const POPUP_KEY = 'syncode.github.oauth.popup';
 const SESSION_CHANNEL = 'syncode.github.session';
 const CLIENT_ID = import.meta.env.VITE_GITHUB_CLIENT_ID?.trim() ?? '';
 const CALLBACK_PATH = '/github/callback';
-const GITHUB_AUTHORIZATION_ENDPOINT = 'https://github.com/login/oauth/authorize';
+const GITHUB_AUTHORIZATION_ENDPOINT =
+  'https://github.com/login/oauth/authorize';
 
 export function isGithubOAuthConfigured(): boolean {
   return Boolean(CLIENT_ID);
@@ -57,6 +58,10 @@ export async function restoreGithubSession(): Promise<GithubAccount | null> {
     clearCachedAccount();
     return null;
   }
+  if (response.status === 429)
+    throw new Error(
+      'Too many GitHub sign-in requests. Wait a moment and try again.'
+    );
   if (!response.ok)
     throw new Error('Could not restore GitHub sign-in. Try again shortly.');
   const result = (await response.json()) as GithubSessionResponse;
@@ -144,7 +149,10 @@ export async function startGithubLogin(
   const challenge = await createCodeChallenge(verifier);
   const safeReturnTo = isSafeReturnPath(returnTo) ? returnTo : '/';
   saveLoginAttempt(state, verifier, safeReturnTo, popup);
-  navigateToGithub(createGithubAuthorizationUrl(state, challenge, pushScope), popup);
+  navigateToGithub(
+    createGithubAuthorizationUrl(state, challenge, pushScope),
+    popup
+  );
 }
 
 export async function completeGithubLogin(
@@ -197,11 +205,14 @@ function githubExchangeError(status: number): string {
   const errors: Record<number, string> = {
     400: 'GitHub returned an invalid sign-in request. Start sign-in again.',
     403: 'GitHub sign-in was rejected. Check that you opened the registered local URL.',
+    429: 'Too many GitHub sign-in requests. Wait a moment and try again.',
     502: 'GitHub could not complete authorization. Check the OAuth app credentials and callback URL.',
     503: 'GitHub sign-in is not configured on the room server. Contact the server administrator.',
   };
-  return errors[status] ??
-    'GitHub sign-in could not be completed. Check that the room server is running and try again.';
+  return (
+    errors[status] ??
+    'GitHub sign-in could not be completed. Check that the room server is running and try again.'
+  );
 }
 
 function saveLoginAttempt(
@@ -297,18 +308,16 @@ function consumeLoginAttempt(receivedState: string): {
   return { verifier: attempt.verifier, returnTo: attempt.returnTo };
 }
 
-function isValidLoginAttempt(
-  attempt: {
-    expectedState: string | null;
-    receivedState: string;
-    verifier: string | null;
-    returnTo: string;
-  }
-): attempt is typeof attempt & { expectedState: string; verifier: string } {
+function isValidLoginAttempt(attempt: {
+  expectedState: string | null;
+  receivedState: string;
+  verifier: string | null;
+  returnTo: string;
+}): attempt is typeof attempt & { expectedState: string; verifier: string } {
   return Boolean(
     attempt.expectedState &&
-      attempt.expectedState === attempt.receivedState &&
-      attempt.verifier
+    attempt.expectedState === attempt.receivedState &&
+    attempt.verifier
   );
 }
 
@@ -359,8 +368,10 @@ function hasValidGithubIdentity(account: Partial<GithubAccount>): boolean {
 }
 
 function hasRepositoryPermissions(account: Partial<GithubAccount>): boolean {
-  return typeof account.canPushPublicRepositories === 'boolean' &&
-    typeof account.canPushPrivateRepositories === 'boolean';
+  return (
+    typeof account.canPushPublicRepositories === 'boolean' &&
+    typeof account.canPushPrivateRepositories === 'boolean'
+  );
 }
 
 function isValidGithubAccountId(value: unknown): value is number {

@@ -5,6 +5,7 @@ export function normalizeParticipant(
 ): ParticipantInfo {
   return {
     connectionId: readString(raw, 'connectionId', 'ConnectionId', ''),
+    memberId: readOptionalString(raw, 'memberId', 'MemberId'),
     displayName: readString(raw, 'displayName', 'DisplayName', 'Anonymous'),
     color: readString(raw, 'color', 'Color', '#38bdf8'),
     avatarUrl: readOptionalString(raw, 'avatarUrl', 'AvatarUrl'),

@@ -6,11 +6,15 @@ import {
   MIN_TERMINAL_HEIGHT,
   storeTerminalHeight,
 } from './editorLayoutStorage';
-import type { TerminalOutputChunk } from '../../hooks/useExecutionStream';
 import type {
   ConnectionStatus,
   SignalRCrdtProvider,
 } from '../../providers/SignalRCrdtProvider';
+import type { FileProblem } from '../../hooks/useFileDiagnostics';
+import type { BottomPanelView } from './terminalTypes';
+import type { TerminalRunRequest } from './terminalTypes';
+import { Icon } from '@iconify/react';
+import { ScrollbarPanel } from '../shared/ScrollbarPanel';
 
 const Terminal = lazy(() =>
   import('./Terminal').then((module) => ({ default: module.Terminal }))
@@ -20,34 +24,42 @@ export interface TerminalPanelProps {
   isOpen: boolean;
   hasOpened: boolean;
   height: number;
-  chunks: TerminalOutputChunk[];
-  outputRevision: number;
-  message: string;
-  jobId: string | null;
   providerRef: RefObject<SignalRCrdtProvider | null>;
   status: ConnectionStatus;
   newTerminalRequest: number;
-  startBashOnMount: boolean;
   onHeightChange: (height: number) => void;
   onClose: () => void;
   onEmpty: () => void;
+  activeView: BottomPanelView;
+  onSelectView: (view: BottomPanelView) => void;
+  problems: FileProblem[];
+  onOpenProblem: (fileId: string, line: number) => void;
+  runRequest: TerminalRunRequest | null;
+  onRunRequestClaimed: (requestId: string) => void;
+  onRun?: () => void;
+  canRun?: boolean;
+  runDisabledReason?: string;
 }
 
 export const TerminalPanel: FC<TerminalPanelProps> = ({
   isOpen,
   hasOpened,
   height,
-  chunks,
-  outputRevision,
-  message,
-  jobId,
   providerRef,
   status,
   newTerminalRequest,
-  startBashOnMount,
   onHeightChange,
   onClose,
   onEmpty,
+  activeView,
+  onSelectView,
+  problems,
+  onOpenProblem,
+  runRequest,
+  onRunRequestClaimed,
+  onRun,
+  canRun,
+  runDisabledReason,
 }) => {
   if (!isOpen && !hasOpened) return null;
 
@@ -78,24 +90,108 @@ export const TerminalPanel: FC<TerminalPanelProps> = ({
         style={{ flexBasis: height, display: isOpen ? undefined : 'none' }}
         aria-hidden={!isOpen}
       >
-        <Suspense
-          fallback={
-            <div className="execution-terminal-loading">Opening terminal…</div>
-          }
-        >
-          <Terminal
-            chunks={chunks}
-            outputRevision={outputRevision}
-            message={message}
-            jobId={jobId}
-            providerRef={providerRef}
-            status={status}
-            newTerminalRequest={newTerminalRequest}
-            startBashOnMount={startBashOnMount}
-            onClose={onClose}
-            onEmpty={onEmpty}
-          />
-        </Suspense>
+        <div className="bottom-panel-content">
+          <div className="bottom-panel-header">
+            <nav
+              className="bottom-panel-tabs"
+              aria-label="Bottom panel views"
+              role="tablist"
+            >
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeView === 'terminal'}
+                onClick={() => onSelectView('terminal')}
+              >
+                Terminal
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeView === 'problems'}
+                onClick={() => onSelectView('problems')}
+              >
+                Problems {problems.length > 0 && <span>{problems.length}</span>}
+              </button>
+            </nav>
+            <div className="bottom-panel-actions">
+              {onRun && (
+                <button
+                  type="button"
+                  className="bottom-panel-action-btn"
+                  onClick={onRun}
+                  disabled={canRun === false}
+                  title={runDisabledReason || 'Run code'}
+                >
+                  <Icon icon="codicon:play" aria-hidden="true" />
+                  <span>Run</span>
+                </button>
+              )}
+              <button
+                type="button"
+                className="bottom-panel-action-btn terminal-panel-close"
+                onClick={onClose}
+                title="Close panel"
+                aria-label="Close panel"
+              >
+                <Icon icon="codicon:close" aria-hidden="true" />
+              </button>
+            </div>
+          </div>
+          <div className="bottom-panel-view" hidden={activeView === 'problems'}>
+            <Suspense
+              fallback={
+                <div className="execution-terminal-loading">
+                  Opening terminal…
+                </div>
+              }
+            >
+              <Terminal
+                providerRef={providerRef}
+                status={status}
+                newTerminalRequest={newTerminalRequest}
+                isPanelOpen={isOpen}
+                onEmpty={onEmpty}
+                activeView={activeView}
+                runRequest={runRequest}
+                onRunRequestClaimed={onRunRequestClaimed}
+              />
+            </Suspense>
+          </div>
+          {activeView === 'problems' && (
+            <ScrollbarPanel
+              className="problems-list"
+              role="tabpanel"
+              aria-label="Problems"
+            >
+              {problems.length === 0 ? (
+                <p>No problems detected.</p>
+              ) : (
+                problems.map((problem, index) => (
+                  <button
+                    type="button"
+                    className="problem-item"
+                    key={`${problem.fileId}:${problem.line}:${problem.column}:${index}`}
+                    onClick={() => onOpenProblem(problem.fileId, problem.line)}
+                  >
+                    <Icon
+                      icon={
+                        problem.severity === 'error'
+                          ? 'codicon:error'
+                          : 'codicon:warning'
+                      }
+                      aria-hidden="true"
+                    />
+                    <span>{problem.message}</span>
+                    <strong>
+                      {problem.path}:{problem.line}
+                    </strong>
+                  </button>
+                ))
+              )}
+            </ScrollbarPanel>
+          )}
+        </div>
       </div>
     </>
   );
