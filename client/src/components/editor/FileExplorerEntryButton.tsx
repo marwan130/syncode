@@ -139,7 +139,7 @@ export const FileExplorerEntryButton: FC<FileExplorerEntryButtonProps> = (
       >
         {entry.name}
       </span>
-      <FileProblemCount count={problemCount} />
+      <FileProblemCount count={problemCount} severity={diagnostic} />
       {diagnostic && (
         <span
           className={`file-explorer-diagnostic is-${diagnostic}`}

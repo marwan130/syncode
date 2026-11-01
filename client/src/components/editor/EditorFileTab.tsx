@@ -42,6 +42,7 @@ export function EditorFileTab({
         tab={reviewTab}
         selected={selected}
         problemCount={problemCount}
+        diagnostic={diagnostic}
         onSelect={onSelect}
         onClose={onClose}
       />
@@ -76,7 +77,7 @@ export function EditorFileTab({
           aria-hidden="true"
         />
         <span className="editor-file-tab-name">{entry.name}</span>
-        <FileProblemCount count={problemCount} />
+        <FileProblemCount count={problemCount} severity={diagnostic} />
         {fileChange && (
           <FileExplorerGitIndicator
             status={{ kind: fileChange.kind, changeCount: 1 }}
@@ -101,6 +102,7 @@ function ReviewFileTab({
   tab,
   selected,
   problemCount,
+  diagnostic,
   onSelect,
   onClose,
 }: {
@@ -108,6 +110,7 @@ function ReviewFileTab({
   tab: GithubChangeReviewTab;
   selected: boolean;
   problemCount?: number;
+  diagnostic?: 'error' | 'warning';
   onSelect: (fileId: string) => void;
   onClose: (fileId: string) => void;
 }) {
@@ -132,7 +135,7 @@ function ReviewFileTab({
           aria-hidden="true"
         />
         <span className="editor-file-tab-name">{name} (Working Tree)</span>
-        <FileProblemCount count={problemCount} />
+        <FileProblemCount count={problemCount} severity={diagnostic} />
         <FileExplorerGitIndicator
           status={{ kind: tab.change.kind, changeCount: 1 }}
           hasProblem={Boolean(problemCount)}

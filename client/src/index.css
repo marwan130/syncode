@@ -2476,10 +2476,17 @@ input[type='checkbox'] {
 .file-problem-count {
   flex: 0 0 auto;
   margin-left: 6px;
-  color: var(--danger);
   font-size: 10px;
   font-weight: 600;
   line-height: 1;
+}
+
+.file-problem-count.is-error {
+  color: var(--danger);
+}
+
+.file-problem-count.is-warning {
+  color: var(--warning);
 }
 
 .file-explorer-git-review-selected {

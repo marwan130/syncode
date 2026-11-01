@@ -60,6 +60,7 @@ export const EditorTabs: FC<EditorTabsProps> = ({
                 getEntryPath(item, entries) === reviewTab.change.path
             )
           : undefined;
+        const diagnosticFileId = entry?.id ?? reviewEntry?.id ?? fileId;
         return (
           <EditorFileTab
             key={fileId}
@@ -68,10 +69,8 @@ export const EditorTabs: FC<EditorTabsProps> = ({
             reviewTab={reviewTab}
             entries={entries}
             selected={fileId === selectedFileId}
-            diagnostic={fileDiagnostics?.[fileId]}
-            problemCount={
-              fileProblemCounts?.[entry?.id ?? reviewEntry?.id ?? fileId]
-            }
+            diagnostic={fileDiagnostics?.[diagnosticFileId]}
+            problemCount={fileProblemCounts?.[diagnosticFileId]}
             sourceControlChanges={sourceControlChanges}
             onSelect={onSelectFile}
             onClose={onCloseFile}
