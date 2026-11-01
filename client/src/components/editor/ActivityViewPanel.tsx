@@ -395,10 +395,7 @@ function SearchFileResults({
         ) : (
           <VscChevronDown aria-hidden="true" />
         )}
-        <VscFile
-          className="activity-search-file-icon"
-          aria-hidden="true"
-        />
+        <VscFile className="activity-search-file-icon" aria-hidden="true" />
         <span className="activity-search-file-name">{group.name}</span>
         {group.parentPath ? (
           <span className="activity-search-file-path">{group.parentPath}</span>

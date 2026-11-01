@@ -242,4 +242,3 @@ export function markJoinRequestRejected(roomId: string): void {
     return;
   }
 }
-

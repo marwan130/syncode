@@ -17,4 +17,3 @@ describe('formatCommitAge', () => {
     expect(formatCommitAge(date, now)).toBe(expected);
   });
 });
-

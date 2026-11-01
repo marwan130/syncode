@@ -47,7 +47,9 @@ export function useGithubBranchActions({
 
   const openBranch = async (branch: string) => {
     if (!canImport) {
-      setError('Only room admins can replace the shared project from a branch.');
+      setError(
+        'Only room admins can replace the shared project from a branch.'
+      );
       return;
     }
     if (
@@ -171,4 +173,3 @@ export function useGithubBranchActions({
     removeBranch,
   };
 }
-

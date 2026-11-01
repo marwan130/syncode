@@ -294,5 +294,4 @@ public sealed class RedisProjectTreeStore : IProjectTreeOperationStore
     private static string ProjectTreeSiteCounterKey(string roomId) => $"room:{roomId}:project-tree:site-counters";
     private static string ProjectTreeSiteLastOperationKey(string roomId) => $"room:{roomId}:project-tree:site-last-operations";
     private static string ProjectTreeNameKeyKey(string roomId) => $"room:{roomId}:project-tree:name-keys";
-    private static string FileSnapshotKey(string roomId, string fileId) => $"room:{roomId}:file:{fileId}:snapshot";
 }

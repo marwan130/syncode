@@ -9,9 +9,27 @@ import {
 } from '../scmHistoryGraph';
 
 const history: GithubCommitHistoryItem[] = [
-  { sha: 'merge', message: 'merge feature', author: 'user', date: null, parents: ['main-parent', 'feature-parent'] },
-  { sha: 'main-parent', message: 'main change', author: 'user', date: null, parents: ['root'] },
-  { sha: 'feature-parent', message: 'feature change', author: 'user', date: null, parents: ['root'] },
+  {
+    sha: 'merge',
+    message: 'merge feature',
+    author: 'user',
+    date: null,
+    parents: ['main-parent', 'feature-parent'],
+  },
+  {
+    sha: 'main-parent',
+    message: 'main change',
+    author: 'user',
+    date: null,
+    parents: ['root'],
+  },
+  {
+    sha: 'feature-parent',
+    message: 'feature change',
+    author: 'user',
+    date: null,
+    parents: ['root'],
+  },
   { sha: 'root', message: 'root', author: 'user', date: null, parents: [] },
 ];
 
@@ -56,4 +74,3 @@ describe('SCM history graph rows', () => {
     );
   });
 });
-

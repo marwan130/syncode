@@ -958,4 +958,3 @@ function CommitHistoryEntry({
 function formatCommitDate(value: string | null): string {
   return value ? new Date(value).toLocaleString() : 'Unknown date';
 }
-

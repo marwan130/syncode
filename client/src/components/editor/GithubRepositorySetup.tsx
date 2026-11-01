@@ -87,7 +87,10 @@ function CreateRepositoryForm({
   github,
   onTargetBranchChange,
   setError,
-}: Pick<GithubRepositorySetupProps, 'github' | 'onTargetBranchChange' | 'setError'>) {
+}: Pick<
+  GithubRepositorySetupProps,
+  'github' | 'onTargetBranchChange' | 'setError'
+>) {
   const { runActivity } = useAppActivity();
   const [busy, setBusy] = useState(false);
   const [repositoryName, setRepositoryName] = useState('');
@@ -200,4 +203,3 @@ async function createRepositoryForWorkspace(
     grant
   );
 }
-

@@ -7,9 +7,9 @@ describe('GitHub repository requests', () => {
   });
 
   it('keeps user supplied repository fields in an encoded same-origin API URL', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify([]), { status: 200 })
-    );
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(JSON.stringify([]), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
 
     await listGithubBranches('//attacker.example/path', 'repo?name=other');
@@ -27,4 +27,3 @@ describe('GitHub repository requests', () => {
     });
   });
 });
-

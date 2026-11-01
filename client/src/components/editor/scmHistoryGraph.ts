@@ -214,11 +214,7 @@ export function getScmHistoryGraphWidth(rows: ScmHistoryGraphRow[]): number {
 export function getScmHistoryGraphPaths(
   row: ScmHistoryGraphRow
 ): ScmHistoryGraphPath[] {
-  return [
-    ...getLanePaths(row),
-    ...getMergePaths(row),
-    ...getNodePaths(row),
-  ];
+  return [...getLanePaths(row), ...getMergePaths(row), ...getNodePaths(row)];
 }
 
 function getLanePaths(row: ScmHistoryGraphRow): ScmHistoryGraphPath[] {

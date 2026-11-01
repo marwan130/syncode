@@ -33,4 +33,3 @@ export function formatCommitAge(
 function formatAmount(amount: number, unit: string): string {
   return `${amount} ${unit}${amount === 1 ? '' : 's'} ago`;
 }
-
