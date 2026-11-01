@@ -60,7 +60,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - name: Validate Compose configuration
-        run: docker compose -f infra/docker-compose.yml config --quiet
+        run: docker compose -f infra/docker-compose.local.yml config --quiet
       - name: Build client image
         run: docker build -f infra/Dockerfile.client -t syncode-client:ci .
       - name: Build room server image

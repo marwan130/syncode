@@ -1,6 +1,5 @@
 import type { Monaco } from '@monaco-editor/react';
 import type * as monaco from 'monaco-editor';
-import 'vscode-jsonrpc/browser';
 import { createWebSocketConnection, listen } from 'vscode-ws-jsonrpc';
 type MessageConnection = ReturnType<typeof createWebSocketConnection>;
 import type { LanguageMode } from '../components/editor/languageModes';
@@ -219,6 +218,7 @@ class RoomLanguageServerClient {
   }
 
   private async openConnection(): Promise<void> {
+    await import('./monacoLanguageServerBrowser');
     const socketUrl = await this.provider.createLanguageServerSocket(
       this.language
     );
