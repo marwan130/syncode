@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { DiffEditor } from '@monaco-editor/react';
+import '../../utils/initializeMonaco';
 import type { GithubChangeReviewTab } from '../../github/changeTracker';
 import { getGithubFileContent } from '../../github/repositoryBrowser';
 import { configureMonacoEditor } from '../../utils/configureMonacoEditor';

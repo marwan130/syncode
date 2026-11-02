@@ -2503,6 +2503,19 @@ input[type='checkbox'] {
   overflow: hidden;
 }
 
+.editor-loading-state {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  background: var(--code-bg);
+}
+
 .editor-pane {
   display: flex;
   flex-direction: column;

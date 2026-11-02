@@ -2,6 +2,7 @@ import Editor, { type Monaco, type OnMount } from '@monaco-editor/react';
 import { useCallback, useEffect, useState } from 'react';
 import type { RefObject } from 'react';
 import type * as monaco from 'monaco-editor';
+import '../../utils/initializeMonaco';
 import type {
   AwarenessState,
   ConnectionStatus,

@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { lazy, Suspense, useCallback } from 'react';
 import type { DragEvent, RefObject } from 'react';
 import type { OnMount } from '@monaco-editor/react';
 import type {
@@ -12,7 +12,6 @@ import { EditorTabs } from './EditorTabs';
 import { EditorWelcomePane } from './EditorWelcomePane';
 import { SplitEditorPane } from './SplitEditorPane';
 import type { EditorWelcomeActions } from './EditorWelcomePane';
-import { EditorCodePane } from './EditorCodePane';
 import { languageForFileName } from './languageModes';
 import { canSplitEditorGroup } from './editorGroups';
 import type { EditorGroupState } from './editorGroups';
@@ -20,8 +19,18 @@ import type {
   GithubChangeReviewTab,
   GithubChangeStatus,
 } from '../../github/changeTracker';
-import { GithubChangeDiffEditor } from './GithubChangeDiffEditor';
 import type { EditorGroupActions } from './editorGroupTypes';
+
+const EditorCodePane = lazy(() =>
+  import('./EditorCodePane').then(({ EditorCodePane }) => ({
+    default: EditorCodePane,
+  }))
+);
+const GithubChangeDiffEditor = lazy(() =>
+  import('./GithubChangeDiffEditor').then(({ GithubChangeDiffEditor }) => ({
+    default: GithubChangeDiffEditor,
+  }))
+);
 
 export interface EditorGroupPaneProps extends EditorGroupActions {
   group: EditorGroupState;
@@ -119,21 +128,25 @@ export function EditorGroupPane({
         onCloseGroup={() => onCloseGroup(group.id)}
       />
       {activeReviewTab ? (
-        <GithubChangeDiffEditor tab={activeReviewTab} />
+        <Suspense fallback={<EditorLoadingState />}>
+          <GithubChangeDiffEditor tab={activeReviewTab} />
+        </Suspense>
       ) : activeFile ? (
-        <EditorCodePane
-          fileId={activeFile.id}
-          filePath={activeFilePath}
-          language={languageForFileName(activeFilePath)}
-          status={status}
-          isLocked={isLocked}
-          autocompleteEnabled={autocompleteEnabled}
-          minimapEnabled={group.width >= 30}
-          onMount={onMount}
-          onDispose={onDispose}
-          peers={peers}
-          providerRef={providerRef}
-        />
+        <Suspense fallback={<EditorLoadingState />}>
+          <EditorCodePane
+            fileId={activeFile.id}
+            filePath={activeFilePath}
+            language={languageForFileName(activeFilePath)}
+            status={status}
+            isLocked={isLocked}
+            autocompleteEnabled={autocompleteEnabled}
+            minimapEnabled={group.width >= 30}
+            onMount={onMount}
+            onDispose={onDispose}
+            peers={peers}
+            providerRef={providerRef}
+          />
+        </Suspense>
       ) : groupIndex === 0 || group.id === 'primary' ? (
         <EditorWelcomePane welcome={welcome} />
       ) : (
@@ -143,6 +156,14 @@ export function EditorGroupPane({
           onOpenFile={(fileId) => onOpenFile(fileId, group.id)}
         />
       )}
+    </div>
+  );
+}
+
+function EditorLoadingState() {
+  return (
+    <div className="editor-loading-state" role="status" aria-busy="true">
+      Loading editor…
     </div>
   );
 }
