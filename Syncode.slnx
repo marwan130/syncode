@@ -1,6 +1,9 @@
 <Solution>
   <Project Path="server/Syncode.Server.csproj" />
   <Project Path="execution-service/Syncode.ExecutionService.csproj" />
+  <Folder Name="/load-tests/">
+    <Project Path="load-tests/Syncode.LoadTests.csproj" />
+  </Folder>
   <Folder Name="/server/" />
   <Folder Name="/server/Application/">
     <Project Path="server/Application/Syncode.Server.Application.csproj" />

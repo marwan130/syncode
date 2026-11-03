@@ -1,0 +1,8 @@
+services:
+  room-server:
+    environment:
+      RoomCapacity__MaxParticipantsPerRoom: ${SYNCODE_LOAD_MAX_PARTICIPANTS:-6}
+      RoomCapacity__MaxConnectionsPerInstance: ${SYNCODE_LOAD_MAX_CONNECTIONS:-50}
+      RoomCapacity__MaxActiveRooms: ${SYNCODE_LOAD_MAX_ACTIVE_ROOMS:-10}
+      RoomExpiry__Minutes: ${SYNCODE_LOAD_ROOM_EXPIRY_MINUTES:-1}
+      RoomExpiry__CleanupIntervalMinutes: ${SYNCODE_LOAD_ROOM_CLEANUP_MINUTES:-1}
