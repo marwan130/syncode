@@ -12,17 +12,11 @@ Syncode is a browser IDE where people edit and run the same project together in 
 
 ## Run locally with Docker Compose
 
-Install Docker Desktop and switch it to Linux containers. Make sure `infra/.env` exists and contains your local settings. 
-
-From the repository root, start the stack.
+Install Docker Desktop and switch it to Linux containers. 
 
 ```powershell
 docker compose --env-file infra/.env -f infra/docker-compose.local.yml up --build -d
 ```
-
-The first start builds the app and execution service, then builds the language runner images inside the nested Docker service. Later starts reuse those images.
-
-Open [http://localhost:8081](http://localhost:8081). The local stack uses the `CLIENT_PORT` value from `infra/.env`, which is `8081`. The room server health endpoint is available at `http://localhost:8081/health`, and the execution service health endpoint is at `http://localhost:5112/health`.
 
 Check the running services with this command.
 
@@ -36,9 +30,9 @@ Stop the stack when you are done.
 docker compose --env-file infra/.env -f infra/docker-compose.local.yml down
 ```
 
-This keeps the Redis data and built runner images for your next run. The app, Redis, and execution API bind to loopback. The local stack uses a privileged nested Docker service to run code containers, so keep it on your development machine.
+This keeps the Redis data and built runner images for your next run. The app, Redis, and execution API bind to loopback. The local stack uses a privileged nested Docker service to run code containers.
 
-GitHub sign-in uses the OAuth values in `infra/.env`. The callback URL should match the local client address, for example `http://localhost:8081/github/callback`.
+GitHub sign-in uses the OAuth values in `infra/.env`. 
 
 ## Project layout
 
